@@ -22,6 +22,9 @@ import {
 interface TodoItemProps {
   todo: Todo
   textSizeClass: string
+  draggable?: boolean
+  onDragStart?: (event: React.DragEvent<HTMLDivElement>) => void
+  onDragEnd?: (event: React.DragEvent<HTMLDivElement>) => void
 }
 
 const TODO_COLORS = [
@@ -33,7 +36,13 @@ const TODO_COLORS = [
   { name: 'Orange', value: '#fed7aa', bg: 'bg-orange-200' },
 ]
 
-export function TodoItem({ todo, textSizeClass }: TodoItemProps) {
+export function TodoItem({
+  todo,
+  textSizeClass,
+  draggable = false,
+  onDragStart,
+  onDragEnd,
+}: TodoItemProps) {
   const { 
     preferences, 
     toggleCalendarTodo, 
@@ -118,7 +127,12 @@ export function TodoItem({ todo, textSizeClass }: TodoItemProps) {
   }
 
   return (
-    <div className="group relative">
+    <div
+      className="group relative"
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+    >
       <div 
         className={cn(
           "flex items-center h-[42px] border-b border-border/60 px-0 transition-colors",

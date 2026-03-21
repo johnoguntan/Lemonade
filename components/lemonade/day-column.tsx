@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, type DragEvent } from "react"
 import { useLemonadeStore, holidays, type Todo } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { TodoItem } from "./todo-item"
@@ -26,9 +26,18 @@ const getDateString = (date: Date) => {
 }
 
 export function DayColumn({ date, isToday }: DayColumnProps) {
-  const { preferences, calendarTodos, addCalendarTodo, searchQuery, isCalendarExpanded, tagFilterId } = useLemonadeStore()
+  const {
+    preferences,
+    calendarTodos,
+    addCalendarTodo,
+    moveTodoToDate,
+    searchQuery,
+    isCalendarExpanded,
+    tagFilterId,
+  } = useLemonadeStore()
   const [newTodoText, setNewTodoText] = useState("")
   const [isAdding, setIsAdding] = useState(false)
+  const [isDragOver, setIsDragOver] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const dateStr = getDateString(date)
@@ -85,6 +94,28 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
   const visibleLineCount = isCalendarExpanded ? 18 : 9
   const totalSlots = Math.max(visibleLineCount, todosForDay.length + (isAdding ? 1 : 0))
 
+  const handleTodoDragStart = (event: DragEvent<HTMLDivElement>, todoId: string) => {
+    event.dataTransfer.setData("text/plain", todoId)
+    event.dataTransfer.effectAllowed = "move"
+  }
+
+  const handleColumnDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = "move"
+    setIsDragOver(true)
+  }
+
+  const handleColumnDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const todoId = event.dataTransfer.getData("text/plain")
+
+    if (todoId) {
+      moveTodoToDate(todoId, dateStr)
+    }
+
+    setIsDragOver(false)
+  }
+
   return (
     <div className="flex-1 min-w-0 dark:bg-[#131313]">
       {/* Header */}
@@ -109,13 +140,31 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
       </div>
 
       {/* Todos */}
-      <div className="flex flex-col dark:bg-[#131313]">
+      <div
+        className={cn(
+          "flex flex-col transition-colors dark:bg-[#131313]",
+          isDragOver && "bg-accent/10"
+        )}
+        onDragOver={handleColumnDragOver}
+        onDragEnter={handleColumnDragOver}
+        onDragLeave={() => setIsDragOver(false)}
+        onDrop={handleColumnDrop}
+      >
         {preferences.showLines ? (
           <div className="flex flex-col">
             {Array.from({ length: totalSlots }).map((_, index) => {
               const todo = todosForDay[index]
               if (todo) {
-                return <TodoItem key={todo.id} todo={todo} textSizeClass={textSizeClass} />
+                return (
+                  <TodoItem
+                    key={todo.id}
+                    todo={todo}
+                    textSizeClass={textSizeClass}
+                    draggable
+                    onDragStart={(event) => handleTodoDragStart(event, todo.id)}
+                    onDragEnd={() => setIsDragOver(false)}
+                  />
+                )
               }
 
               const isInputRow = isAdding && index === todosForDay.length
