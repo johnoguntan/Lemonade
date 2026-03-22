@@ -275,6 +275,19 @@ export function PreferencesPanel() {
             </div>
           </div>
 
+          <div className="mb-6 flex items-center justify-between">
+            <label className="text-sm font-normal text-gray-300">Dot grid background</label>
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] text-gray-500 font-medium">OFF</span>
+              <Switch
+                checked={preferences.showDotGridBackground}
+                onCheckedChange={(checked) => setPreferences({ showDotGridBackground: checked })}
+                className="data-[state=checked]:bg-[var(--accent-color)] scale-75"
+              />
+              <span className="text-[10px] text-gray-500 font-medium">ON</span>
+            </div>
+          </div>
+
           <Separator className="bg-gray-800 my-6" />
 
           {/* Tags Section */}

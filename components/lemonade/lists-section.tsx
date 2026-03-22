@@ -38,6 +38,7 @@ export function ListsSection() {
     addListTodo, 
     toggleListTodo, 
     deleteListTodo,
+    preferences,
     isCalendarExpanded,
     toggleCalendar
   } = useLemonadeStore()
@@ -131,11 +132,13 @@ export function ListsSection() {
 
   return (
     <div className={cn(
-      "relative z-20 shrink-0 border-t border-border bg-background transition-all duration-300"
+      "relative z-20 shrink-0 border-t border-border bg-background transition-all duration-300",
+      preferences.showDotGridBackground && "journal-dot-grid"
     )}>
       {/* Tabs */}
       <div className={cn(
         "flex min-h-10 items-center px-2 py-1 gap-2 bg-background dark:bg-[#131313]",
+        preferences.showDotGridBackground && "journal-dot-grid",
         !isCalendarExpanded && "border-b border-border"
       )}>
         <DropdownMenu open={manageTabMenuOpen} onOpenChange={setManageTabMenuOpen}>
@@ -211,6 +214,7 @@ export function ListsSection() {
               onClick={() => setActiveTabId(tab.id)}
               className={cn(
                 "relative mx-1 my-0.5 flex items-center gap-2 px-3 py-1.5 font-meta text-[10px] leading-[10px] uppercase tracking-[0.08em] transition-colors",
+                preferences.showDotGridBackground && "journal-dot-grid",
                 activeTabId === tab.id
                   ? "text-foreground dark:bg-[#131313] dark:text-foreground"
                   : "text-[#a7a9ac] hover:rounded-2xl hover:bg-[#F2F3F5] hover:text-[#a7a9ac] dark:hover:bg-[#131315] dark:hover:text-foreground"
@@ -261,8 +265,14 @@ export function ListsSection() {
 
       {/* Lists Grid */}
       {!isCalendarExpanded ? (
-        <div className="group/lists-nav relative border-b border-border bg-[#f7f8fa] dark:bg-[#0d0d0d]">
-          <div className="pointer-events-none absolute left-0 top-1/2 z-10 flex -translate-y-1/2 flex-col overflow-hidden rounded-r-md border border-border bg-[#f7f8fa] opacity-0 transition-opacity duration-200 group-hover/lists-nav:opacity-100 dark:bg-[#0d0d0d]">
+        <div className={cn(
+          "group/lists-nav relative border-b border-border bg-[#f7f8fa] dark:bg-[#0d0d0d]",
+          preferences.showDotGridBackground && "journal-dot-grid"
+        )}>
+          <div className={cn(
+            "pointer-events-none absolute left-0 top-1/2 z-10 flex -translate-y-1/2 flex-col overflow-hidden rounded-r-md border border-border bg-[#f7f8fa] opacity-0 transition-opacity duration-200 group-hover/lists-nav:opacity-100 dark:bg-[#0d0d0d]",
+            preferences.showDotGridBackground && "journal-dot-grid"
+          )}>
             <Button
               variant="ghost"
               size="icon"
@@ -283,7 +293,10 @@ export function ListsSection() {
 
           <div
             ref={scrollRef}
-            className="flex min-h-[500px] items-stretch gap-0 overflow-x-auto overflow-y-visible bg-[#f7f8fa] px-0 py-0 scroll-smooth dark:bg-[#0d0d0d]"
+            className={cn(
+              "flex min-h-[500px] items-stretch gap-0 overflow-x-auto overflow-y-visible bg-[#f7f8fa] px-0 py-0 scroll-smooth dark:bg-[#0d0d0d]",
+              preferences.showDotGridBackground && "journal-dot-grid"
+            )}
           >
             {filteredLists.map((list) => (
               <ListCard
@@ -310,19 +323,26 @@ export function ListsSection() {
                 onToggleTodo={(todoId) => toggleListTodo(list.id, todoId)}
                 onDeleteTodo={(todoId) => deleteListTodo(list.id, todoId)}
                 listTabs={listTabs}
+                showDotGridBackground={preferences.showDotGridBackground}
               />
             ))}
 
             <button
               onClick={handleCreateList}
-              className="flex min-h-[500px] w-[33.333%] min-w-[320px] shrink-0 items-center justify-center gap-2 self-stretch bg-[#f7f8fa] p-6 text-muted-foreground transition-colors hover:text-foreground dark:bg-[#0d0d0d]"
+              className={cn(
+                "flex min-h-[500px] w-[33.333%] min-w-[320px] shrink-0 items-center justify-center gap-2 self-stretch bg-[#f7f8fa] p-6 text-muted-foreground transition-colors hover:text-foreground dark:bg-[#0d0d0d]",
+                preferences.showDotGridBackground && "journal-dot-grid"
+              )}
             >
               <Plus className="size-4" />
               <span className="text-sm font-medium">NEW LIST</span>
             </button>
           </div>
 
-          <div className="pointer-events-none absolute right-0 top-1/2 z-10 flex -translate-y-1/2 flex-col overflow-hidden rounded-l-md border border-border bg-[#f7f8fa] opacity-0 transition-opacity duration-200 group-hover/lists-nav:opacity-100 dark:bg-[#0d0d0d]">
+          <div className={cn(
+            "pointer-events-none absolute right-0 top-1/2 z-10 flex -translate-y-1/2 flex-col overflow-hidden rounded-l-md border border-border bg-[#f7f8fa] opacity-0 transition-opacity duration-200 group-hover/lists-nav:opacity-100 dark:bg-[#0d0d0d]",
+            preferences.showDotGridBackground && "journal-dot-grid"
+          )}>
             <Button
               variant="ghost"
               size="icon"
@@ -342,7 +362,10 @@ export function ListsSection() {
           </div>
         </div>
       ) : (
-        <div className="h-0 overflow-hidden bg-background" />
+        <div className={cn(
+          "h-0 overflow-hidden bg-background",
+          preferences.showDotGridBackground && "journal-dot-grid"
+        )} />
       )}
     </div>
   )
@@ -366,6 +389,7 @@ interface ListCardProps {
   onToggleTodo: (todoId: string) => void
   onDeleteTodo: (todoId: string) => void
   listTabs: Array<{ id: string; name: string }>
+  showDotGridBackground: boolean
 }
 
 function ListCard({ 
@@ -386,6 +410,7 @@ function ListCard({
   onToggleTodo,
   onDeleteTodo,
   listTabs,
+  showDotGridBackground,
 }: ListCardProps) {
   const [isEditingName, setIsEditingName] = useState(false)
   const [editName, setEditName] = useState(list.name)
@@ -415,6 +440,7 @@ function ListCard({
       onDrop={onDrop}
       className={cn(
         "group relative flex min-h-[500px] w-[33.333%] min-w-[320px] shrink-0 flex-col self-stretch bg-[#f7f8fa] px-10 py-5 transition-all dark:bg-[#0d0d0d]",
+        showDotGridBackground && "journal-dot-grid",
         isDragging && "opacity-45",
         "hover:bg-[#f7f8fa] dark:hover:bg-[#0d0d0d]"
       )}

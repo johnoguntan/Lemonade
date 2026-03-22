@@ -27,15 +27,6 @@ interface TodoItemProps {
   onDragEnd?: (event: React.DragEvent<HTMLDivElement>) => void
 }
 
-const TODO_COLORS = [
-  { name: 'None', value: undefined, bg: 'bg-transparent' },
-  { name: 'Yellow', value: '#fef08a', bg: 'bg-yellow-200' },
-  { name: 'Green', value: '#bbf7d0', bg: 'bg-green-200' },
-  { name: 'Blue', value: '#bfdbfe', bg: 'bg-blue-200' },
-  { name: 'Pink', value: '#fbcfe8', bg: 'bg-pink-200' },
-  { name: 'Orange', value: '#fed7aa', bg: 'bg-orange-200' },
-]
-
 export function TodoItem({
   todo,
   textSizeClass,
@@ -51,8 +42,9 @@ export function TodoItem({
     addSubtask,
     toggleSubtask,
     deleteSubtask,
-    tags
+    tags,
   } = useLemonadeStore()
+  const colorPalette = preferences.colorPalette ?? []
   
   const [isEditing, setIsEditing] = useState(false)
   const [editText, setEditText] = useState(todo.text)
@@ -337,16 +329,24 @@ export function TodoItem({
               <DropdownMenuSeparator />
               <div className="px-2 py-1.5 text-sm font-medium">Color</div>
               <div className="flex gap-1 px-2 pb-2">
-                {TODO_COLORS.map((color) => (
+                <button
+                  onClick={() => updateCalendarTodo(todo.id, { color: undefined })}
+                  className={cn(
+                    "size-5 rounded border border-border bg-transparent",
+                    !todo.color && "ring-2 ring-foreground"
+                  )}
+                  title="None"
+                />
+                {colorPalette.map((hex) => (
                   <button
-                    key={color.name}
-                    onClick={() => updateCalendarTodo(todo.id, { color: color.value })}
+                    key={hex}
+                    onClick={() => updateCalendarTodo(todo.id, { color: hex })}
                     className={cn(
                       "size-5 rounded border border-border",
-                      color.bg,
-                      todo.color === color.value && "ring-2 ring-foreground"
+                      todo.color === hex && "ring-2 ring-foreground"
                     )}
-                    title={color.name}
+                    style={{ backgroundColor: hex }}
+                    title={hex.toUpperCase()}
                   />
                 ))}
               </div>

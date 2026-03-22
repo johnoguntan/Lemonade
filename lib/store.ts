@@ -26,6 +26,7 @@ export interface Todo {
   text: string
   completed: boolean
   date: string // ISO date string
+  time?: string
   color?: string
   isHeading?: boolean
   subtasks: SubTask[]
@@ -61,6 +62,29 @@ export interface UserPreferences {
   theme: 'light' | 'dark'
   accentColor: string
   showCelebrations: boolean
+  colorPalette: string[]
+  showDotGridBackground: boolean
+}
+
+export interface NaturalLanguagePreviewToken {
+  key: string
+  label: string
+}
+
+export interface ParsedNaturalLanguageTask {
+  cleanText: string
+  scheduledDate?: string
+  recurrence?: {
+    isRecurring: boolean
+    recurringFrequency?: 'daily' | 'weekday' | 'weekly' | 'monthly'
+    recurringDays?: number[]
+    label: string
+  }
+  priority?: Todo['priority']
+  tagIds: string[]
+  newTagNames: string[]
+  time?: string
+  previewTokens: NaturalLanguagePreviewToken[]
 }
 
 
@@ -104,6 +128,7 @@ interface LemonadeStore {
   // Tags
   tags: Tag[]
   addTag: (name: string, color: string) => void
+  ensureTagIds: (names: string[]) => string[]
   editTag: (id: string, name: string, color: string) => void
   deleteTag: (id: string) => void
   
@@ -114,6 +139,8 @@ interface LemonadeStore {
   // Filter
   tagFilterId: string | null
   setTagFilterId: (id: string | null) => void
+  activeFilterColor: string | null
+  setActiveFilterColor: (color: string | null) => void
   
   // Sidebar
   sidebarOpen: boolean
@@ -131,6 +158,327 @@ interface LemonadeStore {
 }
 
 const generateId = () => Math.random().toString(36).substring(2, 15)
+
+const DEFAULT_COLOR_PALETTE = [
+  '#fef08a',
+  '#bbf7d0',
+  '#bfdbfe',
+  '#fbcfe8',
+  '#fed7aa',
+]
+
+const monthLookup: Record<string, number> = {
+  january: 0,
+  jan: 0,
+  february: 1,
+  feb: 1,
+  march: 2,
+  mar: 2,
+  april: 3,
+  apr: 3,
+  may: 4,
+  june: 5,
+  jun: 5,
+  july: 6,
+  jul: 6,
+  august: 7,
+  aug: 7,
+  september: 8,
+  sep: 8,
+  sept: 8,
+  october: 9,
+  oct: 9,
+  november: 10,
+  nov: 10,
+  december: 11,
+  dec: 11,
+}
+
+const weekdayLookup: Record<string, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+}
+
+type TokenRange = {
+  start: number
+  end: number
+  type: 'date' | 'recurrence' | 'priority' | 'tag' | 'time'
+  preview: NaturalLanguagePreviewToken
+  payload?: unknown
+}
+
+const startOfDay = (date: Date) => {
+  const next = new Date(date)
+  next.setHours(0, 0, 0, 0)
+  return next
+}
+
+export const formatLocalDateKey = (date: Date) => {
+  const normalized = startOfDay(date)
+  const year = normalized.getFullYear()
+  const month = `${normalized.getMonth() + 1}`.padStart(2, '0')
+  const day = `${normalized.getDate()}`.padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const toIsoDate = (date: Date) => formatLocalDateKey(date)
+
+const titleCase = (value: string) =>
+  value.replace(/\b\w/g, (char) => char.toUpperCase())
+
+const normalizeTagName = (value: string) => value.trim().toLowerCase()
+
+const normalizeTimeValue = (raw: string) =>
+  raw.replace(/\s+/g, '').toLowerCase()
+
+const buildUpcomingWeekday = (weekday: number, referenceDate: Date) => {
+  const reference = startOfDay(referenceDate)
+  const next = new Date(reference)
+  let delta = (weekday - reference.getDay() + 7) % 7
+  if (delta === 0) {
+    delta = 7
+  }
+  next.setDate(reference.getDate() + delta)
+  return next
+}
+
+const resolveMonthDayDate = (month: number, day: number, referenceDate: Date) => {
+  const reference = startOfDay(referenceDate)
+  const candidate = new Date(reference.getFullYear(), month, day)
+  if (candidate < reference) {
+    candidate.setFullYear(candidate.getFullYear() + 1)
+  }
+  return candidate
+}
+
+const hasOverlap = (ranges: TokenRange[], start: number, end: number) =>
+  ranges.some((range) => start < range.end && end > range.start)
+
+const stripTokenRanges = (input: string, ranges: TokenRange[]) => {
+  const sorted = [...ranges].sort((left, right) => left.start - right.start)
+  let cursor = 0
+  let output = ""
+
+  for (const range of sorted) {
+    output += input.slice(cursor, range.start)
+    cursor = range.end
+  }
+
+  output += input.slice(cursor)
+
+  return output
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,!.?])/g, "$1")
+    .trim()
+}
+
+export function parseNaturalLanguageTaskInput(
+  input: string,
+  options: { tags: Tag[]; referenceDate?: Date }
+): ParsedNaturalLanguageTask {
+  const referenceDate = options.referenceDate ?? new Date()
+  const ranges: TokenRange[] = []
+  let selectedDateValue: string | undefined
+  let selectedDatePreview: NaturalLanguagePreviewToken | undefined
+  let selectedDateIndex = -1
+  let recurrenceSelection: ParsedNaturalLanguageTask["recurrence"] | null = null
+  let recurrencePreview: NaturalLanguagePreviewToken | null = null
+  let recurrenceIndex = -1
+  let prioritySelection: Todo["priority"] | undefined
+  let priorityPreview: NaturalLanguagePreviewToken | null = null
+  let priorityIndex = -1
+  let timeSelection: string | undefined
+  let timePreview: NaturalLanguagePreviewToken | null = null
+  let timeIndex = -1
+  const tagIds: string[] = []
+  const newTagNames: string[] = []
+  const tagPreviews: NaturalLanguagePreviewToken[] = []
+
+  const pushRange = (range: TokenRange) => {
+    if (!hasOverlap(ranges, range.start, range.end)) {
+      ranges.push(range)
+      return true
+    }
+    return false
+  }
+
+  const registerDate = (match: RegExpExecArray, date: Date, label: string) => {
+    const value = toIsoDate(date)
+    const preview = { key: `date-${match.index}`, label: `📅 ${label}` }
+    if (pushRange({ start: match.index, end: match.index + match[0].length, type: "date", preview, payload: value })) {
+      if (match.index >= selectedDateIndex) {
+        selectedDateValue = value
+        selectedDatePreview = preview
+        selectedDateIndex = match.index
+      }
+    }
+  }
+
+  for (const match of input.matchAll(/\b(today|tomorrow)\b/gi)) {
+    const keyword = match[0].toLowerCase()
+    const resolved = startOfDay(referenceDate)
+    if (keyword === "tomorrow") {
+      resolved.setDate(resolved.getDate() + 1)
+    }
+    registerDate(match as RegExpExecArray, resolved, titleCase(keyword))
+  }
+
+  for (const match of input.matchAll(/\bnext\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi)) {
+    const weekday = weekdayLookup[match[1].toLowerCase()]
+    registerDate(match as RegExpExecArray, buildUpcomingWeekday(weekday, referenceDate), `Next ${titleCase(match[1])}`)
+  }
+
+  for (const match of input.matchAll(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi)) {
+    const matchIndex = match.index ?? 0
+    const before = input.slice(Math.max(0, matchIndex - 6), matchIndex).toLowerCase()
+    if (/\b(next|every)\s*$/.test(before)) {
+      continue
+    }
+    const weekday = weekdayLookup[match[1].toLowerCase()]
+    registerDate(match as RegExpExecArray, buildUpcomingWeekday(weekday, referenceDate), titleCase(match[1]))
+  }
+
+  for (const match of input.matchAll(/\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|sept|october|oct|november|nov|december|dec)\s+(\d{1,2})(?:st|nd|rd|th)?\b/gi)) {
+    const month = monthLookup[match[1].toLowerCase()]
+    const day = Number.parseInt(match[2], 10)
+    if (Number.isNaN(day)) {
+      continue
+    }
+    registerDate(match as RegExpExecArray, resolveMonthDayDate(month, day, referenceDate), `${titleCase(match[1])} ${day}`)
+  }
+
+  for (const match of input.matchAll(/\bevery\s+(day|weekday|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi)) {
+    const value = match[1].toLowerCase()
+    const preview = {
+      key: `recurrence-${match.index}`,
+      label: `🔁 Every ${value === "day" ? "Day" : titleCase(value)}`,
+    }
+
+    let recurrence: ParsedNaturalLanguageTask["recurrence"]
+
+    if (value === "day") {
+      recurrence = { isRecurring: true, recurringFrequency: "daily", label: "Every Day" }
+    } else if (value === "weekday") {
+      recurrence = { isRecurring: true, recurringFrequency: "weekday", label: "Every Weekday" }
+    } else {
+      recurrence = {
+        isRecurring: true,
+        recurringDays: [weekdayLookup[value]],
+        label: `Every ${titleCase(value)}`,
+      }
+    }
+
+    if (pushRange({ start: match.index!, end: match.index! + match[0].length, type: "recurrence", preview, payload: recurrence })) {
+      if (match.index! >= recurrenceIndex) {
+        recurrenceSelection = recurrence
+        recurrencePreview = preview
+        recurrenceIndex = match.index!
+      }
+    }
+  }
+
+  for (const match of input.matchAll(/!(high|medium|low)\b/gi)) {
+    const value = match[1].toLowerCase() as NonNullable<Todo["priority"]>
+    const preview = { key: `priority-${match.index}`, label: `❗ ${titleCase(value)}` }
+    if (pushRange({ start: match.index!, end: match.index! + match[0].length, type: "priority", preview, payload: value })) {
+      if (match.index! >= priorityIndex) {
+        prioritySelection = value
+        priorityPreview = preview
+        priorityIndex = match.index!
+      }
+    }
+  }
+
+  for (const match of input.matchAll(/#([a-z0-9_-]+)/gi)) {
+    const tagName = normalizeTagName(match[1])
+    const existingTag = options.tags.find((tag) => normalizeTagName(tag.name) === tagName)
+    if (!pushRange({
+      start: match.index!,
+      end: match.index! + match[0].length,
+      type: "tag",
+      preview: {
+        key: `tag-${match.index}`,
+        label: existingTag ? `#${tagName}` : `#${tagName} (new)`,
+      },
+      payload: tagName,
+    })) {
+      continue
+    }
+
+    if (existingTag) {
+      tagIds.push(existingTag.id)
+    } else if (!newTagNames.includes(tagName)) {
+      newTagNames.push(tagName)
+    }
+
+    tagPreviews.push({
+      key: `tag-${match.index}`,
+      label: existingTag ? `#${tagName}` : `#${tagName} (new)`,
+    })
+  }
+
+  for (const match of input.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/gi)) {
+    const normalized = normalizeTimeValue(match[0])
+    const preview = { key: `time-${match.index}`, label: `🕒 ${normalized}` }
+    if (pushRange({ start: match.index!, end: match.index! + match[0].length, type: "time", preview, payload: normalized })) {
+      if (match.index! >= timeIndex) {
+        timeSelection = normalized
+        timePreview = preview
+        timeIndex = match.index!
+      }
+    }
+  }
+
+  for (const match of input.matchAll(/\b(morning|evening)\b/gi)) {
+    const normalized = match[1].toLowerCase()
+    const preview = { key: `time-${match.index}`, label: `🕒 ${titleCase(normalized)}` }
+    if (pushRange({ start: match.index!, end: match.index! + match[0].length, type: "time", preview, payload: normalized })) {
+      if (match.index! >= timeIndex) {
+        timeSelection = normalized
+        timePreview = preview
+        timeIndex = match.index!
+      }
+    }
+  }
+
+  const previewTokens: NaturalLanguagePreviewToken[] = []
+
+  if (selectedDatePreview) {
+    previewTokens.push(selectedDatePreview)
+  }
+  if (recurrenceSelection && recurrencePreview && recurrenceIndex >= 0) {
+    previewTokens.push(recurrencePreview)
+  }
+  if (prioritySelection && priorityPreview && priorityIndex >= 0) {
+    previewTokens.push(priorityPreview)
+  }
+  previewTokens.push(...tagPreviews)
+  if (timeSelection && timePreview && timeIndex >= 0) {
+    previewTokens.push(timePreview)
+  }
+
+  previewTokens.sort((left, right) => {
+    const leftIndex = Number.parseInt(left.key.split("-").at(-1) || "0", 10)
+    const rightIndex = Number.parseInt(right.key.split("-").at(-1) || "0", 10)
+    return leftIndex - rightIndex
+  })
+
+  return {
+    cleanText: stripTokenRanges(input, ranges),
+    scheduledDate: selectedDateValue,
+    recurrence: recurrenceSelection ?? undefined,
+    priority: prioritySelection,
+    tagIds,
+    newTagNames,
+    time: timeSelection,
+    previewTokens,
+  }
+}
 
 const removeRecurringChildren = (todos: Todo[], parentId: string) =>
   todos.filter((todo) => todo.parentId !== parentId)
@@ -168,6 +516,8 @@ export const useLemonadeStore = create<LemonadeStore>()(
         theme: 'light',
         accentColor: '#852CE6',
         showCelebrations: false,
+        colorPalette: DEFAULT_COLOR_PALETTE,
+        showDotGridBackground: true,
       },
       
       setPreferences: (prefs) => set((state) => ({
@@ -494,12 +844,48 @@ export const useLemonadeStore = create<LemonadeStore>()(
       // Filter
       tagFilterId: null,
       setTagFilterId: (id) => set({ tagFilterId: id }),
+      activeFilterColor: null,
+      setActiveFilterColor: (color) => set({ activeFilterColor: color }),
 
       // Tags
       tags: [],
       addTag: (name, color) => set((state) => ({
         tags: [...state.tags, { id: generateId(), name, color }]
       })),
+      ensureTagIds: (names) => {
+        const state = get()
+        const resolvedIds: string[] = []
+        const existingByName = new Map(
+          state.tags.map((tag) => [normalizeTagName(tag.name), tag])
+        )
+        const nextTags = [...state.tags]
+
+        for (const rawName of names) {
+          const normalized = normalizeTagName(rawName)
+          const existing = existingByName.get(normalized)
+
+          if (existing) {
+            resolvedIds.push(existing.id)
+            continue
+          }
+
+          const newTag = {
+            id: generateId(),
+            name: normalized,
+            color: state.preferences.accentColor,
+          }
+
+          existingByName.set(normalized, newTag)
+          nextTags.push(newTag)
+          resolvedIds.push(newTag.id)
+        }
+
+        if (nextTags.length !== state.tags.length) {
+          set({ tags: nextTags })
+        }
+
+        return resolvedIds
+      },
       editTag: (id, name, color) => set((state) => ({
         tags: state.tags.map((tag) => tag.id === id ? { ...tag, name, color } : tag)
       })),
@@ -540,7 +926,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
           for (let i = 1; i <= 30; i++) {
             const nextDate = new Date(startDate)
             nextDate.setDate(startDate.getDate() + i)
-            const nextDateStr = nextDate.toISOString().split('T')[0]
+            const nextDateStr = formatLocalDateKey(nextDate)
 
             // Check if instance already exists
             const exists = currentTodos.find(t => t.parentId === parent.id && t.date === nextDateStr)
@@ -583,7 +969,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
 
       // Auto-rollover
       autoRollover: () => {
-        const todayStr = new Date().toISOString().split('T')[0]
+        const todayStr = formatLocalDateKey(new Date())
         const lastOpenedDate = localStorage.getItem('lemonade-last-opened')
         
         if (lastOpenedDate && lastOpenedDate < todayStr) {
@@ -604,6 +990,31 @@ export const useLemonadeStore = create<LemonadeStore>()(
     }),
     {
       name: 'lemonade-storage',
+      partialize: (state) => ({
+        preferences: state.preferences,
+        calendarTodos: state.calendarTodos,
+        listTabs: state.listTabs,
+        lists: state.lists,
+        tags: state.tags,
+        searchQuery: state.searchQuery,
+        tagFilterId: state.tagFilterId,
+        sidebarOpen: state.sidebarOpen,
+        isCalendarExpanded: state.isCalendarExpanded,
+      }),
+      merge: (persistedState, currentState) => {
+        const persisted = persistedState as Partial<LemonadeStore> | undefined
+
+        return {
+          ...currentState,
+          ...persisted,
+          preferences: {
+            ...currentState.preferences,
+            ...persisted?.preferences,
+            colorPalette: persisted?.preferences?.colorPalette ?? currentState.preferences.colorPalette,
+            showDotGridBackground: persisted?.preferences?.showDotGridBackground ?? currentState.preferences.showDotGridBackground,
+          },
+        }
+      },
     }
   )
 )

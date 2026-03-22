@@ -72,12 +72,16 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className={cn(
+      "min-h-screen bg-background",
+      preferences.showDotGridBackground && "journal-dot-grid"
+    )}>
       <PreferencesPanel />
       <DailyPlannerModal />
       
       <div className={cn(
         "relative min-h-screen transition-all duration-300",
+        preferences.showDotGridBackground && "journal-dot-grid",
         sidebarOpen && "ml-72"
       )}>
         <Header currentDate={startDate} onNavigate={handleNavigate} onJumpToDate={handleJumpToDate} />

@@ -1,9 +1,17 @@
 "use client"
 
 import { useState, useRef, useEffect, type DragEvent } from "react"
-import { useLemonadeStore, holidays, type Todo } from "@/lib/store"
+import {
+  formatLocalDateKey,
+  useLemonadeStore,
+  holidays,
+  parseNaturalLanguageTaskInput,
+  type NaturalLanguagePreviewToken,
+  type Todo,
+} from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { TodoItem } from "./todo-item"
+import { Check } from "lucide-react"
 
 interface DayColumnProps {
   date: Date
@@ -22,7 +30,7 @@ const formatDate = (date: Date) => {
 }
 
 const getDateString = (date: Date) => {
-  return date.toISOString().split('T')[0]
+  return formatLocalDateKey(date)
 }
 
 export function DayColumn({ date, isToday }: DayColumnProps) {
@@ -30,10 +38,13 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
     preferences,
     calendarTodos,
     addCalendarTodo,
+    ensureTagIds,
     moveTodoToDate,
     searchQuery,
     isCalendarExpanded,
     tagFilterId,
+    activeFilterColor,
+    tags,
   } = useLemonadeStore()
   const [newTodoText, setNewTodoText] = useState("")
   const [isAdding, setIsAdding] = useState(false)
@@ -49,6 +60,7 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
     if (!preferences.showCompleted && todo.completed) return false
     if (searchQuery && !todo.text.toLowerCase().includes(searchQuery.toLowerCase())) return false
     if (tagFilterId && !todo.tags?.includes(tagFilterId)) return false
+    if (activeFilterColor && todo.color !== activeFilterColor) return false
     return true
   })
 
@@ -93,6 +105,7 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
   const { date: dateFontSize } = getResponsiveFontSizes()
   const visibleLineCount = isCalendarExpanded ? 18 : 9
   const totalSlots = Math.max(visibleLineCount, todosForDay.length + (isAdding ? 1 : 0))
+  const parsedInput = parseNaturalLanguageTaskInput(newTodoText, { tags })
 
   const handleTodoDragStart = (event: DragEvent<HTMLDivElement>, todoId: string) => {
     event.dataTransfer.setData("text/plain", todoId)
@@ -116,42 +129,82 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
     setIsDragOver(false)
   }
 
-  return (
-    <div className="flex-1 min-w-0 dark:bg-[#131313]">
-      {/* Header */}
-      <div className="px-4 pb-2 pt-2">
-        <div
-          className={cn("font-semibold tracking-[0.08em]", dateFontSize)}
-          style={{ color: "#A4A4A4" }}
-        >
-          {month} {day}, {year}
-        </div>
-        <div className={cn(
-          "font-heading uppercase text-[20px] leading-[20px]",
-          isToday ? "text-[var(--accent-color)]" : "text-foreground"
-        )}>
-          {dayName}
-        </div>
-        {holiday && (
-          <div className="text-xs text-muted-foreground mt-1 italic">
-            {holiday}
-          </div>
-        )}
-      </div>
+  const handleCreateNaturalLanguageTodo = () => {
+    const parsed = parseNaturalLanguageTaskInput(newTodoText, { tags })
+    const tagIds = [...parsed.tagIds, ...ensureTagIds(parsed.newTagNames)]
 
-      {/* Todos */}
-      <div
-        className={cn(
-          "flex flex-col transition-colors dark:bg-[#131313]",
-          isDragOver && "bg-accent/10"
-        )}
-        onDragOver={handleColumnDragOver}
-        onDragEnter={handleColumnDragOver}
-        onDragLeave={() => setIsDragOver(false)}
-        onDrop={handleColumnDrop}
-      >
-        {preferences.showLines ? (
-          <div className="flex flex-col">
+    if (!parsed.cleanText) {
+      setNewTodoText("")
+      return false
+    }
+
+    const isHeading = parsed.cleanText === parsed.cleanText.toUpperCase() && parsed.cleanText.length > 2
+
+    addCalendarTodo({
+      text: parsed.cleanText,
+      completed: false,
+      date: parsed.scheduledDate ?? dateStr,
+      isHeading,
+      isRecurring: parsed.recurrence?.isRecurring,
+      recurringFrequency: parsed.recurrence?.recurringFrequency,
+      recurringDays: parsed.recurrence?.recurringDays,
+      priority: parsed.priority,
+      tags: tagIds.length > 0 ? tagIds : undefined,
+      time: parsed.time,
+    })
+
+    setNewTodoText("")
+    return true
+  }
+
+  return (
+    <div className={cn(
+      "w-full border-b border-border/60 dark:bg-[#131313]",
+      preferences.showDotGridBackground && "journal-dot-grid-dark-only"
+    )}>
+      <div className={cn(
+        "grid w-full grid-cols-[220px_minmax(0,1fr)] gap-0 dark:bg-[#131313]",
+        preferences.showDotGridBackground && "journal-dot-grid-dark-only"
+      )}>
+        <div className={cn(
+          "px-4 pb-3 pt-3",
+          preferences.showDotGridBackground && "journal-dot-grid-dark-only"
+        )}>
+          <div
+            className={cn("font-semibold tracking-[0.08em]", dateFontSize)}
+            style={{ color: "#A4A4A4" }}
+          >
+            {month} {day}, {year}
+          </div>
+          <div className={cn(
+            "font-heading uppercase text-[20px] leading-[20px]",
+            isToday ? "text-[var(--accent-color)]" : "text-foreground"
+          )}>
+            {dayName}
+          </div>
+          {holiday && (
+            <div className="mt-1 text-xs italic text-muted-foreground">
+              {holiday}
+            </div>
+          )}
+        </div>
+
+        <div
+          className={cn(
+            "flex flex-col transition-colors dark:bg-[#131313]",
+            preferences.showDotGridBackground && "journal-dot-grid-dark-only",
+            isDragOver && "bg-accent/10"
+          )}
+          onDragOver={handleColumnDragOver}
+          onDragEnter={handleColumnDragOver}
+          onDragLeave={() => setIsDragOver(false)}
+          onDrop={handleColumnDrop}
+        >
+          {preferences.showLines ? (
+            <div className={cn(
+              "flex flex-col",
+              preferences.showDotGridBackground && "journal-dot-grid-dark-only"
+            )}>
             {Array.from({ length: totalSlots }).map((_, index) => {
               const todo = todosForDay[index]
               if (todo) {
@@ -176,35 +229,94 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
                   onClick={() => setIsAdding(true)}
                 >
                   {isInputRow ? (
-                    <input
-                      ref={inputRef}
-                      type="text"
-                      value={newTodoText}
-                      onChange={(e) => setNewTodoText(e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      onBlur={() => {
-                        handleAddTodo()
-                        setIsAdding(false)
-                      }}
-                      className={cn(
-                        "w-full bg-transparent px-0 outline-none font-task",
-                        textSizeClass
-                      )}
-                      placeholder="Add a todo..."
-                    />
+                    <div className="w-full py-2">
+                      <div className="relative">
+                        <input
+                          ref={inputRef}
+                          type="text"
+                          value={newTodoText}
+                          onChange={(e) => setNewTodoText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              handleCreateNaturalLanguageTodo()
+                              setIsAdding(false)
+                            } else if (e.key === "Escape") {
+                              setIsAdding(false)
+                              setNewTodoText("")
+                            }
+                          }}
+                          onBlur={() => {
+                            handleCreateNaturalLanguageTodo()
+                            setIsAdding(false)
+                          }}
+                          className={cn(
+                            "w-full bg-transparent px-0 pr-7 outline-none font-task",
+                            textSizeClass
+                          )}
+                          placeholder="Add a todo..."
+                        />
+                        {newTodoText.trim() ? (
+                          <button
+                            type="button"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => {
+                              const created = handleCreateNaturalLanguageTodo()
+
+                              if (created) {
+                                requestAnimationFrame(() => {
+                                  inputRef.current?.focus()
+                                })
+                              }
+                            }}
+                            className="absolute right-0 top-1/2 inline-flex -translate-y-1/2 items-center justify-center text-[var(--accent-color)] opacity-75 transition-opacity hover:opacity-100"
+                            aria-label="Confirm task"
+                          >
+                            <Check className="size-4" strokeWidth={2.5} />
+                          </button>
+                        ) : null}
+                      </div>
+                      <TokenPreviewBar tokens={parsedInput.previewTokens} />
+                    </div>
                   ) : null}
                 </div>
               )
             })}
-          </div>
-        ) : (
-          <>
-            {todosForDay.map((todo) => (
-              <TodoItem key={todo.id} todo={todo} textSizeClass={textSizeClass} />
-            ))}
-          </>
-        )}
+            </div>
+          ) : (
+            <>
+              {todosForDay.map((todo) => (
+                <TodoItem
+                  key={todo.id}
+                  todo={todo}
+                  textSizeClass={textSizeClass}
+                  draggable
+                  onDragStart={(event) => handleTodoDragStart(event, todo.id)}
+                  onDragEnd={() => setIsDragOver(false)}
+                />
+              ))}
+            </>
+          )}
+        </div>
       </div>
+    </div>
+  )
+}
+
+function TokenPreviewBar({ tokens }: { tokens: NaturalLanguagePreviewToken[] }) {
+  if (tokens.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {tokens.map((token) => (
+        <span
+          key={token.key}
+          className="rounded-full bg-muted px-2 py-1 text-[10px] font-medium text-muted-foreground"
+        >
+          {token.label}
+        </span>
+      ))}
     </div>
   )
 }

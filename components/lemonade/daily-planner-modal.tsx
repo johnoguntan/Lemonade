@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useLemonadeStore, type Todo } from "@/lib/store"
+import { formatLocalDateKey, useLemonadeStore, type Todo } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -13,10 +13,10 @@ export function DailyPlannerModal() {
   const [priorities, setPriorities] = useState(["", "", ""])
   
   const today = new Date()
-  const todayStr = today.toISOString().split('T')[0]
+  const todayStr = formatLocalDateKey(today)
   const yesterday = new Date()
   yesterday.setDate(yesterday.getDate() - 1)
-  const yesterdayStr = yesterday.toISOString().split('T')[0]
+  const yesterdayStr = formatLocalDateKey(yesterday)
 
   useEffect(() => {
     const lastPlannerDate = localStorage.getItem('lemonade-last-planner')

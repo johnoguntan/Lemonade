@@ -4,6 +4,7 @@ import { useLemonadeStore } from "@/lib/store"
 import { DayColumn } from "./day-column"
 import { Button } from "@/components/ui/button"
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react"
+import { cn } from "@/lib/utils"
 
 interface CalendarViewProps {
   startDate: Date
@@ -35,8 +36,14 @@ export function CalendarView({ startDate, onNavigate }: CalendarViewProps) {
   const dates = getDateArray(startDate, preferences.columns)
 
   return (
-    <div className="group/calendar-nav relative flex flex-1 px-10 pt-6 dark:bg-[#131313]">
-      <div className="pointer-events-none absolute left-0 top-24 z-10 flex flex-col overflow-hidden rounded-r-md border border-border bg-[#f7f8fa] opacity-0 transition-opacity duration-200 group-hover/calendar-nav:opacity-100 dark:bg-[#131313]">
+    <div className={cn(
+      "group/calendar-nav relative flex flex-1 px-10 pt-6 dark:bg-[#131313]",
+      preferences.showDotGridBackground && "journal-dot-grid-dark-only"
+    )}>
+      <div className={cn(
+        "pointer-events-none absolute left-0 top-24 z-10 flex flex-col overflow-hidden rounded-r-md border border-border bg-[#f7f8fa] opacity-0 transition-opacity duration-200 group-hover/calendar-nav:opacity-100 dark:bg-[#131313]",
+        preferences.showDotGridBackground && "journal-dot-grid-dark-only"
+      )}>
         <Button
           variant="ghost"
           size="icon"
@@ -55,17 +62,20 @@ export function CalendarView({ startDate, onNavigate }: CalendarViewProps) {
         </Button>
       </div>
       
-      <div className="flex-1 flex gap-8 overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden">
         {dates.map((date) => (
           <DayColumn
-            key={date.toISOString()}
+            key={`${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`}
             date={date}
             isToday={isSameDay(date, today)}
           />
         ))}
       </div>
       
-      <div className="pointer-events-none absolute right-0 top-24 z-10 flex flex-col overflow-hidden rounded-l-md border border-border bg-[#f7f8fa] opacity-0 transition-opacity duration-200 group-hover/calendar-nav:opacity-100 dark:bg-[#131313]">
+      <div className={cn(
+        "pointer-events-none absolute right-0 top-24 z-10 flex flex-col overflow-hidden rounded-l-md border border-border bg-[#f7f8fa] opacity-0 transition-opacity duration-200 group-hover/calendar-nav:opacity-100 dark:bg-[#131313]",
+        preferences.showDotGridBackground && "journal-dot-grid-dark-only"
+      )}>
         <Button
           variant="ghost"
           size="icon"
