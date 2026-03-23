@@ -33,6 +33,30 @@ const getDateString = (date: Date) => {
   return formatLocalDateKey(date)
 }
 
+const sortEndOfDayTodos = (todos: Todo[]) => {
+  const getBucket = (todo: Todo) => {
+    if (!todo.completed && !todo.endOfDay) return 0
+    if (!todo.completed && todo.endOfDay) return 1
+    if (todo.completed && !todo.endOfDay) return 2
+    return 3
+  }
+
+  // We sort explicitly by section and creation time so ordering stays predictable
+  // across reloads and does not depend on engine sort stability.
+  return todos
+    .map((todo, index) => ({ todo, index }))
+    .sort((a, b) => {
+      const bucketDiff = getBucket(a.todo) - getBucket(b.todo)
+      if (bucketDiff !== 0) return bucketDiff
+
+      const createdAtDiff = a.todo.createdAt - b.todo.createdAt
+      if (createdAtDiff !== 0) return createdAtDiff
+
+      return a.index - b.index
+    })
+    .map(({ todo }) => todo)
+}
+
 export function DayColumn({ date, isToday }: DayColumnProps) {
   const {
     preferences,
@@ -55,42 +79,16 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
   const { month, day, year, dayName } = formatDate(date)
   const holiday = holidays[dateStr]
 
-  const todosForDay = calendarTodos.filter((todo) => {
+  const todosForDay = sortEndOfDayTodos(calendarTodos.filter((todo) => {
     if (todo.date !== dateStr) return false
     if (!preferences.showCompleted && todo.completed) return false
     if (searchQuery && !todo.text.toLowerCase().includes(searchQuery.toLowerCase())) return false
     if (tagFilterId && !todo.tags?.includes(tagFilterId)) return false
     if (activeFilterColor && todo.color !== activeFilterColor) return false
     return true
-  })
+  }))
 
-  const textSizeClass = {
-    S: 'text-[13px]',
-    M: 'text-[14px]',
-    L: 'text-[16px]',
-  }[preferences.textSize]
-
-  const handleAddTodo = () => {
-    if (newTodoText.trim()) {
-      const isHeading = newTodoText === newTodoText.toUpperCase() && newTodoText.length > 2
-      addCalendarTodo({
-        text: newTodoText.trim(),
-        completed: false,
-        date: dateStr,
-        isHeading,
-      })
-      setNewTodoText("")
-    }
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleAddTodo()
-    } else if (e.key === 'Escape') {
-      setIsAdding(false)
-      setNewTodoText("")
-    }
-  }
+  const textSizeClass = "lemonade-task-text"
 
   useEffect(() => {
     if (isAdding && inputRef.current) {
@@ -158,18 +156,9 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
   }
 
   return (
-    <div className={cn(
-      "w-full border-b border-border/60 dark:bg-[#131313]",
-      preferences.showDotGridBackground && "journal-dot-grid-dark-only"
-    )}>
-      <div className={cn(
-        "grid w-full grid-cols-[220px_minmax(0,1fr)] gap-0 dark:bg-[#131313]",
-        preferences.showDotGridBackground && "journal-dot-grid-dark-only"
-      )}>
-        <div className={cn(
-          "px-4 pb-3 pt-3",
-          preferences.showDotGridBackground && "journal-dot-grid-dark-only"
-        )}>
+    <div className="w-full border-b border-border/60">
+      <div className="grid w-full grid-cols-[220px_minmax(0,1fr)] gap-0">
+        <div className="px-4 pb-3 pt-3">
           <div
             className={cn("font-semibold tracking-[0.08em]", dateFontSize)}
             style={{ color: "#A4A4A4" }}
@@ -191,8 +180,7 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
 
         <div
           className={cn(
-            "flex flex-col transition-colors dark:bg-[#131313]",
-            preferences.showDotGridBackground && "journal-dot-grid-dark-only",
+            "flex flex-col transition-colors",
             isDragOver && "bg-accent/10"
           )}
           onDragOver={handleColumnDragOver}
@@ -200,11 +188,7 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
           onDragLeave={() => setIsDragOver(false)}
           onDrop={handleColumnDrop}
         >
-          {preferences.showLines ? (
-            <div className={cn(
-              "flex flex-col",
-              preferences.showDotGridBackground && "journal-dot-grid-dark-only"
-            )}>
+          <div className="flex flex-col">
             {Array.from({ length: totalSlots }).map((_, index) => {
               const todo = todosForDay[index]
               if (todo) {
@@ -225,7 +209,7 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
               return (
                 <div
                   key={`${dateStr}-line-${index}`}
-                  className="flex h-[42px] items-center border-b border-border/60 px-0 transition-colors cursor-text hover:bg-accent/20"
+                  className="lemonade-task-row flex h-[42px] items-center border-b border-border/60 px-0 transition-colors cursor-text hover:bg-accent/20"
                   onClick={() => setIsAdding(true)}
                 >
                   {isInputRow ? (
@@ -281,21 +265,7 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
                 </div>
               )
             })}
-            </div>
-          ) : (
-            <>
-              {todosForDay.map((todo) => (
-                <TodoItem
-                  key={todo.id}
-                  todo={todo}
-                  textSizeClass={textSizeClass}
-                  draggable
-                  onDragStart={(event) => handleTodoDragStart(event, todo.id)}
-                  onDragEnd={() => setIsDragOver(false)}
-                />
-              ))}
-            </>
-          )}
+          </div>
         </div>
       </div>
     </div>

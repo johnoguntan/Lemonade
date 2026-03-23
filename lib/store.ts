@@ -26,6 +26,8 @@ export interface Todo {
   text: string
   completed: boolean
   date: string // ISO date string
+  createdAt: number
+  endOfDay: boolean
   time?: string
   color?: string
   isHeading?: boolean
@@ -53,12 +55,11 @@ export interface ListTab {
 
 export interface UserPreferences {
   columns: 1 | 3 | 5 | 7
-  textSize: 'S' | 'M' | 'L'
-  spacing: 'S' | 'M' | 'L'
+  textSize: 'sm' | 'md' | 'lg'
+  spacing: 'compact' | 'normal' | 'comfortable'
   showCompleted: boolean
   bulletStyle: BulletStyle
   startOnYesterday: boolean
-  showLines: boolean
   theme: 'light' | 'dark'
   accentColor: string
   showCelebrations: boolean
@@ -96,10 +97,11 @@ interface LemonadeStore {
   
   // Calendar todos
   calendarTodos: Todo[]
-  addCalendarTodo: (todo: Omit<Todo, 'id' | 'subtasks'>) => void
+  addCalendarTodo: (todo: Omit<Todo, 'id' | 'subtasks' | 'endOfDay' | 'createdAt'> & { endOfDay?: boolean; createdAt?: number }) => void
   updateCalendarTodo: (id: string, updates: Partial<Todo>) => void
   deleteCalendarTodo: (id: string) => void
   toggleCalendarTodo: (id: string) => void
+  toggleEndOfDay: (id: string) => void
   addSubtask: (todoId: string, text: string) => void
   toggleSubtask: (todoId: string, subtaskId: string) => void
   deleteSubtask: (todoId: string, subtaskId: string) => void
@@ -118,10 +120,8 @@ interface LemonadeStore {
   addListAdjacent: (referenceListId: string, position: 'left' | 'right') => void
   moveListToTab: (listId: string, tabId: string) => void
   addListTodo: (listId: string, text: string) => void
-  updateListTodo: (listId: string, todoId: string, updates: Partial<Todo>) => void
   deleteListTodo: (listId: string, todoId: string) => void
   toggleListTodo: (listId: string, todoId: string) => void
-  moveListTodoToCalendar: (listId: string, todoId: string, date: string) => void
   
  
   
@@ -138,13 +138,16 @@ interface LemonadeStore {
   
   // Filter
   tagFilterId: string | null
-  setTagFilterId: (id: string | null) => void
   activeFilterColor: string | null
   setActiveFilterColor: (color: string | null) => void
   
   // Sidebar
   sidebarOpen: boolean
   setSidebarOpen: (open: boolean) => void
+
+  // Calendar selection
+  selectedCalendarDate: string
+  setSelectedCalendarDate: (date: string) => void
 
     // Calendar expansion
     isCalendarExpanded: boolean
@@ -158,6 +161,12 @@ interface LemonadeStore {
 }
 
 const generateId = () => Math.random().toString(36).substring(2, 15)
+
+const normalizeTodo = (todo: Todo, fallbackCreatedAt: number): Todo => ({
+  ...todo,
+  createdAt: typeof todo.createdAt === "number" ? todo.createdAt : fallbackCreatedAt,
+  endOfDay: typeof todo.endOfDay === "boolean" ? todo.endOfDay : false,
+})
 
 const DEFAULT_COLOR_PALETTE = [
   '#fef08a',
@@ -226,7 +235,40 @@ export const formatLocalDateKey = (date: Date) => {
   return `${year}-${month}-${day}`
 }
 
+export const parseLocalDateKey = (value: string) => {
+  const [year, month, day] = value.split('-').map(Number)
+  return new Date(year, (month ?? 1) - 1, day ?? 1)
+}
+
 const toIsoDate = (date: Date) => formatLocalDateKey(date)
+
+const getInitialCalendarDate = (startOnYesterday: boolean) => {
+  const date = new Date()
+  if (startOnYesterday) {
+    date.setDate(date.getDate() - 1)
+  }
+  return formatLocalDateKey(date)
+}
+
+const normalizeTextSizePreference = (value: unknown): UserPreferences["textSize"] => {
+  if (value === "sm" || value === "md" || value === "lg") {
+    return value
+  }
+
+  if (value === "S") return "sm"
+  if (value === "L") return "lg"
+  return "md"
+}
+
+const normalizeSpacingPreference = (value: unknown): UserPreferences["spacing"] => {
+  if (value === "compact" || value === "normal" || value === "comfortable") {
+    return value
+  }
+
+  if (value === "S") return "compact"
+  if (value === "L") return "comfortable"
+  return "normal"
+}
 
 const titleCase = (value: string) =>
   value.replace(/\b\w/g, (char) => char.toUpperCase())
@@ -507,12 +549,11 @@ export const useLemonadeStore = create<LemonadeStore>()(
       // Default preferences
       preferences: {
         columns: 5,
-        textSize: 'M',
-        spacing: 'M',
+        textSize: 'md',
+        spacing: 'normal',
         showCompleted: true,
         bulletStyle: 'none',
         startOnYesterday: false,
-        showLines: true,
         theme: 'light',
         accentColor: '#852CE6',
         showCelebrations: false,
@@ -532,6 +573,8 @@ export const useLemonadeStore = create<LemonadeStore>()(
           calendarTodos: [...state.calendarTodos, {
             ...todo,
             id: generateId(),
+            createdAt: todo.createdAt ?? Date.now(),
+            endOfDay: todo.endOfDay ?? false,
             subtasks: [],
           }]
         }))
@@ -580,6 +623,12 @@ export const useLemonadeStore = create<LemonadeStore>()(
       toggleCalendarTodo: (id) => set((state) => ({
         calendarTodos: state.calendarTodos.map((todo) =>
           todo.id === id ? { ...todo, completed: !todo.completed } : todo
+        )
+      })),
+
+      toggleEndOfDay: (id) => set((state) => ({
+        calendarTodos: state.calendarTodos.map((todo) =>
+          todo.id === id ? { ...todo, endOfDay: !todo.endOfDay } : todo
         )
       })),
       
@@ -777,22 +826,11 @@ export const useLemonadeStore = create<LemonadeStore>()(
                   id: generateId(),
                   text,
                   completed: false,
-                  date: '',
+                  date: new Date().toISOString().split('T')[0],
+                  createdAt: Date.now(),
+                  endOfDay: false,
                   subtasks: [],
                 }]
-              }
-            : list
-        )
-      })),
-      
-      updateListTodo: (listId, todoId, updates) => set((state) => ({
-        lists: state.lists.map((list) =>
-          list.id === listId
-            ? {
-                ...list,
-                todos: list.todos.map((todo) =>
-                  todo.id === todoId ? { ...todo, ...updates } : todo
-                )
               }
             : list
         )
@@ -819,31 +857,12 @@ export const useLemonadeStore = create<LemonadeStore>()(
         )
       })),
       
-      moveListTodoToCalendar: (listId, todoId, date) => {
-        const state = get()
-        const list = state.lists.find((l) => l.id === listId)
-        const todo = list?.todos.find((t) => t.id === todoId)
-        if (todo) {
-          set((state) => ({
-            calendarTodos: [...state.calendarTodos, { ...todo, date }],
-            lists: state.lists.map((l) =>
-              l.id === listId
-                ? { ...l, todos: l.todos.filter((t) => t.id !== todoId) }
-                : l
-            )
-          }))
-        }
-      },
-      
-
-      
       // Search
       searchQuery: '',
       setSearchQuery: (query) => set({ searchQuery: query }),
       
       // Filter
       tagFilterId: null,
-      setTagFilterId: (id) => set({ tagFilterId: id }),
       activeFilterColor: null,
       setActiveFilterColor: (color) => set({ activeFilterColor: color }),
 
@@ -908,6 +927,10 @@ export const useLemonadeStore = create<LemonadeStore>()(
       sidebarOpen: false,
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
 
+      // Calendar selection
+      selectedCalendarDate: getInitialCalendarDate(false),
+      setSelectedCalendarDate: (date) => set({ selectedCalendarDate: date }),
+
       // Calendar expansion
       isCalendarExpanded: false,
       toggleCalendar: () => set((state) => ({ isCalendarExpanded: !state.isCalendarExpanded })),
@@ -952,6 +975,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
                 ...parent,
                 id: generateId(),
                 date: nextDateStr,
+                createdAt: parent.createdAt,
                 completed: false,
                 parentId: parent.id,
                 isRecurring: false,
@@ -1003,16 +1027,29 @@ export const useLemonadeStore = create<LemonadeStore>()(
       }),
       merge: (persistedState, currentState) => {
         const persisted = persistedState as Partial<LemonadeStore> | undefined
+        const mergedPreferences = {
+          ...currentState.preferences,
+          ...persisted?.preferences,
+          textSize: normalizeTextSizePreference(persisted?.preferences?.textSize),
+          spacing: normalizeSpacingPreference(persisted?.preferences?.spacing),
+          colorPalette: persisted?.preferences?.colorPalette ?? currentState.preferences.colorPalette,
+          showDotGridBackground: persisted?.preferences?.showDotGridBackground ?? currentState.preferences.showDotGridBackground,
+        }
 
         return {
           ...currentState,
           ...persisted,
-          preferences: {
-            ...currentState.preferences,
-            ...persisted?.preferences,
-            colorPalette: persisted?.preferences?.colorPalette ?? currentState.preferences.colorPalette,
-            showDotGridBackground: persisted?.preferences?.showDotGridBackground ?? currentState.preferences.showDotGridBackground,
-          },
+          calendarTodos: (persisted?.calendarTodos ?? currentState.calendarTodos).map((todo, index) =>
+            normalizeTodo(todo, index)
+          ),
+          lists: (persisted?.lists ?? currentState.lists).map((list, listIndex) => ({
+            ...list,
+            todos: list.todos.map((todo, todoIndex) =>
+              normalizeTodo(todo, listIndex * 1000 + todoIndex)
+            ),
+          })),
+          preferences: mergedPreferences,
+          selectedCalendarDate: getInitialCalendarDate(mergedPreferences.startOnYesterday),
         }
       },
     }

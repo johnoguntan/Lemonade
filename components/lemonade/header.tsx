@@ -7,6 +7,7 @@ import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   formatLocalDateKey,
+  parseLocalDateKey,
   parseNaturalLanguageTaskInput,
   useLemonadeStore,
   type NaturalLanguagePreviewToken,
@@ -14,12 +15,10 @@ import {
 import { useEffect, useState } from "react"
 
 interface HeaderProps {
-  currentDate: Date
   onNavigate: (direction: 'prev-week' | 'next-week' | 'prev-day' | 'next-day' | 'today') => void
-  onJumpToDate: (date: Date) => void
 }
 
-export function Header({ currentDate, onNavigate, onJumpToDate }: HeaderProps) {
+export function Header({ onNavigate }: HeaderProps) {
   const {
     searchQuery,
     setSearchQuery,
@@ -31,12 +30,17 @@ export function Header({ currentDate, onNavigate, onJumpToDate }: HeaderProps) {
     activeFilterColor,
     setActiveFilterColor,
     setPreferences,
+    selectedCalendarDate,
+    setSelectedCalendarDate,
   } = useLemonadeStore()
   const [showSearch, setShowSearch] = useState(false)
   const [showQuickAdd, setShowQuickAdd] = useState(false)
   const [quickAddText, setQuickAddText] = useState("")
   const [showColorPopover, setShowColorPopover] = useState(false)
+  const [showDatePopover, setShowDatePopover] = useState(false)
   const [newPaletteColor, setNewPaletteColor] = useState("#fef08a")
+  const currentDate = parseLocalDateKey(selectedCalendarDate)
+  const [pickerMonth, setPickerMonth] = useState(currentDate)
 
   const parsedQuickAdd = parseNaturalLanguageTaskInput(quickAddText, { tags })
   const palette = preferences.colorPalette ?? []
@@ -99,6 +103,10 @@ export function Header({ currentDate, onNavigate, onJumpToDate }: HeaderProps) {
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [])
+
+  useEffect(() => {
+    setPickerMonth(currentDate)
+  }, [selectedCalendarDate])
 
   const handleQuickAddSubmit = () => {
     const parsed = parseNaturalLanguageTaskInput(quickAddText, { tags })
@@ -380,7 +388,15 @@ export function Header({ currentDate, onNavigate, onJumpToDate }: HeaderProps) {
           >
             <ChevronsRight className="size-4" strokeWidth={2.75} />
           </Button>
-          <Popover>
+          <Popover
+            open={showDatePopover}
+            onOpenChange={(open) => {
+              setShowDatePopover(open)
+              if (open) {
+                setPickerMonth(currentDate)
+              }
+            }}
+          >
             <PopoverTrigger asChild>
               <Button
                 variant="ghost"
@@ -390,30 +406,38 @@ export function Header({ currentDate, onNavigate, onJumpToDate }: HeaderProps) {
                 <CalendarIcon className="size-4" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="end" side="bottom" sideOffset={10} className="w-auto rounded-2xl border-0 p-0 shadow-[0_10px_30px_rgba(0,0,0,0.12)]">
+            <PopoverContent
+              align="end"
+              side="bottom"
+              sideOffset={8}
+              collisionPadding={12}
+              className="z-50 w-auto max-w-[calc(100vw-24px)] rounded-2xl border-0 p-0 shadow-[0_10px_30px_rgba(0,0,0,0.12)]"
+            >
               <Calendar
                 mode="single"
                 selected={currentDate}
-                month={currentDate}
+                month={pickerMonth}
+                onMonthChange={setPickerMonth}
                 onSelect={(date) => {
                   if (date) {
-                    onJumpToDate(date)
+                    setSelectedCalendarDate(formatLocalDateKey(date))
+                    setShowDatePopover(false)
                   }
                 }}
-                className="rounded-2xl border-b-4 border-b-sky-300 bg-white p-4"
+                className="rounded-2xl border-b-[4px] border-b-[var(--accent-color)] bg-white p-4"
                 classNames={{
-                  month_caption: "flex items-center justify-center h-10 w-full px-10",
-                  caption_label: "text-[14px] font-semibold uppercase tracking-[0.14em]",
-                  nav: "absolute inset-x-0 top-4 flex items-center justify-between px-4",
-                  button_previous: "h-8 w-8 rounded-full text-foreground hover:bg-muted",
-                  button_next: "h-8 w-8 rounded-full text-foreground hover:bg-muted",
+                  month_caption: "relative flex h-10 w-full items-center justify-center px-10",
+                  caption_label: "text-center text-[14px] leading-none font-semibold uppercase tracking-[0.14em]",
+                  nav: "absolute inset-x-0 top-4 z-10 flex items-center justify-between px-3",
+                  button_previous: "flex h-8 w-8 items-center justify-center rounded-full text-foreground hover:bg-muted [&_svg]:size-4 [&_svg]:text-foreground",
+                  button_next: "flex h-8 w-8 items-center justify-center rounded-full text-foreground hover:bg-muted [&_svg]:size-4 [&_svg]:text-foreground",
                   weekdays: "mb-2 mt-3 grid grid-cols-7",
                   weekday: "text-center text-[12px] font-semibold uppercase text-foreground",
                   week: "mt-0 grid grid-cols-7",
                   day: "aspect-square p-0",
                   day_button: "h-12 w-12 rounded-none text-base font-semibold text-foreground hover:bg-muted/50",
                   today: "bg-transparent text-foreground",
-                  selected: "bg-sky-300 text-white hover:bg-sky-300",
+                  selected: "bg-[var(--accent-color)] text-white hover:bg-[var(--accent-color)]",
                   outside: "text-muted-foreground/40",
                 }}
               />

@@ -1,14 +1,22 @@
 "use client"
 
+import { useState } from "react"
 import { useLemonadeStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
 import { CircleHelp, Moon, RefreshCw, SlidersHorizontal, Sun, User } from "lucide-react"
 import { useTheme } from "next-themes"
 import Link from "next/link"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 
 export function Footer() {
   const { preferences, setPreferences, sidebarOpen, setSidebarOpen } = useLemonadeStore()
   const { setTheme } = useTheme()
+  const [showHelp, setShowHelp] = useState(false)
 
   const handleThemeToggle = () => {
     const newTheme = preferences.theme === 'light' ? 'dark' : 'light'
@@ -31,6 +39,7 @@ export function Footer() {
         <Button
           variant="ghost"
           size="icon"
+          onClick={() => window.location.reload()}
           className="size-8 text-muted-foreground hover:text-foreground"
           title="Refresh"
         >
@@ -83,12 +92,59 @@ export function Footer() {
         <Button
           variant="ghost"
           size="icon"
+          onClick={() => setShowHelp(true)}
           className="size-8 text-muted-foreground hover:text-foreground"
           title="Help"
         >
           <CircleHelp className="size-4" />
         </Button>
       </div>
+
+      <Dialog open={showHelp} onOpenChange={setShowHelp}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Help</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 text-sm">
+            <div>
+              <div className="mb-2 font-medium">Keyboard shortcuts</div>
+              <ul className="space-y-1 text-muted-foreground">
+                <li><span className="font-medium text-foreground">/</span> Open quick add</li>
+                <li><span className="font-medium text-foreground">Enter</span> Save a task</li>
+                <li><span className="font-medium text-foreground">Esc</span> Cancel task entry</li>
+              </ul>
+            </div>
+
+            <div>
+              <div className="mb-2 font-medium">Natural language tips</div>
+              <ul className="space-y-1 text-muted-foreground">
+                <li>Dates: <span className="text-foreground">today</span>, <span className="text-foreground">tomorrow</span>, <span className="text-foreground">friday</span>, <span className="text-foreground">next friday</span>, <span className="text-foreground">june 5</span></li>
+                <li>Priority: <span className="text-foreground">!high</span>, <span className="text-foreground">!medium</span>, <span className="text-foreground">!low</span></li>
+                <li>Tags: <span className="text-foreground">#work</span>, <span className="text-foreground">#home</span></li>
+                <li>Time: <span className="text-foreground">3pm</span>, <span className="text-foreground">9am</span>, <span className="text-foreground">morning</span>, <span className="text-foreground">evening</span></li>
+              </ul>
+            </div>
+
+            <div>
+              <div className="mb-2 font-medium">Recurring syntax</div>
+              <ul className="space-y-1 text-muted-foreground">
+                <li><span className="text-foreground">every day</span></li>
+                <li><span className="text-foreground">every weekday</span></li>
+                <li><span className="text-foreground">every monday</span></li>
+              </ul>
+            </div>
+
+            <div>
+              <div className="mb-2 font-medium">Usage tips</div>
+              <ul className="space-y-1 text-muted-foreground">
+                <li>Drag tasks between day columns to reschedule them.</li>
+                <li>Use the color dot in the header to filter highlighted tasks.</li>
+                <li>Use the bottom tabs to organize lists and planning pages.</li>
+              </ul>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </footer>
   )
 }

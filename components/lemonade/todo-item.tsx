@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useLemonadeStore, type Todo, type SubTask } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { ChevronDown, ChevronRight, RotateCcw, Plus, Minus, X } from "lucide-react"
+import { ChevronDown, ChevronRight, RotateCcw, Plus, Minus, X, Moon } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,6 +37,7 @@ export function TodoItem({
   const { 
     preferences, 
     toggleCalendarTodo, 
+    toggleEndOfDay,
     updateCalendarTodo, 
     deleteCalendarTodo,
     addSubtask,
@@ -92,9 +93,9 @@ export function TodoItem({
 
   if (todo.isHeading) {
     return (
-      <div 
-        className={cn(
-          "font-bold uppercase tracking-wide h-[40px] border-b border-border/50 flex items-center px-2",
+        <div 
+          className={cn(
+          "lemonade-heading-row font-bold uppercase tracking-wide h-[40px] border-b border-border/50 flex items-center px-2",
           textSizeClass
         )}
         style={{ backgroundColor: todo.color }}
@@ -125,9 +126,9 @@ export function TodoItem({
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
     >
-      <div 
+        <div 
         className={cn(
-          "flex items-center h-[42px] border-b border-border/60 px-0 transition-colors",
+          "lemonade-task-row flex items-center h-[42px] border-b border-border/60 px-0 transition-colors",
           todo.completed && "bg-transparent"
         )}
         style={{ backgroundColor: todo.color }}
@@ -162,7 +163,7 @@ export function TodoItem({
                 onBlur={handleSave}
                 onKeyDown={(e) => e.key === 'Enter' && handleSave()}
                 className={cn(
-                  "w-full bg-transparent outline-none font-task font-normal text-[14px] leading-[1.15] text-[#000000] dark:text-foreground",
+                  "lemonade-task-text w-full bg-transparent outline-none font-task font-normal text-[14px] leading-[1.15] text-[#000000] dark:text-foreground",
                   todo.completed && "line-through opacity-40"
                 )}
                 autoFocus
@@ -171,7 +172,7 @@ export function TodoItem({
               <span
                 onClick={() => setIsEditing(true)}
                 className={cn(
-                  "cursor-text block font-task font-normal text-[14px] leading-[1.15] text-[#000000] dark:text-foreground",
+                  "lemonade-task-text cursor-text block font-task font-normal text-[14px] leading-[1.15] text-[#000000] dark:text-foreground",
                   todo.completed && "line-through opacity-40"
                 )}
               >
@@ -204,6 +205,22 @@ export function TodoItem({
         </div>
 
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => toggleEndOfDay(todo.id)}
+            className={cn(
+              "size-7 hover:bg-transparent",
+              todo.endOfDay
+                ? "text-white"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            style={todo.endOfDay ? { backgroundColor: "var(--accent-color)" } : undefined}
+            aria-label={todo.endOfDay ? "Unset end of day" : "Set end of day"}
+          >
+            <Moon className="size-3.5" />
+          </Button>
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -369,7 +386,7 @@ export function TodoItem({
       {showSubtasks && (
         <div className="ml-0">
           {todo.subtasks.map((subtask) => (
-            <div key={subtask.id} className="h-[48px] border-b border-border/60 flex items-center gap-2 px-0 pl-7 group/subtask transition-colors">
+            <div key={subtask.id} className="lemonade-subtask-row h-[48px] border-b border-border/60 flex items-center gap-2 px-0 pl-7 group/subtask transition-colors">
               <button
                 onClick={() => toggleSubtask(todo.id, subtask.id)}
                 className={cn(
@@ -384,7 +401,7 @@ export function TodoItem({
                 )}
               </button>
               <span className={cn(
-                "flex-1 font-task font-normal text-[14px] leading-[16.3338px] text-[#000000] dark:text-foreground",
+                "lemonade-task-text flex-1 font-task font-normal text-[14px] leading-[16.3338px] text-[#000000] dark:text-foreground",
                 subtask.completed && "line-through opacity-50"
               )}>
                 {subtask.text}
@@ -398,7 +415,7 @@ export function TodoItem({
               </button>
             </div>
           ))}
-          <div className="h-[48px] border-b border-border/60 flex items-center gap-2 px-0 pl-7">
+          <div className="lemonade-subtask-row h-[48px] border-b border-border/60 flex items-center gap-2 px-0 pl-7">
             <Plus className="size-3 text-muted-foreground" />
             <input
               type="text"
@@ -406,7 +423,7 @@ export function TodoItem({
               onChange={(e) => setNewSubtaskText(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleAddSubtask()}
               placeholder="Add subtask..."
-              className="bg-transparent outline-none flex-1 font-task font-normal text-[14px] leading-[1.15] text-[#000000] dark:text-foreground"
+              className="lemonade-task-text bg-transparent outline-none flex-1 font-task font-normal text-[14px] leading-[1.15] text-[#000000] dark:text-foreground"
             />
           </div>
         </div>

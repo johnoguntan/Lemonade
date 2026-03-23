@@ -103,16 +103,20 @@ export function PreferencesPanel() {
           <div className="mb-6 flex items-center justify-between">
             <label className="text-sm font-normal text-gray-300">Text size</label>
             <div className="flex bg-[#2a2a2a] rounded p-0.5">
-              {(['S', 'M', 'L'] as const).map((size) => (
+              {([
+                { label: 'S', value: 'sm' as const },
+                { label: 'M', value: 'md' as const },
+                { label: 'L', value: 'lg' as const },
+              ]).map(({ label, value }) => (
                 <button
-                  key={size}
-                  onClick={() => setPreferences({ textSize: size })}
+                  key={value}
+                  onClick={() => setPreferences({ textSize: value })}
                   className={cn(
                     "px-3 py-1 text-xs rounded transition-colors",
-                    preferences.textSize === size ? "bg-white text-black" : "text-gray-400 hover:text-white"
+                    preferences.textSize === value ? "bg-white text-black" : "text-gray-400 hover:text-white"
                   )}
                 >
-                  {size}
+                  {label}
                 </button>
               ))}
             </div>
@@ -122,16 +126,20 @@ export function PreferencesPanel() {
           <div className="mb-6 flex items-center justify-between">
             <label className="text-sm font-normal text-gray-300">Spacing</label>
             <div className="flex bg-[#2a2a2a] rounded p-0.5">
-              {(['S', 'M', 'L'] as const).map((size) => (
+              {([
+                { label: 'S', value: 'compact' as const },
+                { label: 'M', value: 'normal' as const },
+                { label: 'L', value: 'comfortable' as const },
+              ]).map(({ label, value }) => (
                 <button
-                  key={size}
-                  onClick={() => setPreferences({ spacing: size })}
+                  key={value}
+                  onClick={() => setPreferences({ spacing: value })}
                   className={cn(
                     "px-3 py-1 text-xs rounded transition-colors",
-                    preferences.spacing === size ? "bg-white text-black" : "text-gray-400 hover:text-white"
+                    preferences.spacing === value ? "bg-white text-black" : "text-gray-400 hover:text-white"
                   )}
                 >
-                  {size}
+                  {label}
                 </button>
               ))}
             </div>
@@ -211,32 +219,7 @@ export function PreferencesPanel() {
             </div>
           </div>
 
-          {/* 8. Lines */}
-          <div className="mb-6 flex items-center justify-between">
-            <label className="text-sm font-normal text-gray-300">Lines</label>
-            <div className="flex bg-[#2a2a2a] rounded p-0.5 gap-0.5">
-              <button
-                onClick={() => setPreferences({ showLines: true })}
-                className={cn(
-                  "p-1.5 rounded transition-colors",
-                  preferences.showLines ? "bg-white text-black" : "text-gray-400 hover:text-white"
-                )}
-              >
-                <Eye className="size-4" />
-              </button>
-              <button
-                onClick={() => setPreferences({ showLines: false })}
-                className={cn(
-                  "p-1.5 rounded transition-colors",
-                  !preferences.showLines ? "bg-white text-black" : "text-gray-400 hover:text-white"
-                )}
-              >
-                <EyeOff className="size-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* 9. Display */}
+          {/* 8. Display */}
           <div className="mb-6 flex items-center justify-between">
             <label className="text-sm font-normal text-gray-300">Display</label>
             <div className="flex bg-[#2a2a2a] rounded p-0.5 gap-0.5">

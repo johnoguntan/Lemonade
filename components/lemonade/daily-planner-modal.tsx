@@ -1,8 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { formatLocalDateKey, useLemonadeStore, type Todo } from "@/lib/store"
-import { cn } from "@/lib/utils"
+import { formatLocalDateKey, useLemonadeStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ArrowRight, Trash2, MoveRight, CheckCircle2 } from "lucide-react"

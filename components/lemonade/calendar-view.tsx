@@ -36,14 +36,8 @@ export function CalendarView({ startDate, onNavigate }: CalendarViewProps) {
   const dates = getDateArray(startDate, preferences.columns)
 
   return (
-    <div className={cn(
-      "group/calendar-nav relative flex flex-1 px-10 pt-6 dark:bg-[#131313]",
-      preferences.showDotGridBackground && "journal-dot-grid-dark-only"
-    )}>
-      <div className={cn(
-        "pointer-events-none absolute left-0 top-24 z-10 flex flex-col overflow-hidden rounded-r-md border border-border bg-[#f7f8fa] opacity-0 transition-opacity duration-200 group-hover/calendar-nav:opacity-100 dark:bg-[#131313]",
-        preferences.showDotGridBackground && "journal-dot-grid-dark-only"
-      )}>
+    <div className="group/calendar-nav relative flex flex-1 px-10 pt-6">
+      <div className="pointer-events-none absolute left-0 top-24 z-10 flex flex-col overflow-hidden rounded-r-md border border-border bg-[rgba(247,248,250,0.95)] opacity-0 transition-opacity duration-200 group-hover/calendar-nav:opacity-100 dark:bg-[rgba(19,19,19,0.9)]">
         <Button
           variant="ghost"
           size="icon"
@@ -72,10 +66,7 @@ export function CalendarView({ startDate, onNavigate }: CalendarViewProps) {
         ))}
       </div>
       
-      <div className={cn(
-        "pointer-events-none absolute right-0 top-24 z-10 flex flex-col overflow-hidden rounded-l-md border border-border bg-[#f7f8fa] opacity-0 transition-opacity duration-200 group-hover/calendar-nav:opacity-100 dark:bg-[#131313]",
-        preferences.showDotGridBackground && "journal-dot-grid-dark-only"
-      )}>
+      <div className="pointer-events-none absolute right-0 top-24 z-10 flex flex-col overflow-hidden rounded-l-md border border-border bg-[rgba(247,248,250,0.95)] opacity-0 transition-opacity duration-200 group-hover/calendar-nav:opacity-100 dark:bg-[rgba(19,19,19,0.9)]">
         <Button
           variant="ghost"
           size="icon"
