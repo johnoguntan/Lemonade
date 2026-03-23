@@ -97,7 +97,9 @@ interface LemonadeStore {
   
   // Calendar todos
   calendarTodos: Todo[]
-  addCalendarTodo: (todo: Omit<Todo, 'id' | 'subtasks' | 'endOfDay' | 'createdAt'> & { endOfDay?: boolean; createdAt?: number }) => void
+  lastCreatedTodoId: string | null
+  addCalendarTodo: (todo: Omit<Todo, 'id' | 'subtasks' | 'endOfDay' | 'createdAt'> & { endOfDay?: boolean; createdAt?: number }) => string
+  clearLastCreatedTodoId: () => void
   updateCalendarTodo: (id: string, updates: Partial<Todo>) => void
   deleteCalendarTodo: (id: string) => void
   toggleCalendarTodo: (id: string) => void
@@ -567,19 +569,24 @@ export const useLemonadeStore = create<LemonadeStore>()(
       
       // Calendar todos
       calendarTodos: [],
+      lastCreatedTodoId: null,
       
       addCalendarTodo: (todo) => {
+        const id = generateId()
         set((state) => ({
           calendarTodos: [...state.calendarTodos, {
             ...todo,
-            id: generateId(),
+            id,
             createdAt: todo.createdAt ?? Date.now(),
             endOfDay: todo.endOfDay ?? false,
             subtasks: [],
-          }]
+          }],
+          lastCreatedTodoId: id,
         }))
         get().generateRecurringInstances()
+        return id
       },
+      clearLastCreatedTodoId: () => set({ lastCreatedTodoId: null }),
       
       updateCalendarTodo: (id, updates) => {
         set((state) => {

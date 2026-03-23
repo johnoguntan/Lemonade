@@ -61,6 +61,7 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
   const {
     preferences,
     calendarTodos,
+    lastCreatedTodoId,
     addCalendarTodo,
     ensureTagIds,
     moveTodoToDate,
@@ -92,9 +93,18 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
 
   useEffect(() => {
     if (isAdding && inputRef.current) {
-      inputRef.current.focus()
+      requestAnimationFrame(() => {
+        inputRef.current?.focus()
+      })
     }
   }, [isAdding])
+
+  const handleStartAdding = () => {
+    setIsAdding(true)
+    requestAnimationFrame(() => {
+      inputRef.current?.focus()
+    })
+  }
 
   const getResponsiveFontSizes = () => {
     return { date: 'text-[10px]' }
@@ -102,7 +112,7 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
 
   const { date: dateFontSize } = getResponsiveFontSizes()
   const visibleLineCount = isCalendarExpanded ? 18 : 9
-  const totalSlots = Math.max(visibleLineCount, todosForDay.length + (isAdding ? 1 : 0))
+  const fillerRowCount = Math.max(visibleLineCount - todosForDay.length - 1, 0)
   const parsedInput = parseNaturalLanguageTaskInput(newTodoText, { tags })
 
   const handleTodoDragStart = (event: DragEvent<HTMLDivElement>, todoId: string) => {
@@ -133,15 +143,17 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
 
     if (!parsed.cleanText) {
       setNewTodoText("")
-      return false
+      return null
     }
 
     const isHeading = parsed.cleanText === parsed.cleanText.toUpperCase() && parsed.cleanText.length > 2
 
+    const targetDate = parsed.scheduledDate ?? dateStr
+
     addCalendarTodo({
       text: parsed.cleanText,
       completed: false,
-      date: parsed.scheduledDate ?? dateStr,
+      date: targetDate,
       isHeading,
       isRecurring: parsed.recurrence?.isRecurring,
       recurringFrequency: parsed.recurrence?.recurringFrequency,
@@ -151,8 +163,14 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
       time: parsed.time,
     })
 
+    const nextTaskId = addCalendarTodo({
+      text: "",
+      completed: false,
+      date: targetDate,
+    })
+
     setNewTodoText("")
-    return true
+    return nextTaskId
   }
 
   return (
@@ -189,82 +207,80 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
           onDrop={handleColumnDrop}
         >
           <div className="flex flex-col">
-            {Array.from({ length: totalSlots }).map((_, index) => {
-              const todo = todosForDay[index]
-              if (todo) {
-                return (
-                  <TodoItem
-                    key={todo.id}
-                    todo={todo}
-                    textSizeClass={textSizeClass}
-                    draggable
-                    onDragStart={(event) => handleTodoDragStart(event, todo.id)}
-                    onDragEnd={() => setIsDragOver(false)}
-                  />
-                )
-              }
+            {todosForDay.map((todo) => (
+              <TodoItem
+                key={todo.id}
+                todo={todo}
+                autoFocus={todo.id === lastCreatedTodoId}
+                textSizeClass={textSizeClass}
+                draggable
+                onDragStart={(event) => handleTodoDragStart(event, todo.id)}
+                onDragEnd={() => setIsDragOver(false)}
+              />
+            ))}
 
-              const isInputRow = isAdding && index === todosForDay.length
-
-              return (
-                <div
-                  key={`${dateStr}-line-${index}`}
-                  className="lemonade-task-row flex h-[42px] items-center border-b border-border/60 px-0 transition-colors cursor-text hover:bg-accent/20"
-                  onClick={() => setIsAdding(true)}
-                >
-                  {isInputRow ? (
-                    <div className="w-full py-2">
-                      <div className="relative">
-                        <input
-                          ref={inputRef}
-                          type="text"
-                          value={newTodoText}
-                          onChange={(e) => setNewTodoText(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              handleCreateNaturalLanguageTodo()
-                              setIsAdding(false)
-                            } else if (e.key === "Escape") {
-                              setIsAdding(false)
-                              setNewTodoText("")
-                            }
-                          }}
-                          onBlur={() => {
-                            handleCreateNaturalLanguageTodo()
+            <div
+              className="lemonade-task-row flex h-[42px] items-center border-b border-border/60 px-0 transition-colors cursor-text hover:bg-accent/20"
+              onClick={handleStartAdding}
+            >
+              {isAdding ? (
+                <div className="w-full py-2">
+                  <div className="relative">
+                    <input
+                      ref={inputRef}
+                      type="text"
+                      value={newTodoText}
+                      onChange={(e) => setNewTodoText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          const nextTaskId = handleCreateNaturalLanguageTodo()
+                          if (nextTaskId) {
                             setIsAdding(false)
-                          }}
-                          className={cn(
-                            "w-full bg-transparent px-0 pr-7 outline-none font-task",
-                            textSizeClass
-                          )}
-                          placeholder="Add a todo..."
-                        />
-                        {newTodoText.trim() ? (
-                          <button
-                            type="button"
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => {
-                              const created = handleCreateNaturalLanguageTodo()
-
-                              if (created) {
-                                requestAnimationFrame(() => {
-                                  inputRef.current?.focus()
-                                })
-                              }
-                            }}
-                            className="absolute right-0 top-1/2 inline-flex -translate-y-1/2 items-center justify-center text-[var(--accent-color)] opacity-75 transition-opacity hover:opacity-100"
-                            aria-label="Confirm task"
-                          >
-                            <Check className="size-4" strokeWidth={2.5} />
-                          </button>
-                        ) : null}
-                      </div>
-                      <TokenPreviewBar tokens={parsedInput.previewTokens} />
-                    </div>
-                  ) : null}
+                          }
+                        } else if (e.key === "Escape") {
+                          setIsAdding(false)
+                          setNewTodoText("")
+                        }
+                      }}
+                      onBlur={() => {
+                        handleCreateNaturalLanguageTodo()
+                        setIsAdding(false)
+                      }}
+                      className={cn(
+                        "w-full bg-transparent px-0 pr-7 outline-none font-task",
+                        textSizeClass
+                      )}
+                      placeholder="Add a todo..."
+                    />
+                    {newTodoText.trim() ? (
+                      <button
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => {
+                          const nextTaskId = handleCreateNaturalLanguageTodo()
+                          if (nextTaskId) {
+                            setIsAdding(false)
+                          }
+                        }}
+                        className="absolute right-0 top-1/2 inline-flex -translate-y-1/2 items-center justify-center text-[var(--accent-color)] opacity-75 transition-opacity hover:opacity-100"
+                        aria-label="Confirm task"
+                      >
+                        <Check className="size-4" strokeWidth={2.5} />
+                      </button>
+                    ) : null}
+                  </div>
+                  <TokenPreviewBar tokens={parsedInput.previewTokens} />
                 </div>
-              )
-            })}
+              ) : null}
+            </div>
+
+            {Array.from({ length: fillerRowCount }).map((_, index) => (
+              <div
+                key={`${dateStr}-line-${index}`}
+                className="lemonade-task-row flex h-[42px] items-center border-b border-border/60 px-0 transition-colors cursor-text hover:bg-accent/20"
+                onClick={handleStartAdding}
+              />
+            ))}
           </div>
         </div>
       </div>

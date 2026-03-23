@@ -56,7 +56,7 @@ export function CalendarView({ startDate, onNavigate }: CalendarViewProps) {
         </Button>
       </div>
       
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex flex-1 flex-col">
         {dates.map((date) => (
           <DayColumn
             key={`${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`}

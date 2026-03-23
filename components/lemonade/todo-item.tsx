@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import { useLemonadeStore, type Todo, type SubTask } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -21,6 +21,7 @@ import {
 
 interface TodoItemProps {
   todo: Todo
+  autoFocus?: boolean
   textSizeClass: string
   draggable?: boolean
   onDragStart?: (event: React.DragEvent<HTMLDivElement>) => void
@@ -29,6 +30,7 @@ interface TodoItemProps {
 
 export function TodoItem({
   todo,
+  autoFocus = false,
   textSizeClass,
   draggable = false,
   onDragStart,
@@ -36,6 +38,8 @@ export function TodoItem({
 }: TodoItemProps) {
   const { 
     preferences, 
+    addCalendarTodo,
+    clearLastCreatedTodoId,
     toggleCalendarTodo, 
     toggleEndOfDay,
     updateCalendarTodo, 
@@ -47,10 +51,11 @@ export function TodoItem({
   } = useLemonadeStore()
   const colorPalette = preferences.colorPalette ?? []
   
-  const [isEditing, setIsEditing] = useState(false)
+  const [isEditing, setIsEditing] = useState(autoFocus)
   const [editText, setEditText] = useState(todo.text)
   const [showSubtasks, setShowSubtasks] = useState(false)
   const [newSubtaskText, setNewSubtaskText] = useState("")
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const recurringValue = todo.isRecurring ? (todo.recurringFrequency || "daily") : "off"
 
@@ -68,10 +73,22 @@ export function TodoItem({
     none: null,
   }[todo.priority || 'none']
 
-  const handleSave = () => {
-    if (editText.trim()) {
-      const isHeading = editText === editText.toUpperCase() && editText.length > 2
-      updateCalendarTodo(todo.id, { text: editText.trim(), isHeading })
+  const handleSave = (createNextEmpty = false) => {
+    const trimmedText = editText.trim()
+
+    if (trimmedText) {
+      const isHeading = trimmedText === trimmedText.toUpperCase() && trimmedText.length > 2
+      const shouldCreateNextEmpty = createNextEmpty && todo.text.trim() === ""
+
+      updateCalendarTodo(todo.id, { text: trimmedText, isHeading })
+
+      if (shouldCreateNextEmpty) {
+        addCalendarTodo({
+          text: "",
+          completed: false,
+          date: todo.date,
+        })
+      }
     }
     setIsEditing(false)
   }
@@ -91,6 +108,19 @@ export function TodoItem({
     updateCalendarTodo(todo.id, { tags: newTags })
   }
 
+  useLayoutEffect(() => {
+    if (!autoFocus) {
+      return
+    }
+
+    setIsEditing(true)
+
+    requestAnimationFrame(() => {
+      inputRef.current?.focus()
+      clearLastCreatedTodoId()
+    })
+  }, [autoFocus, clearLastCreatedTodoId])
+
   if (todo.isHeading) {
     return (
         <div 
@@ -102,10 +132,11 @@ export function TodoItem({
       >
         {isEditing ? (
           <input
+            ref={inputRef}
             type="text"
             value={editText}
             onChange={(e) => setEditText(e.target.value)}
-            onBlur={handleSave}
+            onBlur={() => handleSave()}
             onKeyDown={(e) => e.key === 'Enter' && handleSave()}
             className="w-full bg-transparent outline-none"
             autoFocus
@@ -157,11 +188,17 @@ export function TodoItem({
             {priorityIndicator}
             {isEditing ? (
               <input
+                ref={inputRef}
                 type="text"
                 value={editText}
                 onChange={(e) => setEditText(e.target.value)}
-                onBlur={handleSave}
-                onKeyDown={(e) => e.key === 'Enter' && handleSave()}
+                onBlur={() => handleSave()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    handleSave(true)
+                  }
+                }}
                 className={cn(
                   "lemonade-task-text w-full bg-transparent outline-none font-task font-normal text-[14px] leading-[1.15] text-[#000000] dark:text-foreground",
                   todo.completed && "line-through opacity-40"
