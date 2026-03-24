@@ -1,10 +1,11 @@
 "use client"
 
-import { useLayoutEffect, useRef, useState } from "react"
-import { useLemonadeStore, type Todo, type SubTask } from "@/lib/store"
+import { useEffect, useRef, useState } from "react"
+import { useLemonadeStore, type Todo } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { ChevronDown, ChevronRight, RotateCcw, Plus, Minus, X, Moon } from "lucide-react"
+import { RotateCcw, Plus, Minus, X, Moon } from "lucide-react"
+import { toast } from "sonner"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,11 +19,22 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 interface TodoItemProps {
   todo: Todo
   autoFocus?: boolean
   textSizeClass: string
+  isDragging?: boolean
   draggable?: boolean
   onDragStart?: (event: React.DragEvent<HTMLDivElement>) => void
   onDragEnd?: (event: React.DragEvent<HTMLDivElement>) => void
@@ -32,18 +44,21 @@ export function TodoItem({
   todo,
   autoFocus = false,
   textSizeClass,
+  isDragging = false,
   draggable = false,
   onDragStart,
   onDragEnd,
 }: TodoItemProps) {
   const { 
     preferences, 
-    addCalendarTodo,
     clearLastCreatedTodoId,
+    clearLastDeleted,
     toggleCalendarTodo, 
     toggleEndOfDay,
     updateCalendarTodo, 
+    updateCalendarTodoInstance,
     deleteCalendarTodo,
+    restoreLastDeletedTodo,
     addSubtask,
     toggleSubtask,
     deleteSubtask,
@@ -55,6 +70,7 @@ export function TodoItem({
   const [editText, setEditText] = useState(todo.text)
   const [showSubtasks, setShowSubtasks] = useState(false)
   const [newSubtaskText, setNewSubtaskText] = useState("")
+  const [pendingRecurringUpdate, setPendingRecurringUpdate] = useState<Partial<Todo> | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const recurringValue = todo.isRecurring ? (todo.recurringFrequency || "daily") : "off"
@@ -73,22 +89,13 @@ export function TodoItem({
     none: null,
   }[todo.priority || 'none']
 
-  const handleSave = (createNextEmpty = false) => {
+  const handleSave = () => {
     const trimmedText = editText.trim()
 
     if (trimmedText) {
       const isHeading = trimmedText === trimmedText.toUpperCase() && trimmedText.length > 2
-      const shouldCreateNextEmpty = createNextEmpty && todo.text.trim() === ""
 
       updateCalendarTodo(todo.id, { text: trimmedText, isHeading })
-
-      if (shouldCreateNextEmpty) {
-        addCalendarTodo({
-          text: "",
-          completed: false,
-          date: todo.date,
-        })
-      }
     }
     setIsEditing(false)
   }
@@ -108,12 +115,39 @@ export function TodoItem({
     updateCalendarTodo(todo.id, { tags: newTags })
   }
 
-  useLayoutEffect(() => {
-    if (!autoFocus) {
+  const handleRecurringChange = (updates: Partial<Todo>) => {
+    if (!todo.parentId) {
+      updateCalendarTodo(todo.id, updates)
+      toast("Series updated", { duration: 2000 })
       return
     }
 
-    setIsEditing(true)
+    setPendingRecurringUpdate(updates)
+  }
+
+  const handleDelete = () => {
+    deleteCalendarTodo(todo.id)
+    const deleteToken = useLemonadeStore.getState().lastDeleted?.token
+
+    toast("Task deleted", {
+      duration: 5000,
+      action: {
+        label: "Undo",
+        onClick: () => restoreLastDeletedTodo(),
+      },
+    })
+
+    if (deleteToken) {
+      window.setTimeout(() => {
+        clearLastDeleted(deleteToken)
+      }, 5000)
+    }
+  }
+
+  useEffect(() => {
+    if (!autoFocus) {
+      return
+    }
 
     requestAnimationFrame(() => {
       inputRef.current?.focus()
@@ -125,7 +159,7 @@ export function TodoItem({
     return (
         <div 
           className={cn(
-          "lemonade-heading-row font-bold uppercase tracking-wide h-[40px] border-b border-border/50 flex items-center px-2",
+          "lemonade-heading-row font-bold uppercase tracking-wide h-[40px] flex items-center px-2",
           textSizeClass
         )}
         style={{ backgroundColor: todo.color }}
@@ -152,14 +186,14 @@ export function TodoItem({
 
   return (
     <div
-      className="group relative"
+      className={cn("group relative transition-opacity", isDragging && "opacity-40")}
       draggable={draggable}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
     >
         <div 
         className={cn(
-          "lemonade-task-row flex items-center h-[42px] border-b border-border/60 px-0 transition-colors",
+          "lemonade-task-row flex items-center h-[42px] px-0 transition-colors",
           todo.completed && "bg-transparent"
         )}
         style={{ backgroundColor: todo.color }}
@@ -196,7 +230,7 @@ export function TodoItem({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault()
-                    handleSave(true)
+                    handleSave()
                   }
                 }}
                 className={cn(
@@ -283,7 +317,7 @@ export function TodoItem({
                   <DropdownMenuRadioGroup value={recurringValue}>
                     <DropdownMenuRadioItem
                       value="off"
-                      onSelect={() => updateCalendarTodo(todo.id, {
+                      onSelect={() => handleRecurringChange({
                         isRecurring: false,
                         recurringFrequency: undefined,
                         recurringDays: undefined,
@@ -293,7 +327,7 @@ export function TodoItem({
                     </DropdownMenuRadioItem>
                     <DropdownMenuRadioItem
                       value="daily"
-                      onSelect={() => updateCalendarTodo(todo.id, {
+                      onSelect={() => handleRecurringChange({
                         isRecurring: true,
                         recurringFrequency: "daily",
                         recurringDays: undefined,
@@ -303,7 +337,7 @@ export function TodoItem({
                     </DropdownMenuRadioItem>
                     <DropdownMenuRadioItem
                       value="weekday"
-                      onSelect={() => updateCalendarTodo(todo.id, {
+                      onSelect={() => handleRecurringChange({
                         isRecurring: true,
                         recurringFrequency: "weekday",
                         recurringDays: undefined,
@@ -313,7 +347,7 @@ export function TodoItem({
                     </DropdownMenuRadioItem>
                     <DropdownMenuRadioItem
                       value="weekly"
-                      onSelect={() => updateCalendarTodo(todo.id, {
+                      onSelect={() => handleRecurringChange({
                         isRecurring: true,
                         recurringFrequency: "weekly",
                         recurringDays: undefined,
@@ -323,7 +357,7 @@ export function TodoItem({
                     </DropdownMenuRadioItem>
                     <DropdownMenuRadioItem
                       value="monthly"
-                      onSelect={() => updateCalendarTodo(todo.id, {
+                      onSelect={() => handleRecurringChange({
                         isRecurring: true,
                         recurringFrequency: "monthly",
                         recurringDays: undefined,
@@ -410,7 +444,7 @@ export function TodoItem({
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => deleteCalendarTodo(todo.id)}
+            onClick={handleDelete}
             className="size-7 text-muted-foreground hover:text-destructive hover:bg-transparent group/delete"
           >
             <Minus className="size-4 group-hover/delete:hidden" />
@@ -423,7 +457,7 @@ export function TodoItem({
       {showSubtasks && (
         <div className="ml-0">
           {todo.subtasks.map((subtask) => (
-            <div key={subtask.id} className="lemonade-subtask-row h-[48px] border-b border-border/60 flex items-center gap-2 px-0 pl-7 group/subtask transition-colors">
+            <div key={subtask.id} className="lemonade-subtask-row h-[48px] flex items-center gap-2 px-0 pl-7 group/subtask transition-colors">
               <button
                 onClick={() => toggleSubtask(todo.id, subtask.id)}
                 className={cn(
@@ -452,7 +486,7 @@ export function TodoItem({
               </button>
             </div>
           ))}
-          <div className="lemonade-subtask-row h-[48px] border-b border-border/60 flex items-center gap-2 px-0 pl-7">
+          <div className="lemonade-subtask-row h-[48px] flex items-center gap-2 px-0 pl-7">
             <Plus className="size-3 text-muted-foreground" />
             <input
               type="text"
@@ -465,6 +499,48 @@ export function TodoItem({
           </div>
         </div>
       )}
+
+      <AlertDialog
+        open={pendingRecurringUpdate !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingRecurringUpdate(null)
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Edit recurring task</AlertDialogTitle>
+            <AlertDialogDescription>
+              Do you want to change this task only, or this and all future tasks?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingRecurringUpdate(null)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!pendingRecurringUpdate) return
+                updateCalendarTodoInstance(todo.id, pendingRecurringUpdate)
+                setPendingRecurringUpdate(null)
+              }}
+            >
+              This task only
+            </AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => {
+                if (!pendingRecurringUpdate) return
+                updateCalendarTodo(todo.id, pendingRecurringUpdate)
+                toast("Series updated", { duration: 2000 })
+                setPendingRecurringUpdate(null)
+              }}
+            >
+              All future tasks
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

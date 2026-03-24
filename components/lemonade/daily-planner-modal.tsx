@@ -1,15 +1,17 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useSyncExternalStore } from "react"
 import { formatLocalDateKey, useLemonadeStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ArrowRight, Trash2, MoveRight, CheckCircle2 } from "lucide-react"
+import { toast } from "sonner"
 
 export function DailyPlannerModal() {
-  const { calendarTodos, moveTodoToDate, deleteCalendarTodo, addCalendarTodo } = useLemonadeStore()
-  const [isOpen, setIsOpen] = useState(false)
+  const { calendarTodos, moveTodoToDate, deleteCalendarTodo, addCalendarTodo, restoreLastDeletedTodo, clearLastDeleted } = useLemonadeStore()
   const [priorities, setPriorities] = useState(["", "", ""])
+  const [keptTodoIds, setKeptTodoIds] = useState<string[]>([])
+  const [dismissedDate, setDismissedDate] = useState<string | null>(null)
   
   const today = new Date()
   const todayStr = formatLocalDateKey(today)
@@ -17,20 +19,33 @@ export function DailyPlannerModal() {
   yesterday.setDate(yesterday.getDate() - 1)
   const yesterdayStr = formatLocalDateKey(yesterday)
 
-  useEffect(() => {
-    const lastPlannerDate = localStorage.getItem('lemonade-last-planner')
-    if (lastPlannerDate !== todayStr) {
-      setIsOpen(true)
-    }
-  }, [todayStr])
+  const shouldOpenToday = useSyncExternalStore(
+    () => () => {},
+    () => localStorage.getItem('lemonade-last-planner') !== todayStr,
+    () => false
+  )
+
+  const isOpen = shouldOpenToday && dismissedDate !== todayStr
 
   const yesterdayUnfinished = calendarTodos.filter(
-    todo => todo.date === yesterdayStr && !todo.completed && !todo.isHeading && !todo.parentId
+    todo =>
+      todo.date === yesterdayStr &&
+      !todo.completed &&
+      !todo.isHeading &&
+      !todo.parentId &&
+      !keptTodoIds.includes(todo.id)
   )
 
   const todaySchedule = calendarTodos.filter(
     todo => todo.date === todayStr && !todo.isHeading
   )
+
+  const greeting = (() => {
+    const hour = today.getHours()
+    if (hour < 12) return "Good Morning ☀️"
+    if (hour <= 17) return "Good Afternoon 👋"
+    return "Good Evening 🌙"
+  })()
 
   const handleStartDay = () => {
     priorities.forEach(text => {
@@ -45,7 +60,36 @@ export function DailyPlannerModal() {
     })
     
     localStorage.setItem('lemonade-last-planner', todayStr)
-    setIsOpen(false)
+    setDismissedDate(todayStr)
+  }
+
+  const handleSkipForToday = () => {
+    localStorage.setItem('lemonade-last-planner', todayStr)
+    setDismissedDate(todayStr)
+  }
+
+  const handleDeleteTodo = (todoId: string) => {
+    deleteCalendarTodo(todoId)
+    const deleteToken = useLemonadeStore.getState().lastDeleted?.token
+
+    toast("Task deleted", {
+      duration: 5000,
+      action: {
+        label: "Undo",
+        onClick: () => restoreLastDeletedTodo(),
+      },
+    })
+
+    if (deleteToken) {
+      window.setTimeout(() => {
+        clearLastDeleted(deleteToken)
+      }, 5000)
+    }
+  }
+
+  const handleMoveToToday = (todoId: string) => {
+    moveTodoToDate(todoId, todayStr)
+    toast("Task moved", { duration: 2000 })
   }
 
   if (!isOpen) return null
@@ -55,7 +99,7 @@ export function DailyPlannerModal() {
       <div className="w-full max-w-2xl bg-background border border-border shadow-2xl rounded-2xl flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="p-8 border-b border-border/50 text-center">
-          <h1 className="text-4xl font-bold mb-2">Good Morning ☀️</h1>
+          <h1 className="text-4xl font-bold mb-2">{greeting}</h1>
           <p className="text-muted-foreground uppercase tracking-widest text-sm font-medium">
             {today.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
           </p>
@@ -66,7 +110,7 @@ export function DailyPlannerModal() {
           <section>
             <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-4 flex items-center gap-2">
               <span className="w-8 h-px bg-border"></span>
-              Yesterday's Unfinished
+              {"Yesterday's Unfinished"}
             </h2>
             <div className="space-y-2">
               {yesterdayUnfinished.length > 0 ? (
@@ -74,25 +118,33 @@ export function DailyPlannerModal() {
                   <div key={todo.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg group">
                     <span className="text-sm">{todo.text}</span>
                     <div className="flex items-center gap-2">
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="h-8 text-[10px] uppercase font-bold hover:bg-[var(--accent-color)] hover:text-white"
-                        onClick={() => moveTodoToDate(todo.id, todayStr)}
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="h-8 text-[10px] uppercase font-bold hover:bg-[var(--accent-color)] hover:text-white"
+                      onClick={() => handleMoveToToday(todo.id)}
                       >
                         <MoveRight className="size-3 mr-1" /> Move to Today
                       </Button>
                       <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="h-8 text-[10px] uppercase font-bold hover:bg-destructive hover:text-white"
-                        onClick={() => deleteCalendarTodo(todo.id)}
-                      >
-                        <Trash2 className="size-3 mr-1" /> Delete
-                      </Button>
-                    </div>
+                      variant="ghost" 
+                      size="sm" 
+                      className="h-8 text-[10px] uppercase font-bold hover:bg-destructive hover:text-white"
+                      onClick={() => handleDeleteTodo(todo.id)}
+                    >
+                      <Trash2 className="size-3 mr-1" /> Delete
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-[10px] uppercase font-bold hover:bg-muted hover:text-foreground"
+                      onClick={() => setKeptTodoIds((current) => [...current, todo.id])}
+                    >
+                      Keep
+                    </Button>
                   </div>
-                ))
+                </div>
+              ))
               ) : (
                 <div className="text-center py-4 text-sm text-muted-foreground font-medium">
                   You crushed yesterday 🎉
@@ -105,7 +157,7 @@ export function DailyPlannerModal() {
           <section>
             <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-4 flex items-center gap-2">
               <span className="w-8 h-px bg-border"></span>
-              Today's Schedule
+              {"Today's Schedule"}
             </h2>
             <div className="space-y-1">
               {todaySchedule.length > 0 ? (
@@ -157,6 +209,13 @@ export function DailyPlannerModal() {
           >
             Start My Day <ArrowRight className="ml-2 size-5" />
           </Button>
+          <button
+            type="button"
+            onClick={handleSkipForToday}
+            className="mt-4 w-full text-center text-sm text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Skip for today
+          </button>
         </div>
       </div>
     </div>

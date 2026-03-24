@@ -18,6 +18,38 @@ interface HeaderProps {
   onNavigate: (direction: 'prev-week' | 'next-week' | 'prev-day' | 'next-day' | 'today') => void
 }
 
+const addDays = (date: Date, amount: number) => {
+  const nextDate = new Date(date)
+  nextDate.setDate(nextDate.getDate() + amount)
+  return nextDate
+}
+
+const getDateArray = (startDate: Date, count: number): Date[] =>
+  Array.from({ length: count }, (_, index) => addDays(startDate, index))
+
+const startOfWeek = (date: Date) => {
+  const nextDate = new Date(date)
+  nextDate.setDate(nextDate.getDate() - nextDate.getDay())
+  return nextDate
+}
+
+const getVisibleDateKeys = (startDate: Date, weekCount: number, columnCount: 1 | 3 | 5 | 7) => {
+  const weeks: Date[][] = [getDateArray(startDate, 7)]
+
+  if (weekCount > 1) {
+    const weekTwoStart = startOfWeek(addDays(startDate, 7))
+
+    for (let weekIndex = 1; weekIndex < weekCount; weekIndex++) {
+      const weekStart = addDays(weekTwoStart, (weekIndex - 1) * 7)
+      weeks.push(getDateArray(weekStart, 7))
+    }
+  }
+
+  return weeks
+    .flatMap((week) => week.slice(0, columnCount))
+    .map((date) => formatLocalDateKey(date))
+}
+
 export function Header({ onNavigate }: HeaderProps) {
   const {
     searchQuery,
@@ -32,6 +64,7 @@ export function Header({ onNavigate }: HeaderProps) {
     setPreferences,
     selectedCalendarDate,
     setSelectedCalendarDate,
+    weekCount,
   } = useLemonadeStore()
   const [showSearch, setShowSearch] = useState(false)
   const [showQuickAdd, setShowQuickAdd] = useState(false)
@@ -45,11 +78,7 @@ export function Header({ onNavigate }: HeaderProps) {
   const parsedQuickAdd = parseNaturalLanguageTaskInput(quickAddText, { tags })
   const palette = preferences.colorPalette ?? []
 
-  const visibleDates = Array.from({ length: preferences.columns }, (_, index) => {
-    const date = new Date(currentDate)
-    date.setDate(currentDate.getDate() + index)
-    return formatLocalDateKey(date)
-  })
+  const visibleDates = getVisibleDateKeys(currentDate, weekCount, preferences.columns)
 
   const visibleTodos = calendarTodos.filter((todo) => visibleDates.includes(todo.date))
   const colorUsage = visibleTodos.reduce<Record<string, number>>((usage, todo) => {
@@ -75,13 +104,8 @@ export function Header({ onNavigate }: HeaderProps) {
   }
 
   const isTodayVisible = () => {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    
-    const startDate = new Date(currentDate)
-    startDate.setHours(0, 0, 0, 0)
-    
-    return today.getTime() === startDate.getTime()
+    const todayKey = formatLocalDateKey(new Date())
+    return visibleDates.includes(todayKey)
   }
 
   useEffect(() => {
@@ -103,10 +127,6 @@ export function Header({ onNavigate }: HeaderProps) {
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [])
-
-  useEffect(() => {
-    setPickerMonth(currentDate)
-  }, [selectedCalendarDate])
 
   const handleQuickAddSubmit = () => {
     const parsed = parseNaturalLanguageTaskInput(quickAddText, { tags })
@@ -139,7 +159,7 @@ export function Header({ onNavigate }: HeaderProps) {
 
   return (
     <header
-      className="flex items-center justify-between border-t-2 bg-background px-4 py-3 dark:bg-[#131313]"
+      className="lemonade-header flex items-center justify-between border-t-2 bg-background px-4 py-3 dark:bg-[#131313]"
       style={{ borderTopColor: "var(--accent-color)" }}
     >
       <div className="flex flex-1 items-center gap-2">

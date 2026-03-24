@@ -1,9 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import { useLemonadeStore } from "@/lib/store"
+import { formatLocalDateKey, parseLocalDateKey, useLemonadeStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
-import { CircleHelp, Moon, RefreshCw, SlidersHorizontal, Sun, User } from "lucide-react"
+import { CircleHelp, Minus, Moon, RefreshCw, SlidersHorizontal, Sun, User, ChevronLeft, ChevronRight, Plus } from "lucide-react"
 import { useTheme } from "next-themes"
 import Link from "next/link"
 import {
@@ -13,10 +13,25 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 
-export function Footer() {
-  const { preferences, setPreferences, sidebarOpen, setSidebarOpen } = useLemonadeStore()
+interface FooterProps {
+  onNavigate?: (direction: 'prev-week' | 'next-week' | 'prev-day' | 'next-day' | 'today') => void
+}
+
+export function Footer({ onNavigate }: FooterProps) {
+  const {
+    preferences,
+    setPreferences,
+    sidebarOpen,
+    setSidebarOpen,
+    weekCount,
+    incrementWeekCount,
+    decrementWeekCount,
+    selectedCalendarDate,
+    setSelectedCalendarDate,
+  } = useLemonadeStore()
   const { setTheme } = useTheme()
   const [showHelp, setShowHelp] = useState(false)
+  const currentStartDate = parseLocalDateKey(selectedCalendarDate)
 
   const handleThemeToggle = () => {
     const newTheme = preferences.theme === 'light' ? 'dark' : 'light'
@@ -24,8 +39,38 @@ export function Footer() {
     setTheme(newTheme)
   }
 
+  const handleNavigate = (direction: 'prev-week' | 'next-week' | 'prev-day' | 'next-day' | 'today') => {
+    if (onNavigate) {
+      onNavigate(direction)
+      return
+    }
+
+    const newDate = new Date(currentStartDate)
+    const dynamicWeekStep = weekCount * 7
+
+    switch (direction) {
+      case 'prev-week':
+        newDate.setDate(newDate.getDate() - dynamicWeekStep)
+        break
+      case 'next-week':
+        newDate.setDate(newDate.getDate() + dynamicWeekStep)
+        break
+      case 'prev-day':
+        newDate.setDate(newDate.getDate() - 1)
+        break
+      case 'next-day':
+        newDate.setDate(newDate.getDate() + 1)
+        break
+      case 'today':
+        setSelectedCalendarDate(formatLocalDateKey(new Date()))
+        return
+    }
+
+    setSelectedCalendarDate(formatLocalDateKey(newDate))
+  }
+
   return (
-    <footer className="sticky bottom-0 z-30 mt-auto flex h-12 items-center border-t border-border bg-background/95 px-4 backdrop-blur-sm transition-all duration-300">
+    <footer className="lemonade-footer sticky bottom-0 z-30 mt-auto flex h-12 items-center border-t border-border bg-background/95 px-4 backdrop-blur-sm transition-all duration-300">
       <div className="flex min-w-0 flex-1 items-center justify-start gap-1">
         <Button
           variant="ghost"
@@ -48,6 +93,47 @@ export function Footer() {
       </div>
 
       <div className="flex min-w-0 flex-1 items-center justify-center gap-2 text-muted-foreground">
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => handleNavigate('prev-week')}
+            className="size-8 text-muted-foreground hover:text-foreground"
+            title="Previous range"
+          >
+            <ChevronLeft className="size-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={decrementWeekCount}
+            className="size-8 text-muted-foreground hover:text-foreground"
+            title="Show fewer weeks"
+          >
+            <Minus className="size-4" />
+          </Button>
+          <span className="min-w-8 text-center text-[12px] font-semibold text-foreground">
+            {weekCount}
+          </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={incrementWeekCount}
+            className="size-8 text-muted-foreground hover:text-foreground"
+            title="Show more weeks"
+          >
+            <Plus className="size-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => handleNavigate('next-week')}
+            className="size-8 text-muted-foreground hover:text-foreground"
+            title="Next range"
+          >
+            <ChevronRight className="size-4" />
+          </Button>
+        </div>
         <div className="flex items-center gap-1">
           {[1, 3, 5, 7].map((num, index) => (
             <div key={num} className="flex items-center gap-1">
@@ -75,7 +161,7 @@ export function Footer() {
       </div>
 
       <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
-        <div className="rounded-md bg-[#2c2c2c] px-4 py-2 text-[12px] font-semibold uppercase tracking-[0.04em] text-white">
+        <div className="lemonade-footer-badge rounded-md bg-[#2c2c2c] px-4 py-2 text-[12px] font-semibold uppercase tracking-[0.04em] text-white">
           Free Trial 5 Days Left
         </div>
         <Button

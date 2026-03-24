@@ -219,8 +219,8 @@ export function ListsSection() {
           >
             <button
               onClick={() => setActiveTabId(tab.id)}
-              className={cn(
-                "relative mx-1 my-0.5 flex items-center gap-2 px-3 py-1.5 font-meta text-[10px] leading-[10px] uppercase tracking-[0.08em] transition-colors",
+            className={cn(
+              "lemonade-tab-label relative mx-1 my-0.5 flex items-center gap-2 px-3 py-1.5 font-meta text-[10px] leading-[10px] uppercase tracking-[0.08em] transition-colors",
                 activeTabId === tab.id
                   ? "text-foreground dark:bg-[#131313] dark:text-foreground"
                   : "text-[#a7a9ac] hover:rounded-2xl hover:bg-[#F2F3F5] hover:text-[#a7a9ac] dark:hover:bg-[#131315] dark:hover:text-foreground"
@@ -424,7 +424,7 @@ function ListCard({
       onDragOver={onDragOver}
       onDrop={onDrop}
       className={cn(
-        "group relative flex min-h-[500px] w-[33.333%] min-w-[320px] shrink-0 flex-col self-stretch bg-[rgba(247,248,250,0.95)] px-10 py-5 transition-all dark:bg-transparent",
+        "lemonade-list-card group relative flex min-h-[500px] w-[33.333%] min-w-[320px] shrink-0 flex-col self-stretch bg-[rgba(247,248,250,0.95)] px-10 py-5 transition-all dark:bg-transparent",
         isDragging && "opacity-45",
         "hover:bg-[rgba(247,248,250,0.95)] dark:hover:bg-transparent"
       )}
@@ -542,13 +542,13 @@ function ListCard({
                 onChange={(e) => setEditName(e.target.value)}
                 onBlur={handleSaveName}
                 onKeyDown={(e) => e.key === 'Enter' && handleSaveName()}
-                className="font-heading text-[20px] leading-[20px] bg-transparent outline-none border-b border-foreground uppercase"
+                className="lemonade-list-title font-heading text-[20px] leading-[20px] bg-transparent outline-none border-b border-foreground uppercase"
                 autoFocus
               />
             ) : (
               <h3 
                 onClick={() => setIsEditingName(true)}
-                className="font-heading text-[20px] leading-[20px] uppercase cursor-text hover:opacity-70"
+                className="lemonade-list-title font-heading text-[20px] leading-[20px] uppercase cursor-text hover:opacity-70"
               >
                 {list.name}
               </h3>
@@ -604,7 +604,7 @@ function ListCard({
                   onChange={(e) => onNewTodoTextChange(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && onAddTodo()}
                   placeholder={list.todos.length === 0 && index === 0 ? "Add item..." : ""}
-                  className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                  className="lemonade-list-item-text w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
                 />
               ) : null}
             </div>

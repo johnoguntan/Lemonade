@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect, type DragEvent } from "react"
+import { useState, useRef, useEffect, useMemo, type DragEvent } from "react"
 import {
   formatLocalDateKey,
   useLemonadeStore,
@@ -12,6 +12,7 @@ import {
 import { cn } from "@/lib/utils"
 import { TodoItem } from "./todo-item"
 import { Check } from "lucide-react"
+import { toast } from "sonner"
 
 interface DayColumnProps {
   date: Date
@@ -58,36 +59,42 @@ const sortEndOfDayTodos = (todos: Todo[]) => {
 }
 
 export function DayColumn({ date, isToday }: DayColumnProps) {
-  const {
-    preferences,
-    calendarTodos,
-    lastCreatedTodoId,
-    addCalendarTodo,
-    ensureTagIds,
-    moveTodoToDate,
-    searchQuery,
-    isCalendarExpanded,
-    tagFilterId,
-    activeFilterColor,
-    tags,
-  } = useLemonadeStore()
+  const preferences = useLemonadeStore((state) => state.preferences)
+  const calendarTodos = useLemonadeStore((state) => state.calendarTodos)
+  const lastCreatedTodoId = useLemonadeStore((state) => state.lastCreatedTodoId)
+  const addCalendarTodo = useLemonadeStore((state) => state.addCalendarTodo)
+  const clearLastCreatedTodoId = useLemonadeStore((state) => state.clearLastCreatedTodoId)
+  const ensureTagIds = useLemonadeStore((state) => state.ensureTagIds)
+  const moveTodoToDate = useLemonadeStore((state) => state.moveTodoToDate)
+  const searchQuery = useLemonadeStore((state) => state.searchQuery)
+  const isCalendarExpanded = useLemonadeStore((state) => state.isCalendarExpanded)
+  const tagFilterId = useLemonadeStore((state) => state.tagFilterId)
+  const activeFilterColor = useLemonadeStore((state) => state.activeFilterColor)
+  const tags = useLemonadeStore((state) => state.tags)
   const [newTodoText, setNewTodoText] = useState("")
   const [isAdding, setIsAdding] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [draggedTodoId, setDraggedTodoId] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const dateStr = getDateString(date)
   const { month, day, year, dayName } = formatDate(date)
   const holiday = holidays[dateStr]
 
-  const todosForDay = sortEndOfDayTodos(calendarTodos.filter((todo) => {
-    if (todo.date !== dateStr) return false
-    if (!preferences.showCompleted && todo.completed) return false
-    if (searchQuery && !todo.text.toLowerCase().includes(searchQuery.toLowerCase())) return false
-    if (tagFilterId && !todo.tags?.includes(tagFilterId)) return false
-    if (activeFilterColor && todo.color !== activeFilterColor) return false
-    return true
-  }))
+  const todosForDay: Todo[] = useMemo(
+    () =>
+      sortEndOfDayTodos(
+        calendarTodos.filter((todo) => {
+          if (todo.date !== dateStr) return false
+          if (!preferences.showCompleted && todo.completed) return false
+          if (searchQuery && !todo.text.toLowerCase().includes(searchQuery.toLowerCase())) return false
+          if (tagFilterId && !todo.tags?.includes(tagFilterId)) return false
+          if (activeFilterColor && todo.color !== activeFilterColor) return false
+          return true
+        })
+      ),
+    [activeFilterColor, calendarTodos, dateStr, preferences.showCompleted, searchQuery, tagFilterId]
+  )
 
   const textSizeClass = "lemonade-task-text"
 
@@ -118,6 +125,7 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
   const handleTodoDragStart = (event: DragEvent<HTMLDivElement>, todoId: string) => {
     event.dataTransfer.setData("text/plain", todoId)
     event.dataTransfer.effectAllowed = "move"
+    setDraggedTodoId(todoId)
   }
 
   const handleColumnDragOver = (event: DragEvent<HTMLDivElement>) => {
@@ -132,9 +140,11 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
 
     if (todoId) {
       moveTodoToDate(todoId, dateStr)
+      toast("Task moved", { duration: 2000 })
     }
 
     setIsDragOver(false)
+    setDraggedTodoId(null)
   }
 
   const handleCreateNaturalLanguageTodo = () => {
@@ -143,7 +153,7 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
 
     if (!parsed.cleanText) {
       setNewTodoText("")
-      return null
+      return false
     }
 
     const isHeading = parsed.cleanText === parsed.cleanText.toUpperCase() && parsed.cleanText.length > 2
@@ -163,28 +173,23 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
       time: parsed.time,
     })
 
-    const nextTaskId = addCalendarTodo({
-      text: "",
-      completed: false,
-      date: targetDate,
-    })
-
     setNewTodoText("")
-    return nextTaskId
+    clearLastCreatedTodoId()
+    return true
   }
 
   return (
-    <div className="w-full border-b border-border/60">
-      <div className="grid w-full grid-cols-[220px_minmax(0,1fr)] gap-0">
-        <div className="px-4 pb-3 pt-3">
+    <div className="w-full">
+      <div className="grid w-full grid-cols-[minmax(108px,132px)_minmax(0,1fr)] gap-x-3 xl:grid-cols-[160px_minmax(0,1fr)] 2xl:grid-cols-[220px_minmax(0,1fr)]">
+        <div className="lemonade-day-header pl-4 pr-1 pb-3 pt-3">
           <div
-            className={cn("font-semibold tracking-[0.08em]", dateFontSize)}
+            className={cn("lemonade-day-date font-semibold tracking-[0.08em]", dateFontSize)}
             style={{ color: "#A4A4A4" }}
           >
             {month} {day}, {year}
           </div>
           <div className={cn(
-            "font-heading uppercase text-[20px] leading-[20px]",
+            "lemonade-day-label font-heading uppercase text-[20px] leading-[20px]",
             isToday ? "text-[var(--accent-color)]" : "text-foreground"
           )}>
             {dayName}
@@ -199,7 +204,7 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
         <div
           className={cn(
             "flex flex-col transition-colors",
-            isDragOver && "bg-accent/10"
+            isDragOver && "rounded-md border border-dashed border-border bg-accent/50"
           )}
           onDragOver={handleColumnDragOver}
           onDragEnter={handleColumnDragOver}
@@ -213,14 +218,18 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
                 todo={todo}
                 autoFocus={todo.id === lastCreatedTodoId}
                 textSizeClass={textSizeClass}
+                isDragging={todo.id === draggedTodoId}
                 draggable
                 onDragStart={(event) => handleTodoDragStart(event, todo.id)}
-                onDragEnd={() => setIsDragOver(false)}
+                onDragEnd={() => {
+                  setIsDragOver(false)
+                  setDraggedTodoId(null)
+                }}
               />
             ))}
 
             <div
-              className="lemonade-task-row flex h-[42px] items-center border-b border-border/60 px-0 transition-colors cursor-text hover:bg-accent/20"
+              className="lemonade-task-row flex h-[42px] items-center px-0 transition-colors cursor-text hover:bg-accent/20"
               onClick={handleStartAdding}
             >
               {isAdding ? (
@@ -233,9 +242,12 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
                       onChange={(e) => setNewTodoText(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
-                          const nextTaskId = handleCreateNaturalLanguageTodo()
-                          if (nextTaskId) {
-                            setIsAdding(false)
+                          e.preventDefault()
+                          const created = handleCreateNaturalLanguageTodo()
+                          if (created) {
+                            requestAnimationFrame(() => {
+                              inputRef.current?.focus()
+                            })
                           }
                         } else if (e.key === "Escape") {
                           setIsAdding(false)
@@ -257,9 +269,11 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
                         type="button"
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => {
-                          const nextTaskId = handleCreateNaturalLanguageTodo()
-                          if (nextTaskId) {
-                            setIsAdding(false)
+                          const created = handleCreateNaturalLanguageTodo()
+                          if (created) {
+                            requestAnimationFrame(() => {
+                              inputRef.current?.focus()
+                            })
                           }
                         }}
                         className="absolute right-0 top-1/2 inline-flex -translate-y-1/2 items-center justify-center text-[var(--accent-color)] opacity-75 transition-opacity hover:opacity-100"
@@ -277,7 +291,7 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
             {Array.from({ length: fillerRowCount }).map((_, index) => (
               <div
                 key={`${dateStr}-line-${index}`}
-                className="lemonade-task-row flex h-[42px] items-center border-b border-border/60 px-0 transition-colors cursor-text hover:bg-accent/20"
+                className="lemonade-task-row flex h-[42px] items-center px-0 transition-colors cursor-text hover:bg-accent/20"
                 onClick={handleStartAdding}
               />
             ))}

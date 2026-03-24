@@ -11,14 +11,36 @@ interface CalendarViewProps {
   onNavigate: (direction: 'prev-week' | 'next-week' | 'prev-day' | 'next-day') => void
 }
 
-const getDateArray = (startDate: Date, count: number): Date[] => {
-  const dates: Date[] = []
-  for (let i = 0; i < count; i++) {
-    const date = new Date(startDate)
-    date.setDate(startDate.getDate() + i)
-    dates.push(date)
+const addDays = (date: Date, amount: number) => {
+  const nextDate = new Date(date)
+  nextDate.setDate(nextDate.getDate() + amount)
+  return nextDate
+}
+
+const getDateArray = (startDate: Date, count: number): Date[] =>
+  Array.from({ length: count }, (_, index) => addDays(startDate, index))
+
+const startOfWeek = (date: Date) => {
+  const nextDate = new Date(date)
+  nextDate.setDate(nextDate.getDate() - nextDate.getDay())
+  return nextDate
+}
+
+const getWeekGroups = (startDate: Date, weekCount: number): Date[][] => {
+  const weeks: Date[][] = [getDateArray(startDate, 7)]
+
+  if (weekCount === 1) {
+    return weeks
   }
-  return dates
+
+  const weekTwoStart = startOfWeek(addDays(startDate, 7))
+
+  for (let weekIndex = 1; weekIndex < weekCount; weekIndex++) {
+    const weekStart = addDays(weekTwoStart, (weekIndex - 1) * 7)
+    weeks.push(getDateArray(weekStart, 7))
+  }
+
+  return weeks
 }
 
 const isSameDay = (date1: Date, date2: Date): boolean => {
@@ -30,10 +52,18 @@ const isSameDay = (date1: Date, date2: Date): boolean => {
 }
 
 export function CalendarView({ startDate, onNavigate }: CalendarViewProps) {
-  const { preferences } = useLemonadeStore()
+  const { weekCount, preferences } = useLemonadeStore()
   const today = new Date()
   
-  const dates = getDateArray(startDate, preferences.columns)
+  const weeks = getWeekGroups(startDate, weekCount).map((week) =>
+    week.slice(0, preferences.columns)
+  )
+  const weekGridClass = {
+    1: "md:grid-cols-1",
+    2: "md:grid-cols-2",
+    3: "md:grid-cols-3",
+    4: "md:grid-cols-4",
+  }[weekCount]
 
   return (
     <div className="group/calendar-nav relative flex flex-1 px-10 pt-6">
@@ -56,13 +86,17 @@ export function CalendarView({ startDate, onNavigate }: CalendarViewProps) {
         </Button>
       </div>
       
-      <div className="flex flex-1 flex-col">
-        {dates.map((date) => (
-          <DayColumn
-            key={`${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`}
-            date={date}
-            isToday={isSameDay(date, today)}
-          />
+      <div className={cn("grid flex-1 grid-cols-1 gap-4 lg:gap-5", weekGridClass)}>
+        {weeks.map((week, weekIndex) => (
+          <div key={`week-${weekIndex}`} className="min-w-0 flex flex-col">
+            {week.map((date) => (
+              <DayColumn
+                key={`${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`}
+                date={date}
+                isToday={isSameDay(date, today)}
+              />
+            ))}
+          </div>
         ))}
       </div>
       

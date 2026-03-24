@@ -1,12 +1,11 @@
 "use client"
 
-import { useLemonadeStore, type ThemeColor, type BulletStyle } from "@/lib/store"
-import { Button } from "@/components/ui/button"
+import { useLemonadeStore, type BulletStyle } from "@/lib/store"
 import { Switch } from "@/components/ui/switch"
 import { Sun, Moon, Eye, EyeOff, Circle, Minus, ArrowRight, Ban, ChevronsLeft, Plus, Pencil, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTheme } from "next-themes"
-import { useState, useRef } from "react"
+import { useState } from "react"
 import { Input } from "@/components/ui/input"
 import {
   Popover,
@@ -57,10 +56,10 @@ export function PreferencesPanel() {
 
   return (
     <div className={cn(
-      "fixed inset-y-0 left-0 w-72 bg-[#1a1a1a] text-white z-50 flex flex-col transition-transform duration-300 ease-in-out shadow-2xl",
+      "lemonade-sidebar fixed inset-y-0 left-0 w-72 bg-[#1a1a1a] text-white z-50 flex flex-col transition-transform duration-300 ease-in-out shadow-2xl",
       sidebarOpen ? "translate-x-0" : "-translate-x-full"
     )}>
-      <div className="p-6 flex-1 overflow-y-auto">
+      <div className="lemonade-sidebar-content p-6 flex-1 overflow-y-auto">
           <h2 className="text-base font-normal text-gray-400 mb-8 mt-2">Preferences</h2>
 
           {/* 1. Accent color */}
@@ -80,9 +79,9 @@ export function PreferencesPanel() {
             </div>
           </div>
 
-          {/* 2. Columns */}
+          {/* 2. Days in view */}
           <div className="mb-6 flex items-center justify-between">
-            <label className="text-sm font-normal text-gray-300">Columns</label>
+            <label className="text-sm font-normal text-gray-300">Days in view</label>
             <div className="flex bg-[#2a2a2a] rounded p-0.5">
               {([1, 3, 5, 7] as const).map((num) => (
                 <button
@@ -147,7 +146,7 @@ export function PreferencesPanel() {
 
           {/* 5. Completed todos */}
           <div className="mb-6 flex items-center justify-between">
-            <label className="text-sm font-normal text-gray-300">Completed todo's</label>
+            <label className="text-sm font-normal text-gray-300">Completed todos</label>
             <div className="flex bg-[#2a2a2a] rounded p-0.5 gap-0.5">
               <button
                 onClick={() => setPreferences({ showCompleted: true })}
