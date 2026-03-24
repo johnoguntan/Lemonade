@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { ThemeProvider } from '@/components/theme-provider'
 import { AccentColorSync } from '@/components/accent-color-sync'
+import { Toaster } from '@/components/ui/sonner'
 import './globals.css'
 
 const inter = Inter({ 
@@ -59,6 +60,7 @@ export default function RootLayout({
         >
           <AccentColorSync />
           {children}
+          <Toaster richColors closeButton />
         </ThemeProvider>
         <Analytics />
       </body>

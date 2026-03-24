@@ -181,3 +181,90 @@
 ::selection {
   background-color: oklch(0.85 0.18 95 / 0.3);
 }
+
+.lemonade-app-root {
+  --app-text-size: 14px;
+  --app-ui-text-size: 12px;
+  --app-heading-size: 20px;
+  --app-heading-line-height: 20px;
+  --app-date-size: 10px;
+  --app-tab-size: 10px;
+  --app-task-row-height: 42px;
+  --app-heading-row-height: 40px;
+  --app-subtask-row-height: 48px;
+  --app-control-gap: 0.5rem;
+  --app-card-padding-y: 1.25rem;
+  --app-card-padding-x: 2.5rem;
+  --app-tab-padding-x: 0.75rem;
+  --app-tab-padding-y: 0.375rem;
+  --app-sidebar-padding: 1.5rem;
+  --app-footer-height: 48px;
+  font-size: var(--app-ui-text-size);
+}
+
+.lemonade-app-root .lemonade-task-text,
+.lemonade-app-root .lemonade-list-item-text {
+  font-size: var(--app-text-size) !important;
+}
+
+.lemonade-app-root .lemonade-task-row {
+  height: var(--app-task-row-height) !important;
+  min-height: var(--app-task-row-height) !important;
+}
+
+.lemonade-app-root .lemonade-heading-row {
+  height: var(--app-heading-row-height) !important;
+  min-height: var(--app-heading-row-height) !important;
+}
+
+.lemonade-app-root .lemonade-subtask-row {
+  height: var(--app-subtask-row-height) !important;
+  min-height: var(--app-subtask-row-height) !important;
+}
+
+.lemonade-app-root .lemonade-day-date {
+  font-size: var(--app-date-size) !important;
+}
+
+.lemonade-app-root .lemonade-day-label,
+.lemonade-app-root .lemonade-list-title {
+  font-size: var(--app-heading-size) !important;
+  line-height: var(--app-heading-line-height) !important;
+}
+
+.lemonade-app-root .lemonade-tab-label {
+  font-size: var(--app-tab-size) !important;
+  line-height: var(--app-tab-size) !important;
+  padding: var(--app-tab-padding-y) var(--app-tab-padding-x) !important;
+}
+
+.lemonade-app-root .lemonade-header,
+.lemonade-app-root .lemonade-footer,
+.lemonade-app-root .lemonade-sidebar {
+  font-size: var(--app-ui-text-size) !important;
+}
+
+.lemonade-app-root .lemonade-header button,
+.lemonade-app-root .lemonade-header input,
+.lemonade-app-root .lemonade-header span,
+.lemonade-app-root .lemonade-footer button,
+.lemonade-app-root .lemonade-footer a,
+.lemonade-app-root .lemonade-footer div,
+.lemonade-app-root .lemonade-sidebar button,
+.lemonade-app-root .lemonade-sidebar label,
+.lemonade-app-root .lemonade-sidebar input,
+.lemonade-app-root .lemonade-sidebar h2 {
+  font-size: var(--app-ui-text-size) !important;
+}
+
+.lemonade-app-root .lemonade-sidebar-content {
+  padding: var(--app-sidebar-padding);
+}
+
+.lemonade-app-root .lemonade-footer {
+  min-height: var(--app-footer-height);
+}
+
+.lemonade-app-root .lemonade-list-card {
+  padding: var(--app-card-padding-y) var(--app-card-padding-x) !important;
+}

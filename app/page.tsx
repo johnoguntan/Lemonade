@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useSyncExternalStore, type CSSProperties } from "react"
 import { parseLocalDateKey, formatLocalDateKey, useLemonadeStore } from "@/lib/store"
 import { Header } from "@/components/lemonade/header"
 import { PreferencesPanel } from "@/components/lemonade/preferences-panel"
@@ -8,27 +8,74 @@ import { CalendarView } from "@/components/lemonade/calendar-view"
 import { ListsSection } from "@/components/lemonade/lists-section"
 import { Footer } from "@/components/lemonade/footer"
 import { DailyPlannerModal } from "@/components/lemonade/daily-planner-modal"
+import { ErrorBoundary } from "@/components/error-boundary"
 import { cn } from "@/lib/utils"
 
-const textSizeMap = {
-  sm: "[&_.lemonade-task-text]:text-sm",
-  md: "[&_.lemonade-task-text]:text-base",
-  lg: "[&_.lemonade-task-text]:text-lg",
+const textSizeVars = {
+  sm: {
+    "--app-text-size": "12px",
+    "--app-ui-text-size": "11px",
+    "--app-heading-size": "17px",
+    "--app-heading-line-height": "17px",
+    "--app-date-size": "9px",
+    "--app-tab-size": "9px",
+  },
+  md: {
+    "--app-text-size": "14px",
+    "--app-ui-text-size": "12px",
+    "--app-heading-size": "20px",
+    "--app-heading-line-height": "20px",
+    "--app-date-size": "10px",
+    "--app-tab-size": "10px",
+  },
+  lg: {
+    "--app-text-size": "18px",
+    "--app-ui-text-size": "14px",
+    "--app-heading-size": "24px",
+    "--app-heading-line-height": "24px",
+    "--app-date-size": "12px",
+    "--app-tab-size": "12px",
+  },
 } as const
 
-const spacingMap = {
-  compact: "[&_.lemonade-task-row]:h-[36px] [&_.lemonade-heading-row]:h-[36px] [&_.lemonade-subtask-row]:h-[40px]",
-  normal: "[&_.lemonade-task-row]:h-[42px] [&_.lemonade-heading-row]:h-[40px] [&_.lemonade-subtask-row]:h-[48px]",
-  comfortable: "[&_.lemonade-task-row]:h-[48px] [&_.lemonade-heading-row]:h-[44px] [&_.lemonade-subtask-row]:h-[56px]",
+const spacingVars = {
+  compact: {
+    "--app-task-row-height": "36px",
+    "--app-heading-row-height": "36px",
+    "--app-subtask-row-height": "40px",
+    "--app-control-gap": "0.375rem",
+    "--app-card-padding-y": "1rem",
+    "--app-card-padding-x": "2rem",
+    "--app-tab-padding-x": "0.625rem",
+    "--app-tab-padding-y": "0.25rem",
+    "--app-sidebar-padding": "1.25rem",
+    "--app-footer-height": "44px",
+  },
+  normal: {
+    "--app-task-row-height": "42px",
+    "--app-heading-row-height": "40px",
+    "--app-subtask-row-height": "48px",
+    "--app-control-gap": "0.5rem",
+    "--app-card-padding-y": "1.25rem",
+    "--app-card-padding-x": "2.5rem",
+    "--app-tab-padding-x": "0.75rem",
+    "--app-tab-padding-y": "0.375rem",
+    "--app-sidebar-padding": "1.5rem",
+    "--app-footer-height": "48px",
+  },
+  comfortable: {
+    "--app-task-row-height": "48px",
+    "--app-heading-row-height": "44px",
+    "--app-subtask-row-height": "56px",
+    "--app-control-gap": "0.625rem",
+    "--app-card-padding-y": "1.5rem",
+    "--app-card-padding-x": "3rem",
+    "--app-tab-padding-x": "0.875rem",
+    "--app-tab-padding-y": "0.5rem",
+    "--app-sidebar-padding": "1.75rem",
+    "--app-footer-height": "52px",
+  },
 } as const
-
-function getStartDate(startOnYesterday: boolean): Date {
-  const today = new Date()
-  if (startOnYesterday) {
-    today.setDate(today.getDate() - 1)
-  }
-  return today
-}
 
 export default function Home() {
   const {
@@ -38,24 +85,33 @@ export default function Home() {
     generateRecurringInstances,
     selectedCalendarDate,
     setSelectedCalendarDate,
+    weekCount,
   } = useLemonadeStore()
   const startDate = parseLocalDateKey(selectedCalendarDate)
-  const [mounted, setMounted] = useState(false)
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false
+  )
+  const appPreferenceVars = {
+    ...textSizeVars[preferences.textSize],
+    ...spacingVars[preferences.spacing],
+  } as CSSProperties
 
   useEffect(() => {
-    setMounted(true)
     autoRollover()
     generateRecurringInstances()
   }, [autoRollover, generateRecurringInstances])
 
   const handleNavigate = (direction: 'prev-week' | 'next-week' | 'prev-day' | 'next-day' | 'today') => {
     const newDate = new Date(startDate)
+    const dynamicWeekStep = weekCount * 7
     switch (direction) {
       case 'prev-week':
-        newDate.setDate(newDate.getDate() - 7)
+        newDate.setDate(newDate.getDate() - dynamicWeekStep)
         break
       case 'next-week':
-        newDate.setDate(newDate.getDate() + 7)
+        newDate.setDate(newDate.getDate() + dynamicWeekStep)
         break
       case 'prev-day':
         newDate.setDate(newDate.getDate() - 1)
@@ -90,27 +146,32 @@ export default function Home() {
         backgroundRepeat: "repeat",
       }}
     >
-      <PreferencesPanel />
-      <DailyPlannerModal />
+      <ErrorBoundary>
+        <PreferencesPanel />
+      </ErrorBoundary>
+      <ErrorBoundary>
+        <DailyPlannerModal />
+      </ErrorBoundary>
       
       <div className={cn(
-        "relative min-h-screen transition-all duration-300",
-        textSizeMap[preferences.textSize],
-        spacingMap[preferences.spacing],
+        "lemonade-app-root relative min-h-screen transition-all duration-300",
         sidebarOpen && "ml-72"
-      )}>
+      )}
+      style={appPreferenceVars}>
         <Header onNavigate={handleNavigate} />
         
         <main className="flex flex-col">
-          <CalendarView 
-            startDate={startDate} 
-            onNavigate={handleNavigate}
-          />
+          <ErrorBoundary>
+            <CalendarView 
+              startDate={startDate} 
+              onNavigate={handleNavigate}
+            />
+          </ErrorBoundary>
         </main>
 
         <ListsSection />
         
-        <Footer />
+        <Footer onNavigate={handleNavigate} />
       </div>
     </div>
   )

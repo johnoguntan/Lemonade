@@ -1,5 +1,6 @@
 "use client"
 
+import { addDays, addMonths } from 'date-fns'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
@@ -35,7 +36,7 @@ export interface Todo {
   isRecurring?: boolean
   recurringFrequency?: 'daily' | 'weekday' | 'weekly' | 'monthly'
   recurringDays?: number[] // 0-6 for Sunday-Saturday
-  parentId?: string // For recurring instances
+  parentId?: string | null // For recurring instances
   priority?: 'high' | 'medium' | 'low' | 'none'
   tags?: string[] // Array of tag IDs
 }
@@ -88,7 +89,10 @@ export interface ParsedNaturalLanguageTask {
   previewTokens: NaturalLanguagePreviewToken[]
 }
 
-
+interface DeletedTodoBuffer {
+  items: Todo[]
+  token: string
+}
 
 interface LemonadeStore {
   // Preferences
@@ -98,9 +102,13 @@ interface LemonadeStore {
   // Calendar todos
   calendarTodos: Todo[]
   lastCreatedTodoId: string | null
+  lastDeleted: DeletedTodoBuffer | null
   addCalendarTodo: (todo: Omit<Todo, 'id' | 'subtasks' | 'endOfDay' | 'createdAt'> & { endOfDay?: boolean; createdAt?: number }) => string
   clearLastCreatedTodoId: () => void
+  clearLastDeleted: (token?: string) => void
+  restoreLastDeletedTodo: () => void
   updateCalendarTodo: (id: string, updates: Partial<Todo>) => void
+  updateCalendarTodoInstance: (id: string, updates: Partial<Todo>) => void
   deleteCalendarTodo: (id: string) => void
   toggleCalendarTodo: (id: string) => void
   toggleEndOfDay: (id: string) => void
@@ -150,6 +158,9 @@ interface LemonadeStore {
   // Calendar selection
   selectedCalendarDate: string
   setSelectedCalendarDate: (date: string) => void
+  weekCount: number
+  incrementWeekCount: () => void
+  decrementWeekCount: () => void
 
     // Calendar expansion
     isCalendarExpanded: boolean
@@ -162,13 +173,119 @@ interface LemonadeStore {
     autoRollover: () => void
 }
 
+type PersistedLemonadeStore = Partial<
+  Pick<
+    LemonadeStore,
+    | 'preferences'
+    | 'calendarTodos'
+    | 'listTabs'
+    | 'lists'
+    | 'tags'
+    | 'searchQuery'
+    | 'tagFilterId'
+    | 'sidebarOpen'
+    | 'weekCount'
+    | 'isCalendarExpanded'
+  >
+>
+
 const generateId = () => Math.random().toString(36).substring(2, 15)
+
+// Persisted storage version history:
+// 0: legacy persisted state before explicit versioning/migrations
+// 1: normalized persisted preferences, todos, lists, weekCount, and calendar expansion
+//
+// When you add or rename persisted fields:
+// 1. bump STORAGE_VERSION
+// 2. add the migration branch in `migrate`
+// 3. keep `normalizePersistedState` backward-safe for older payloads
+export const STORAGE_VERSION = 1
+export const LEMONADE_STORAGE_KEY = "lemonade-storage"
 
 const normalizeTodo = (todo: Todo, fallbackCreatedAt: number): Todo => ({
   ...todo,
   createdAt: typeof todo.createdAt === "number" ? todo.createdAt : fallbackCreatedAt,
   endOfDay: typeof todo.endOfDay === "boolean" ? todo.endOfDay : false,
+  subtasks: Array.isArray(todo.subtasks) ? todo.subtasks : [],
 })
+
+const normalizeLegacyTodo = (todo: Todo, fallbackCreatedAt: number): Todo => ({
+  ...normalizeTodo(todo, fallbackCreatedAt),
+  parentId: todo.parentId ?? null,
+  subtasks: Array.isArray(todo.subtasks) ? todo.subtasks : [],
+})
+
+const normalizePersistedPreferences = (
+  preferences: Partial<UserPreferences> | undefined,
+  fallbackPreferences: UserPreferences
+): UserPreferences => ({
+  ...fallbackPreferences,
+  ...preferences,
+  textSize: normalizeTextSizePreference(preferences?.textSize),
+  spacing: normalizeSpacingPreference(preferences?.spacing),
+  colorPalette: preferences?.colorPalette ?? fallbackPreferences.colorPalette,
+  showDotGridBackground: preferences?.showDotGridBackground ?? fallbackPreferences.showDotGridBackground,
+})
+
+const clampWeekCount = (value: unknown, fallback: number) =>
+  typeof value === "number" ? Math.min(4, Math.max(1, value)) : fallback
+
+export const migratePersistedLemonadeState = (
+  persistedState: unknown,
+  fallbackState?: LemonadeStore
+): PersistedLemonadeStore => {
+  const persisted = (persistedState && typeof persistedState === "object"
+    ? persistedState
+    : {}) as PersistedLemonadeStore
+
+  const fallbackPreferences = fallbackState?.preferences ?? {
+    columns: 5,
+    textSize: "md",
+    spacing: "normal",
+    showCompleted: true,
+    bulletStyle: "none",
+    startOnYesterday: false,
+    theme: "light",
+    accentColor: "#852CE6",
+    showCelebrations: false,
+    colorPalette: DEFAULT_COLOR_PALETTE,
+    showDotGridBackground: true,
+  }
+
+  const isLegacyVersion = typeof fallbackState === "undefined"
+
+  return {
+    ...persisted,
+    preferences: normalizePersistedPreferences(persisted.preferences, fallbackPreferences),
+    calendarTodos: Array.isArray(persisted.calendarTodos)
+      ? persisted.calendarTodos.map((todo, index) =>
+          isLegacyVersion ? normalizeLegacyTodo(todo, index) : normalizeTodo(todo, index)
+        )
+      : [],
+    listTabs: Array.isArray(persisted.listTabs) ? persisted.listTabs : [],
+    lists: Array.isArray(persisted.lists)
+      ? persisted.lists.map((list, listIndex) => ({
+          ...list,
+          todos: Array.isArray(list.todos)
+            ? list.todos.map((todo, todoIndex) =>
+                isLegacyVersion
+                  ? normalizeLegacyTodo(todo, listIndex * 1000 + todoIndex)
+                  : normalizeTodo(todo, listIndex * 1000 + todoIndex)
+              )
+            : [],
+        }))
+      : [],
+    tags: Array.isArray(persisted.tags) ? persisted.tags : [],
+    searchQuery: typeof persisted.searchQuery === "string" ? persisted.searchQuery : "",
+    tagFilterId: typeof persisted.tagFilterId === "string" ? persisted.tagFilterId : null,
+    sidebarOpen: typeof persisted.sidebarOpen === "boolean" ? persisted.sidebarOpen : false,
+    weekCount: clampWeekCount(persisted.weekCount, fallbackState?.weekCount ?? 2),
+    isCalendarExpanded:
+      typeof persisted.isCalendarExpanded === "boolean"
+        ? persisted.isCalendarExpanded
+        : fallbackState?.isCalendarExpanded ?? false,
+  }
+}
 
 const DEFAULT_COLOR_PALETTE = [
   '#fef08a',
@@ -207,12 +324,22 @@ const monthLookup: Record<string, number> = {
 
 const weekdayLookup: Record<string, number> = {
   sunday: 0,
+  sun: 0,
   monday: 1,
+  mon: 1,
   tuesday: 2,
+  tue: 2,
+  tues: 2,
   wednesday: 3,
+  wed: 3,
   thursday: 4,
+  thu: 4,
+  thur: 4,
+  thurs: 4,
   friday: 5,
+  fri: 5,
   saturday: 6,
+  sat: 6,
 }
 
 type TokenRange = {
@@ -280,6 +407,17 @@ const normalizeTagName = (value: string) => value.trim().toLowerCase()
 const normalizeTimeValue = (raw: string) =>
   raw.replace(/\s+/g, '').toLowerCase()
 
+const DATE_TIME_STOP_WORDS = new Set([
+  "at",
+  "on",
+  "for",
+  "by",
+  "in",
+  "due",
+  "from",
+  "until",
+])
+
 const buildUpcomingWeekday = (weekday: number, referenceDate: Date) => {
   const reference = startOfDay(referenceDate)
   const next = new Date(reference)
@@ -304,7 +442,52 @@ const hasOverlap = (ranges: TokenRange[], start: number, end: number) =>
   ranges.some((range) => start < range.end && end > range.start)
 
 const stripTokenRanges = (input: string, ranges: TokenRange[]) => {
-  const sorted = [...ranges].sort((left, right) => left.start - right.start)
+  const expandedRanges = ranges.map((range) => {
+    if (range.type !== "date" && range.type !== "time" && range.type !== "recurrence") {
+      return range
+    }
+
+    let start = range.start
+    let end = range.end
+
+    let cursor = start
+    while (cursor > 0 && /\s/.test(input[cursor - 1])) {
+      cursor -= 1
+    }
+
+    const wordEnd = cursor
+    while (cursor > 0 && /[a-z]/i.test(input[cursor - 1])) {
+      cursor -= 1
+    }
+
+    const previousWord = input.slice(cursor, wordEnd).toLowerCase()
+    if (previousWord && DATE_TIME_STOP_WORDS.has(previousWord)) {
+      start = cursor
+    }
+
+    cursor = end
+    while (cursor < input.length && /\s/.test(input[cursor])) {
+      cursor += 1
+    }
+
+    const nextWordStart = cursor
+    while (cursor < input.length && /[a-z]/i.test(input[cursor])) {
+      cursor += 1
+    }
+
+    const nextWord = input.slice(nextWordStart, cursor).toLowerCase()
+    if (nextWord && DATE_TIME_STOP_WORDS.has(nextWord)) {
+      end = cursor
+    }
+
+    return {
+      ...range,
+      start,
+      end,
+    }
+  })
+
+  const sorted = [...expandedRanges].sort((left, right) => left.start - right.start)
   let cursor = 0
   let output = ""
 
@@ -363,12 +546,50 @@ export function parseNaturalLanguageTaskInput(
     }
   }
 
+  const registerTime = (match: RegExpExecArray, value: string, label: string) => {
+    const preview = { key: `time-${match.index}`, label: `🕒 ${label}` }
+    if (pushRange({ start: match.index!, end: match.index! + match[0].length, type: "time", preview, payload: value })) {
+      if (match.index! >= timeIndex) {
+        timeSelection = value
+        timePreview = preview
+        timeIndex = match.index!
+      }
+    }
+  }
+
+  const setTimeFromOverlappingToken = (match: RegExpExecArray, value: string, label: string) => {
+    if (match.index! >= timeIndex) {
+      timeSelection = value
+      timePreview = { key: `time-${match.index}`, label: `🕒 ${label}` }
+      timeIndex = match.index!
+    }
+  }
+
+  const formatRecurringDaysLabel = (days: number[]) =>
+    days
+      .map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day])
+      .join("/")
+
+  for (const match of input.matchAll(/\bday after tomorrow\b/gi)) {
+    registerDate(match as RegExpExecArray, addDays(referenceDate, 2), "Day After Tomorrow")
+  }
+
+  for (const match of input.matchAll(/\btonight\b/gi)) {
+    registerDate(match as RegExpExecArray, referenceDate, "Tonight")
+    setTimeFromOverlappingToken(match as RegExpExecArray, "9pm", "Tonight")
+  }
+
+  for (const match of input.matchAll(/\bin\s+(\d+)\s+days?\b/gi)) {
+    const dayCount = Number.parseInt(match[1], 10)
+    if (Number.isNaN(dayCount)) {
+      continue
+    }
+    registerDate(match as RegExpExecArray, addDays(referenceDate, dayCount), `In ${dayCount} Day${dayCount === 1 ? "" : "s"}`)
+  }
+
   for (const match of input.matchAll(/\b(today|tomorrow)\b/gi)) {
     const keyword = match[0].toLowerCase()
-    const resolved = startOfDay(referenceDate)
-    if (keyword === "tomorrow") {
-      resolved.setDate(resolved.getDate() + 1)
-    }
+    const resolved = keyword === "tomorrow" ? addDays(referenceDate, 1) : referenceDate
     registerDate(match as RegExpExecArray, resolved, titleCase(keyword))
   }
 
@@ -426,6 +647,57 @@ export function parseNaturalLanguageTaskInput(
     }
   }
 
+  for (const match of input.matchAll(/\bevery\s+((?:sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat)(?:\s*\/\s*(?:sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat))*)\b/gi)) {
+    const aliases = match[1]
+      .split("/")
+      .map((value) => normalizeTagName(value))
+      .map((value) => weekdayLookup[value])
+      .filter((value): value is number => typeof value === "number")
+
+    const uniqueDays = [...new Set(aliases)]
+    if (uniqueDays.length === 0) {
+      continue
+    }
+
+    const recurrence: ParsedNaturalLanguageTask["recurrence"] = {
+      isRecurring: true,
+      recurringDays: uniqueDays,
+      label: `Every ${formatRecurringDaysLabel(uniqueDays)}`,
+    }
+    const preview = {
+      key: `recurrence-${match.index}`,
+      label: `🔁 Every ${formatRecurringDaysLabel(uniqueDays)}`,
+    }
+
+    if (pushRange({ start: match.index!, end: match.index! + match[0].length, type: "recurrence", preview, payload: recurrence })) {
+      if (match.index! >= recurrenceIndex) {
+        recurrenceSelection = recurrence
+        recurrencePreview = preview
+        recurrenceIndex = match.index!
+      }
+    }
+  }
+
+  for (const match of input.matchAll(/\bweekly\b/gi)) {
+    const recurrence: ParsedNaturalLanguageTask["recurrence"] = {
+      isRecurring: true,
+      recurringFrequency: "weekly",
+      label: "Weekly",
+    }
+    const preview = {
+      key: `recurrence-${match.index}`,
+      label: "🔁 Weekly",
+    }
+
+    if (pushRange({ start: match.index!, end: match.index! + match[0].length, type: "recurrence", preview, payload: recurrence })) {
+      if (match.index! >= recurrenceIndex) {
+        recurrenceSelection = recurrence
+        recurrencePreview = preview
+        recurrenceIndex = match.index!
+      }
+    }
+  }
+
   for (const match of input.matchAll(/!(high|medium|low)\b/gi)) {
     const value = match[1].toLowerCase() as NonNullable<Todo["priority"]>
     const preview = { key: `priority-${match.index}`, label: `❗ ${titleCase(value)}` }
@@ -466,28 +738,24 @@ export function parseNaturalLanguageTaskInput(
     })
   }
 
-  for (const match of input.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/gi)) {
+  for (const match of input.matchAll(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/gi)) {
     const normalized = normalizeTimeValue(match[0])
-    const preview = { key: `time-${match.index}`, label: `🕒 ${normalized}` }
-    if (pushRange({ start: match.index!, end: match.index! + match[0].length, type: "time", preview, payload: normalized })) {
-      if (match.index! >= timeIndex) {
-        timeSelection = normalized
-        timePreview = preview
-        timeIndex = match.index!
-      }
-    }
+    registerTime(match as RegExpExecArray, normalized.replace(/^at/, ""), normalized)
   }
 
-  for (const match of input.matchAll(/\b(morning|evening)\b/gi)) {
+  for (const match of input.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/gi)) {
+    const normalized = normalizeTimeValue(match[0])
+    registerTime(match as RegExpExecArray, normalized, normalized)
+  }
+
+  for (const match of input.matchAll(/\b(?:at\s+)?noon\b/gi)) {
+    registerTime(match as RegExpExecArray, "12pm", "Noon")
+  }
+
+  for (const match of input.matchAll(/\b(?:this\s+)?(morning|evening)\b/gi)) {
     const normalized = match[1].toLowerCase()
-    const preview = { key: `time-${match.index}`, label: `🕒 ${titleCase(normalized)}` }
-    if (pushRange({ start: match.index!, end: match.index! + match[0].length, type: "time", preview, payload: normalized })) {
-      if (match.index! >= timeIndex) {
-        timeSelection = normalized
-        timePreview = preview
-        timeIndex = match.index!
-      }
-    }
+    const value = normalized === "evening" ? "6pm" : normalized
+    registerTime(match as RegExpExecArray, value, titleCase(normalized))
   }
 
   const previewTokens: NaturalLanguagePreviewToken[] = []
@@ -514,7 +782,7 @@ export function parseNaturalLanguageTaskInput(
 
   return {
     cleanText: stripTokenRanges(input, ranges),
-    scheduledDate: selectedDateValue,
+    scheduledDate: selectedDateValue ?? toIsoDate(referenceDate),
     recurrence: recurrenceSelection ?? undefined,
     priority: prioritySelection,
     tagIds,
@@ -526,6 +794,18 @@ export function parseNaturalLanguageTaskInput(
 
 const removeRecurringChildren = (todos: Todo[], parentId: string) =>
   todos.filter((todo) => todo.parentId !== parentId)
+
+const removeIncompleteRecurringChildren = (todos: Todo[], parentId: string) =>
+  todos.filter((todo) => todo.parentId !== parentId || todo.completed)
+
+const cloneRecurringSubtasks = (subtasks: SubTask[]) =>
+  subtasks.map((subtask) => ({
+    ...subtask,
+    id: generateId(),
+    completed: false,
+  }))
+
+const RECURRING_GENERATION_DAYS = 730
 
 const getHolidays = (year: number): Record<string, string> => {
   return {
@@ -570,6 +850,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
       // Calendar todos
       calendarTodos: [],
       lastCreatedTodoId: null,
+      lastDeleted: null,
       
       addCalendarTodo: (todo) => {
         const id = generateId()
@@ -583,10 +864,42 @@ export const useLemonadeStore = create<LemonadeStore>()(
           }],
           lastCreatedTodoId: id,
         }))
-        get().generateRecurringInstances()
+        if (todo.isRecurring && !todo.parentId) {
+          get().generateRecurringInstances()
+        }
         return id
       },
       clearLastCreatedTodoId: () => set({ lastCreatedTodoId: null }),
+      clearLastDeleted: (token) =>
+        set((state) => {
+          if (!state.lastDeleted) {
+            return state
+          }
+
+          if (token && state.lastDeleted.token !== token) {
+            return state
+          }
+
+          return { lastDeleted: null }
+        }),
+      restoreLastDeletedTodo: () =>
+        set((state) => {
+          if (!state.lastDeleted) {
+            return state
+          }
+
+          const existingIds = new Set(state.calendarTodos.map((todo) => todo.id))
+          const restoredItems = state.lastDeleted.items.filter((todo) => !existingIds.has(todo.id))
+
+          if (restoredItems.length === 0) {
+            return { lastDeleted: null }
+          }
+
+          return {
+            calendarTodos: [...state.calendarTodos, ...restoredItems],
+            lastDeleted: null,
+          }
+        }),
       
       updateCalendarTodo: (id, updates) => {
         set((state) => {
@@ -606,7 +919,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
             )
 
           const todosWithoutChildren = shouldResetChildren
-            ? removeRecurringChildren(state.calendarTodos, id)
+            ? removeIncompleteRecurringChildren(state.calendarTodos, id)
             : state.calendarTodos
 
           return {
@@ -619,13 +932,43 @@ export const useLemonadeStore = create<LemonadeStore>()(
           get().generateRecurringInstances()
         }
       },
-      
-      deleteCalendarTodo: (id) => set((state) => ({
-        calendarTodos: removeRecurringChildren(
-          state.calendarTodos.filter((todo) => todo.id !== id),
-          id
+
+      updateCalendarTodoInstance: (id, updates) => set((state) => ({
+        calendarTodos: state.calendarTodos.map((todo) =>
+          todo.id === id
+            ? {
+                ...todo,
+                ...updates,
+                parentId: undefined,
+                isRecurring: false,
+                recurringFrequency: undefined,
+                recurringDays: undefined,
+              }
+            : todo
         )
       })),
+      
+      deleteCalendarTodo: (id) =>
+        set((state) => {
+          const deletedItems = state.calendarTodos.filter(
+            (todo) => todo.id === id || todo.parentId === id
+          )
+
+          if (deletedItems.length === 0) {
+            return state
+          }
+
+          return {
+            calendarTodos: removeRecurringChildren(
+              state.calendarTodos.filter((todo) => todo.id !== id),
+              id
+            ),
+            lastDeleted: {
+              items: deletedItems,
+              token: generateId(),
+            },
+          }
+        }),
       
       toggleCalendarTodo: (id) => set((state) => ({
         calendarTodos: state.calendarTodos.map((todo) =>
@@ -937,6 +1280,9 @@ export const useLemonadeStore = create<LemonadeStore>()(
       // Calendar selection
       selectedCalendarDate: getInitialCalendarDate(false),
       setSelectedCalendarDate: (date) => set({ selectedCalendarDate: date }),
+      weekCount: 2,
+      incrementWeekCount: () => set((state) => ({ weekCount: Math.min(4, state.weekCount + 1) })),
+      decrementWeekCount: () => set((state) => ({ weekCount: Math.max(1, state.weekCount - 1) })),
 
       // Calendar expansion
       isCalendarExpanded: false,
@@ -945,51 +1291,130 @@ export const useLemonadeStore = create<LemonadeStore>()(
       // Recurring todos
       generateRecurringInstances: () => {
         const state = get()
-        const recurringParents = state.calendarTodos.filter(t => t.isRecurring && !t.parentId)
+        const recurringParents = state.calendarTodos.filter((todo) => todo.isRecurring && !todo.parentId)
+        const generationStart = startOfDay(new Date())
+        const generationEnd = addDays(generationStart, RECURRING_GENERATION_DAYS)
         let currentTodos = [...state.calendarTodos]
         let changed = false
 
         for (const parent of recurringParents) {
-          const startDate = new Date(parent.date)
-          startDate.setHours(0, 0, 0, 0)
+          const cleanedTodos = removeIncompleteRecurringChildren(currentTodos, parent.id)
+          if (cleanedTodos.length !== currentTodos.length) {
+            currentTodos = cleanedTodos
+            changed = true
+          } else {
+            currentTodos = cleanedTodos
+          }
 
-          for (let i = 1; i <= 30; i++) {
-            const nextDate = new Date(startDate)
-            nextDate.setDate(startDate.getDate() + i)
-            const nextDateStr = formatLocalDateKey(nextDate)
+          const existingChildDates = new Set(
+            currentTodos
+              .filter((todo) => todo.parentId === parent.id)
+              .map((todo) => todo.date)
+          )
 
-            // Check if instance already exists
-            const exists = currentTodos.find(t => t.parentId === parent.id && t.date === nextDateStr)
-            if (exists) continue
+          const parentStartDate = parseLocalDateKey(parent.date)
+          const nextInstances: Todo[] = []
+          const createdAtBase = Date.now()
 
-            // Check frequency
-            let shouldAdd = false
-            if (parent.recurringFrequency === 'daily') {
-              shouldAdd = true
-            } else if (parent.recurringFrequency === 'weekday') {
-              const day = nextDate.getDay()
-              if (day >= 1 && day <= 5) shouldAdd = true
-            } else if (parent.recurringFrequency === 'weekly') {
-              if (nextDate.getDay() === startDate.getDay()) shouldAdd = true
-            } else if (parent.recurringFrequency === 'monthly') {
-              if (nextDate.getDate() === startDate.getDate()) shouldAdd = true
-            } else if (parent.recurringDays && parent.recurringDays.includes(nextDate.getDay())) {
-              shouldAdd = true
-            }
+          if (parent.recurringFrequency === 'daily') {
+            for (let offset = 1; offset <= RECURRING_GENERATION_DAYS; offset += 1) {
+              const candidate = addDays(parentStartDate, offset)
+              if (candidate > generationEnd) break
+              if (candidate < generationStart) continue
 
-            if (shouldAdd) {
-              currentTodos.push({
+              const candidateDate = formatLocalDateKey(candidate)
+              if (existingChildDates.has(candidateDate)) continue
+
+              nextInstances.push({
                 ...parent,
                 id: generateId(),
-                date: nextDateStr,
-                createdAt: parent.createdAt,
+                text: parent.text,
+                date: candidateDate,
+                createdAt: createdAtBase + offset,
                 completed: false,
                 parentId: parent.id,
-                isRecurring: false,
-                subtasks: parent.subtasks.map(s => ({ ...s, id: generateId(), completed: false }))
+                isRecurring: true,
+                subtasks: cloneRecurringSubtasks(parent.subtasks),
               })
-              changed = true
+              existingChildDates.add(candidateDate)
             }
+          } else if (parent.recurringFrequency === 'weekday') {
+            for (let offset = 1; offset <= RECURRING_GENERATION_DAYS; offset += 1) {
+              const candidate = addDays(parentStartDate, offset)
+              if (candidate > generationEnd) break
+              if (candidate < generationStart) continue
+              if (candidate.getDay() === 0 || candidate.getDay() === 6) continue
+
+              const candidateDate = formatLocalDateKey(candidate)
+              if (existingChildDates.has(candidateDate)) continue
+
+              nextInstances.push({
+                ...parent,
+                id: generateId(),
+                text: parent.text,
+                date: candidateDate,
+                createdAt: createdAtBase + offset,
+                completed: false,
+                parentId: parent.id,
+                isRecurring: true,
+                subtasks: cloneRecurringSubtasks(parent.subtasks),
+              })
+              existingChildDates.add(candidateDate)
+            }
+          } else if (parent.recurringFrequency === 'weekly' || (parent.recurringDays && parent.recurringDays.length > 0)) {
+            const recurringDays = parent.recurringDays && parent.recurringDays.length > 0
+              ? new Set(parent.recurringDays)
+              : new Set([parentStartDate.getDay()])
+
+            for (let offset = 1; offset <= RECURRING_GENERATION_DAYS; offset += 1) {
+              const candidate = addDays(parentStartDate, offset)
+              if (candidate > generationEnd) break
+              if (candidate < generationStart) continue
+              if (!recurringDays.has(candidate.getDay())) continue
+
+              const candidateDate = formatLocalDateKey(candidate)
+              if (existingChildDates.has(candidateDate)) continue
+
+              nextInstances.push({
+                ...parent,
+                id: generateId(),
+                text: parent.text,
+                date: candidateDate,
+                createdAt: createdAtBase + offset,
+                completed: false,
+                parentId: parent.id,
+                isRecurring: true,
+                subtasks: cloneRecurringSubtasks(parent.subtasks),
+              })
+              existingChildDates.add(candidateDate)
+            }
+          } else if (parent.recurringFrequency === 'monthly') {
+            for (let monthOffset = 1; monthOffset <= 36; monthOffset += 1) {
+              const candidate = addMonths(parentStartDate, monthOffset)
+              if (candidate > generationEnd) break
+              if (candidate < generationStart) continue
+
+              const candidateDate = formatLocalDateKey(candidate)
+              if (existingChildDates.has(candidateDate)) continue
+
+              nextInstances.push({
+                ...parent,
+                id: generateId(),
+                text: parent.text,
+                date: candidateDate,
+                createdAt: createdAtBase + monthOffset,
+                completed: false,
+                parentId: parent.id,
+                isRecurring: true,
+                subtasks: cloneRecurringSubtasks(parent.subtasks),
+              })
+              existingChildDates.add(candidateDate)
+            }
+          }
+
+          if (nextInstances.length > 0) {
+            currentTodos = [...currentTodos, ...nextInstances]
+            changed = true
           }
         }
 
@@ -1020,7 +1445,8 @@ export const useLemonadeStore = create<LemonadeStore>()(
       },
     }),
     {
-      name: 'lemonade-storage',
+      name: LEMONADE_STORAGE_KEY,
+      version: STORAGE_VERSION,
       partialize: (state) => ({
         preferences: state.preferences,
         calendarTodos: state.calendarTodos,
@@ -1030,33 +1456,33 @@ export const useLemonadeStore = create<LemonadeStore>()(
         searchQuery: state.searchQuery,
         tagFilterId: state.tagFilterId,
         sidebarOpen: state.sidebarOpen,
+        weekCount: state.weekCount,
         isCalendarExpanded: state.isCalendarExpanded,
       }),
-      merge: (persistedState, currentState) => {
-        const persisted = persistedState as Partial<LemonadeStore> | undefined
-        const mergedPreferences = {
-          ...currentState.preferences,
-          ...persisted?.preferences,
-          textSize: normalizeTextSizePreference(persisted?.preferences?.textSize),
-          spacing: normalizeSpacingPreference(persisted?.preferences?.spacing),
-          colorPalette: persisted?.preferences?.colorPalette ?? currentState.preferences.colorPalette,
-          showDotGridBackground: persisted?.preferences?.showDotGridBackground ?? currentState.preferences.showDotGridBackground,
+      migrate: (persistedState, version) => {
+        const normalized = migratePersistedLemonadeState(persistedState)
+
+        // Version 0 -> 1:
+        // Older installs had no explicit persist version and could contain
+        // partially shaped preferences/todos/lists. We normalize them here,
+        // including defaulting legacy task `parentId` to null and `subtasks` to [].
+        if (typeof version !== "number" || version === 0 || version < STORAGE_VERSION) {
+          return normalized
         }
+
+        return normalized
+      },
+      merge: (persistedState, currentState) => {
+        const persisted = migratePersistedLemonadeState(persistedState, currentState)
 
         return {
           ...currentState,
           ...persisted,
-          calendarTodos: (persisted?.calendarTodos ?? currentState.calendarTodos).map((todo, index) =>
-            normalizeTodo(todo, index)
-          ),
-          lists: (persisted?.lists ?? currentState.lists).map((list, listIndex) => ({
-            ...list,
-            todos: list.todos.map((todo, todoIndex) =>
-              normalizeTodo(todo, listIndex * 1000 + todoIndex)
-            ),
-          })),
-          preferences: mergedPreferences,
-          selectedCalendarDate: getInitialCalendarDate(mergedPreferences.startOnYesterday),
+          calendarTodos: persisted.calendarTodos ?? currentState.calendarTodos,
+          lists: persisted.lists ?? currentState.lists,
+          preferences: persisted.preferences ?? currentState.preferences,
+          selectedCalendarDate: getInitialCalendarDate((persisted.preferences ?? currentState.preferences).startOnYesterday),
+          weekCount: persisted.weekCount ?? currentState.weekCount,
         }
       },
     }
