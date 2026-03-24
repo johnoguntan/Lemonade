@@ -6,17 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "clean": "rm -rf .tmp-tests .next dist && find . -type f -name '*.log' -delete 2>/dev/null || true",
-    "clean:hygiene": "rm -rf .tmp-tests dist && find . -type f -name '*.log' -delete 2>/dev/null || true",
-    "lint": "npm run clean:hygiene >/dev/null && eslint .",
-    "lint:fix": "npm run clean:hygiene >/dev/null && eslint . --fix",
-    "fix": "npm run lint:fix",
-    "pretest": "npm run clean:hygiene",
-    "test": "npm run test:store",
-    "posttest": "npm run clean:hygiene",
-    "test:migrations": "TMP_DIR=.tmp-tests; rm -rf \"$TMP_DIR\"; trap 'rm -rf \"$TMP_DIR\"' EXIT; tsc lib/store.ts tests/store-migrations.test.ts --module commonjs --target es2020 --moduleResolution node --esModuleInterop --skipLibCheck --outDir \"$TMP_DIR\" && node --test \"$TMP_DIR\"/tests/store-migrations.test.js",
-    "test:nlp": "TMP_DIR=.tmp-tests; rm -rf \"$TMP_DIR\"; trap 'rm -rf \"$TMP_DIR\"' EXIT; tsc lib/store.ts tests/nlp-parser.test.ts --module commonjs --target es2020 --moduleResolution node --esModuleInterop --skipLibCheck --outDir \"$TMP_DIR\" && node --test \"$TMP_DIR\"/tests/nlp-parser.test.js",
-    "test:store": "TMP_DIR=.tmp-tests; rm -rf \"$TMP_DIR\"; trap 'rm -rf \"$TMP_DIR\"' EXIT; tsc lib/store.ts tests/store-migrations.test.ts tests/store-recurring.test.ts tests/nlp-parser.test.ts --module commonjs --target es2020 --moduleResolution node --esModuleInterop --skipLibCheck --outDir \"$TMP_DIR\" && node --test \"$TMP_DIR\"/tests/store-migrations.test.js \"$TMP_DIR\"/tests/store-recurring.test.js \"$TMP_DIR\"/tests/nlp-parser.test.js"
+    "lint": "eslint ."
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
