@@ -60,9 +60,12 @@ export function TodoItem({
     deleteCalendarTodo,
     restoreLastDeletedTodo,
     addSubtask,
+    editSubtask,
     toggleSubtask,
     deleteSubtask,
-    tags,
+    labels,
+    addLabelToTask,
+    removeLabelFromTask,
   } = useLemonadeStore()
   const colorPalette = preferences.colorPalette ?? []
   
@@ -70,6 +73,8 @@ export function TodoItem({
   const [editText, setEditText] = useState(todo.text)
   const [showSubtasks, setShowSubtasks] = useState(false)
   const [newSubtaskText, setNewSubtaskText] = useState("")
+  const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null)
+  const [editingSubtaskText, setEditingSubtaskText] = useState("")
   const [pendingRecurringUpdate, setPendingRecurringUpdate] = useState<Partial<Todo> | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -107,12 +112,35 @@ export function TodoItem({
     }
   }
 
-  const toggleTag = (tagId: string) => {
-    const currentTags = todo.tags || []
-    const newTags = currentTags.includes(tagId)
-      ? currentTags.filter(id => id !== tagId)
-      : [...currentTags, tagId]
-    updateCalendarTodo(todo.id, { tags: newTags })
+  const handleStartEditingSubtask = (subtaskId: string, title: string) => {
+    setEditingSubtaskId(subtaskId)
+    setEditingSubtaskText(title)
+  }
+
+  const handleSaveSubtask = () => {
+    if (!editingSubtaskId) {
+      return
+    }
+
+    const trimmedTitle = editingSubtaskText.trim()
+
+    if (!trimmedTitle) {
+      deleteSubtask(todo.id, editingSubtaskId)
+    } else {
+      editSubtask(todo.id, editingSubtaskId, trimmedTitle)
+    }
+
+    setEditingSubtaskId(null)
+    setEditingSubtaskText("")
+  }
+
+  const toggleLabel = (labelId: string) => {
+    if (todo.labelIds.includes(labelId)) {
+      removeLabelFromTask(todo.id, labelId)
+      return
+    }
+
+    addLabelToTask(todo.id, labelId)
   }
 
   const handleRecurringChange = (updates: Partial<Todo>) => {
@@ -154,6 +182,8 @@ export function TodoItem({
       clearLastCreatedTodoId()
     })
   }, [autoFocus, clearLastCreatedTodoId])
+
+  const completedSubtaskCount = todo.subtasks.filter((subtask) => subtask.completed).length
 
   if (todo.isHeading) {
     return (
@@ -254,20 +284,29 @@ export function TodoItem({
                 )}
               </span>
             )}
+            {todo.subtasks.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowSubtasks((value) => !value)}
+                className="ml-2 text-[10px] font-medium text-muted-foreground hover:text-foreground"
+              >
+                {completedSubtaskCount}/{todo.subtasks.length}
+              </button>
+            )}
           </div>
           {/* Tag Pills */}
-          {todo.tags && todo.tags.length > 0 && (
+          {todo.labelIds.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-0.5">
-              {todo.tags.map(tagId => {
-                const tag = tags.find(t => t.id === tagId)
-                if (!tag) return null
+              {todo.labelIds.map((labelId) => {
+                const label = labels.find((item) => item.id === labelId)
+                if (!label) return null
                 return (
                   <span 
-                    key={tagId} 
+                    key={labelId} 
                     className="px-1.5 py-0.5 rounded-full text-[9px] font-medium text-white shadow-sm"
-                    style={{ backgroundColor: tag.color }}
+                    style={{ backgroundColor: label.color }}
                   >
-                    {tag.name}
+                    {label.name}
                   </span>
                 )
               })}
@@ -387,30 +426,30 @@ export function TodoItem({
                 ))}
               </div>
               <DropdownMenuSeparator />
-              <div className="px-2 py-1.5 text-sm font-medium">Tags</div>
+              <div className="px-2 py-1.5 text-sm font-medium">Labels</div>
               <div className="px-2 pb-2">
                 <div className="flex flex-wrap gap-1 max-h-[100px] overflow-y-auto">
-                  {tags.length > 0 ? (
-                    tags.map((tag) => (
+                  {labels.length > 0 ? (
+                    labels.map((label) => (
                       <button
-                        key={tag.id}
-                        onClick={() => toggleTag(tag.id)}
+                        key={label.id}
+                        onClick={() => toggleLabel(label.id)}
                         className={cn(
                           "px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors",
-                          todo.tags?.includes(tag.id)
+                          todo.labelIds.includes(label.id)
                             ? "text-white"
                             : "bg-transparent text-muted-foreground hover:text-foreground border-border"
                         )}
                         style={{ 
-                          backgroundColor: todo.tags?.includes(tag.id) ? tag.color : 'transparent',
-                          borderColor: todo.tags?.includes(tag.id) ? tag.color : undefined
+                          backgroundColor: todo.labelIds.includes(label.id) ? label.color : 'transparent',
+                          borderColor: todo.labelIds.includes(label.id) ? label.color : undefined
                         }}
                       >
-                        {tag.name}
+                        {label.name}
                       </button>
                     ))
                   ) : (
-                    <div className="text-[10px] text-muted-foreground italic">No tags created yet</div>
+                    <div className="text-[10px] text-muted-foreground italic">No labels created yet</div>
                   )}
                 </div>
               </div>
@@ -471,12 +510,35 @@ export function TodoItem({
                   </svg>
                 )}
               </button>
-              <span className={cn(
-                "lemonade-task-text flex-1 font-task font-normal text-[14px] leading-[16.3338px] text-[#000000] dark:text-foreground",
-                subtask.completed && "line-through opacity-50"
-              )}>
-                {subtask.text}
-              </span>
+              {editingSubtaskId === subtask.id ? (
+                <input
+                  type="text"
+                  value={editingSubtaskText}
+                  onChange={(event) => setEditingSubtaskText(event.target.value)}
+                  onBlur={handleSaveSubtask}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      handleSaveSubtask()
+                    } else if (event.key === "Escape") {
+                      setEditingSubtaskId(null)
+                      setEditingSubtaskText("")
+                    }
+                  }}
+                  className="lemonade-task-text bg-transparent outline-none flex-1 font-task font-normal text-[14px] leading-[16.3338px] text-[#000000] dark:text-foreground"
+                  autoFocus
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleStartEditingSubtask(subtask.id, subtask.title)}
+                  className={cn(
+                    "lemonade-task-text flex-1 text-left font-task font-normal text-[14px] leading-[16.3338px] text-[#000000] dark:text-foreground",
+                    subtask.completed && "line-through opacity-50"
+                  )}
+                >
+                  {subtask.title}
+                </button>
+              )}
               <button
                 onClick={() => deleteSubtask(todo.id, subtask.id)}
                 className="opacity-0 group-hover/subtask:opacity-100 text-muted-foreground hover:text-destructive group/sub-delete"

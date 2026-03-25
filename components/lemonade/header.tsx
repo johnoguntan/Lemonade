@@ -1,10 +1,12 @@
 "use client"
 
-import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Calendar as CalendarIcon, Plus } from "lucide-react"
+import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Calendar as CalendarIcon, Plus, Rows3, Clock3, SunMedium, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { PrintPreviewDialog } from "./print-preview-dialog"
+import { cn } from "@/lib/utils"
 import {
   formatLocalDateKey,
   parseLocalDateKey,
@@ -13,9 +15,12 @@ import {
   type NaturalLanguagePreviewToken,
 } from "@/lib/store"
 import { useEffect, useState } from "react"
+import { getTodayViewBuckets } from "./today-view"
 
 interface HeaderProps {
   onNavigate: (direction: 'prev-week' | 'next-week' | 'prev-day' | 'next-day' | 'today') => void
+  viewMode: "calendar" | "timeline" | "today"
+  onViewModeChange: (mode: "calendar" | "timeline" | "today") => void
 }
 
 const addDays = (date: Date, amount: number) => {
@@ -50,15 +55,18 @@ const getVisibleDateKeys = (startDate: Date, weekCount: number, columnCount: 1 |
     .map((date) => formatLocalDateKey(date))
 }
 
-export function Header({ onNavigate }: HeaderProps) {
+export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) {
   const {
     searchQuery,
     setSearchQuery,
     addCalendarTodo,
-    ensureTagIds,
-    tags,
+    ensureLabelIds,
+    labels,
     calendarTodos,
     preferences,
+    labelFilterIds,
+    toggleLabelFilter,
+    clearLabelFilters,
     activeFilterColor,
     setActiveFilterColor,
     setPreferences,
@@ -75,8 +83,17 @@ export function Header({ onNavigate }: HeaderProps) {
   const currentDate = parseLocalDateKey(selectedCalendarDate)
   const [pickerMonth, setPickerMonth] = useState(currentDate)
 
-  const parsedQuickAdd = parseNaturalLanguageTaskInput(quickAddText, { tags })
+  const parsedQuickAdd = parseNaturalLanguageTaskInput(quickAddText, { labels })
   const palette = preferences.colorPalette ?? []
+  const todayKey = formatLocalDateKey(new Date())
+  const todayFilteredTodos = calendarTodos.filter((todo) => {
+    if (searchQuery && !todo.text.toLowerCase().includes(searchQuery.toLowerCase())) return false
+    if (labelFilterIds.length > 0 && !todo.labelIds.some((labelId) => labelFilterIds.includes(labelId))) return false
+    if (activeFilterColor && todo.color !== activeFilterColor) return false
+    return true
+  })
+  const todayBuckets = getTodayViewBuckets(todayFilteredTodos, preferences.showCompleted, todayKey)
+  const todayCount = todayBuckets.overdue.length + todayBuckets.today.length
 
   const visibleDates = getVisibleDateKeys(currentDate, weekCount, preferences.columns)
 
@@ -129,8 +146,8 @@ export function Header({ onNavigate }: HeaderProps) {
   }, [])
 
   const handleQuickAddSubmit = () => {
-    const parsed = parseNaturalLanguageTaskInput(quickAddText, { tags })
-    const tagIds = [...parsed.tagIds, ...ensureTagIds(parsed.newTagNames)]
+    const parsed = parseNaturalLanguageTaskInput(quickAddText, { labels })
+    const labelIds = [...parsed.labelIds, ...ensureLabelIds(parsed.newLabelNames)]
 
     if (!parsed.cleanText) {
       setQuickAddText("")
@@ -149,7 +166,8 @@ export function Header({ onNavigate }: HeaderProps) {
       recurringFrequency: parsed.recurrence?.recurringFrequency,
       recurringDays: parsed.recurrence?.recurringDays,
       priority: parsed.priority,
-      tags: tagIds.length > 0 ? tagIds : undefined,
+      labelIds,
+      subtasks: parsed.subtaskTitles.map((title) => ({ title })),
       time: parsed.time,
     })
 
@@ -237,7 +255,7 @@ export function Header({ onNavigate }: HeaderProps) {
             >
               <Plus className="size-[15px]" />
             </Button>
-            {!isTodayVisible() && (
+            {!isTodayVisible() && viewMode !== "today" && (
               <Button
                 variant="outline"
                 size="sm"
@@ -293,8 +311,17 @@ export function Header({ onNavigate }: HeaderProps) {
             >
               <div className="space-y-4">
                 <div>
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                    Current Usage
+                  <div className="mb-2 flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    <span>Current Usage</span>
+                    {activeFilterColor ? (
+                      <button
+                        type="button"
+                        onClick={() => setActiveFilterColor(null)}
+                        className="text-[10px] font-medium normal-case tracking-normal text-foreground/70 hover:text-foreground"
+                      >
+                        Clear filter
+                      </button>
+                    ) : null}
                   </div>
                   {usedColors.length === 0 ? (
                     <div className="text-[12px] text-muted-foreground">No colors used yet</div>
@@ -320,6 +347,68 @@ export function Header({ onNavigate }: HeaderProps) {
                             <span className="flex-1">
                               {getColorLabel(hex)} ({count})
                             </span>
+                            {isActive ? (
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  setActiveFilterColor(null)
+                                }}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault()
+                                    event.stopPropagation()
+                                    setActiveFilterColor(null)
+                                  }
+                                }}
+                                className="inline-flex items-center justify-center rounded-full border border-border/70 p-0.5 text-muted-foreground hover:text-foreground"
+                                aria-label={`Clear ${getColorLabel(hex)} filter`}
+                              >
+                                <X className="size-3" />
+                              </span>
+                            ) : null}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <div className="mb-2 flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    <span>Labels</span>
+                    {labelFilterIds.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => clearLabelFilters()}
+                        className="text-[10px] font-medium text-foreground/80 hover:text-foreground"
+                      >
+                        Clear
+                      </button>
+                    ) : null}
+                  </div>
+                  {labels.length === 0 ? (
+                    <div className="mb-4 text-[12px] text-muted-foreground">No labels created yet</div>
+                  ) : (
+                    <div className="mb-4 flex flex-wrap gap-2">
+                      {labels.map((label) => {
+                        const isActive = labelFilterIds.includes(label.id)
+
+                        return (
+                          <button
+                            key={label.id}
+                            type="button"
+                            onClick={() => toggleLabelFilter(label.id)}
+                            className={cn(
+                              "inline-flex items-center gap-2 rounded-full border px-2 py-1 text-[11px] transition-colors",
+                              isActive
+                                ? "border-transparent bg-foreground text-background"
+                                : "border-border bg-transparent text-foreground hover:bg-muted"
+                            )}
+                          >
+                            <span className="size-2 rounded-full" style={{ backgroundColor: label.color }} />
+                            <span>{label.name}</span>
                           </button>
                         )
                       })}
@@ -376,93 +465,144 @@ export function Header({ onNavigate }: HeaderProps) {
               </div>
             </PopoverContent>
           </Popover>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onNavigate('prev-week')}
-            className="size-8 text-muted-foreground hover:text-foreground"
-          >
-            <ChevronsLeft className="size-4" strokeWidth={2.75} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onNavigate('prev-day')}
-            className="size-8 text-muted-foreground hover:text-foreground"
-          >
-            <ChevronLeft className="size-4" strokeWidth={2.75} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onNavigate('next-day')}
-            className="size-8 text-muted-foreground hover:text-foreground"
-          >
-            <ChevronRight className="size-4" strokeWidth={2.75} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onNavigate('next-week')}
-            className="size-8 text-muted-foreground hover:text-foreground"
-          >
-            <ChevronsRight className="size-4" strokeWidth={2.75} />
-          </Button>
-          <Popover
-            open={showDatePopover}
-            onOpenChange={(open) => {
-              setShowDatePopover(open)
-              if (open) {
-                setPickerMonth(currentDate)
-              }
-            }}
-          >
-            <PopoverTrigger asChild>
+          {viewMode !== "today" ? (
+            <>
               <Button
                 variant="ghost"
                 size="icon"
-                className="ml-2 size-8 text-muted-foreground hover:text-foreground"
+                onClick={() => onNavigate('prev-week')}
+                className="size-8 text-muted-foreground hover:text-foreground"
               >
-                <CalendarIcon className="size-4" />
+                <ChevronsLeft className="size-4" strokeWidth={2.75} />
               </Button>
-            </PopoverTrigger>
-            <PopoverContent
-              align="end"
-              side="bottom"
-              sideOffset={8}
-              collisionPadding={12}
-              className="z-50 w-auto max-w-[calc(100vw-24px)] rounded-2xl border-0 p-0 shadow-[0_10px_30px_rgba(0,0,0,0.12)]"
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onNavigate('prev-day')}
+                className="size-8 text-muted-foreground hover:text-foreground"
+              >
+                <ChevronLeft className="size-4" strokeWidth={2.75} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onNavigate('next-day')}
+                className="size-8 text-muted-foreground hover:text-foreground"
+              >
+                <ChevronRight className="size-4" strokeWidth={2.75} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onNavigate('next-week')}
+                className="size-8 text-muted-foreground hover:text-foreground"
+              >
+                <ChevronsRight className="size-4" strokeWidth={2.75} />
+              </Button>
+            </>
+          ) : null}
+          <PrintPreviewDialog selectedDate={selectedCalendarDate} />
+          <div className="ml-2 flex items-center rounded-full border border-border/70 bg-background/80 p-0.5">
+            <Button
+              variant="ghost"
+              onClick={() => onViewModeChange("today")}
+              className={cn(
+                "h-8 rounded-full px-3 text-[12px] font-medium",
+                viewMode === "today" ? "bg-foreground text-background hover:bg-foreground hover:text-background" : "text-muted-foreground hover:text-foreground"
+              )}
+              title="Today view"
             >
-              <Calendar
-                mode="single"
-                selected={currentDate}
-                month={pickerMonth}
-                onMonthChange={setPickerMonth}
-                onSelect={(date) => {
-                  if (date) {
-                    setSelectedCalendarDate(formatLocalDateKey(date))
-                    setShowDatePopover(false)
-                  }
-                }}
-                className="rounded-2xl border-b-[4px] border-b-[var(--accent-color)] bg-white p-4"
-                classNames={{
-                  month_caption: "relative flex h-10 w-full items-center justify-center px-10",
-                  caption_label: "text-center text-[14px] leading-none font-semibold uppercase tracking-[0.14em]",
-                  nav: "absolute inset-x-0 top-4 z-10 flex items-center justify-between px-3",
-                  button_previous: "flex h-8 w-8 items-center justify-center rounded-full text-foreground hover:bg-muted [&_svg]:size-4 [&_svg]:text-foreground",
-                  button_next: "flex h-8 w-8 items-center justify-center rounded-full text-foreground hover:bg-muted [&_svg]:size-4 [&_svg]:text-foreground",
-                  weekdays: "mb-2 mt-3 grid grid-cols-7",
-                  weekday: "text-center text-[12px] font-semibold uppercase text-foreground",
-                  week: "mt-0 grid grid-cols-7",
-                  day: "aspect-square p-0",
-                  day_button: "h-12 w-12 rounded-none text-base font-semibold text-foreground hover:bg-muted/50",
-                  today: "bg-transparent text-foreground",
-                  selected: "bg-[var(--accent-color)] text-white hover:bg-[var(--accent-color)]",
-                  outside: "text-muted-foreground/40",
-                }}
-              />
-            </PopoverContent>
-          </Popover>
+              <SunMedium className="mr-1.5 size-4" />
+              Today
+              <span className={cn(
+                "ml-2 rounded-full px-1.5 py-0.5 text-[10px] leading-none",
+                viewMode === "today" ? "bg-background/15 text-background" : "bg-muted text-foreground"
+              )}>
+                {todayCount}
+              </span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onViewModeChange("calendar")}
+              className={cn(
+                "size-8 rounded-full",
+                viewMode === "calendar" ? "bg-foreground text-background hover:bg-foreground hover:text-background" : "text-muted-foreground hover:text-foreground"
+              )}
+              title="Calendar view"
+            >
+              <Rows3 className="size-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onViewModeChange("timeline")}
+              className={cn(
+                "size-8 rounded-full",
+                viewMode === "timeline" ? "bg-foreground text-background hover:bg-foreground hover:text-background" : "text-muted-foreground hover:text-foreground"
+              )}
+              title="Timeline view"
+            >
+              <Clock3 className="size-4" />
+            </Button>
+          </div>
+          {viewMode !== "today" ? (
+            <Popover
+              open={showDatePopover}
+              onOpenChange={(open) => {
+                setShowDatePopover(open)
+                if (open) {
+                  setPickerMonth(currentDate)
+                }
+              }}
+            >
+              <PopoverTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="ml-2 size-8 text-muted-foreground hover:text-foreground"
+                >
+                  <CalendarIcon className="size-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                side="bottom"
+                sideOffset={8}
+                collisionPadding={12}
+                className="z-50 w-auto max-w-[calc(100vw-24px)] rounded-2xl border-0 p-0 shadow-[0_10px_30px_rgba(0,0,0,0.12)]"
+              >
+                <Calendar
+                  mode="single"
+                  selected={currentDate}
+                  month={pickerMonth}
+                  onMonthChange={setPickerMonth}
+                  onSelect={(date) => {
+                    if (date) {
+                      setSelectedCalendarDate(formatLocalDateKey(date))
+                      setShowDatePopover(false)
+                    }
+                  }}
+                  className="rounded-2xl border-b-[4px] border-b-[var(--accent-color)] bg-white p-4"
+                  classNames={{
+                    month_caption: "relative flex h-10 w-full items-center justify-center px-10",
+                    caption_label: "text-center text-[14px] leading-none font-semibold uppercase tracking-[0.14em]",
+                    nav: "absolute inset-x-0 top-4 z-10 flex items-center justify-between px-3",
+                    button_previous: "flex h-8 w-8 items-center justify-center rounded-full text-foreground hover:bg-muted [&_svg]:size-4 [&_svg]:text-foreground",
+                    button_next: "flex h-8 w-8 items-center justify-center rounded-full text-foreground hover:bg-muted [&_svg]:size-4 [&_svg]:text-foreground",
+                    weekdays: "mb-2 mt-3 grid grid-cols-7",
+                    weekday: "text-center text-[12px] font-semibold uppercase text-foreground",
+                    week: "mt-0 grid grid-cols-7",
+                    day: "aspect-square p-0",
+                    day_button: "h-12 w-12 rounded-none text-base font-semibold text-foreground hover:bg-muted/50",
+                    today: "bg-transparent text-foreground",
+                    selected: "bg-[var(--accent-color)] text-white hover:bg-[var(--accent-color)]",
+                    outside: "text-muted-foreground/40",
+                  }}
+                />
+              </PopoverContent>
+            </Popover>
+          ) : null}
         </div>
       ) : null}
     </header>

@@ -1,15 +1,18 @@
 "use client"
 
-import { useEffect, useSyncExternalStore, type CSSProperties } from "react"
+import { useEffect, useState, useSyncExternalStore, type CSSProperties } from "react"
 import { parseLocalDateKey, formatLocalDateKey, useLemonadeStore } from "@/lib/store"
 import { Header } from "@/components/lemonade/header"
 import { PreferencesPanel } from "@/components/lemonade/preferences-panel"
 import { CalendarView } from "@/components/lemonade/calendar-view"
+import { TimelineView } from "@/components/lemonade/timeline-view"
+import { TodayView } from "@/components/lemonade/today-view"
 import { ListsSection } from "@/components/lemonade/lists-section"
 import { Footer } from "@/components/lemonade/footer"
 import { DailyPlannerModal } from "@/components/lemonade/daily-planner-modal"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { cn } from "@/lib/utils"
+import { toast } from "sonner"
 
 const textSizeVars = {
   sm: {
@@ -82,11 +85,14 @@ export default function Home() {
     preferences,
     sidebarOpen,
     autoRollover,
+    lastAutoMovedCount,
+    clearLastAutoMovedCount,
     generateRecurringInstances,
     selectedCalendarDate,
     setSelectedCalendarDate,
     weekCount,
   } = useLemonadeStore()
+  const [viewMode, setViewMode] = useState<"calendar" | "timeline" | "today">("calendar")
   const startDate = parseLocalDateKey(selectedCalendarDate)
   const mounted = useSyncExternalStore(
     () => () => {},
@@ -102,6 +108,20 @@ export default function Home() {
     autoRollover()
     generateRecurringInstances()
   }, [autoRollover, generateRecurringInstances])
+
+  useEffect(() => {
+    if (lastAutoMovedCount <= 0) {
+      return
+    }
+
+    toast(
+      lastAutoMovedCount === 1
+        ? "1 task moved from yesterday."
+        : `${lastAutoMovedCount} tasks moved from earlier days.`,
+      { duration: 3000 }
+    )
+    clearLastAutoMovedCount()
+  }, [clearLastAutoMovedCount, lastAutoMovedCount])
 
   const handleNavigate = (direction: 'prev-week' | 'next-week' | 'prev-day' | 'next-day' | 'today') => {
     const newDate = new Date(startDate)
@@ -124,6 +144,14 @@ export default function Home() {
         return
     }
     setSelectedCalendarDate(formatLocalDateKey(newDate))
+  }
+
+  const handleViewModeChange = (mode: "calendar" | "timeline" | "today") => {
+    if (mode === "today") {
+      setSelectedCalendarDate(formatLocalDateKey(new Date()))
+    }
+
+    setViewMode(mode)
   }
 
   // Prevent hydration mismatch
@@ -158,14 +186,23 @@ export default function Home() {
         sidebarOpen && "ml-72"
       )}
       style={appPreferenceVars}>
-        <Header onNavigate={handleNavigate} />
+        <Header onNavigate={handleNavigate} viewMode={viewMode} onViewModeChange={handleViewModeChange} />
         
-        <main className="flex flex-col">
+        <main className="flex flex-col pb-6">
           <ErrorBoundary>
-            <CalendarView 
-              startDate={startDate} 
-              onNavigate={handleNavigate}
-            />
+            {viewMode === "calendar" ? (
+              <CalendarView 
+                startDate={startDate} 
+                onNavigate={handleNavigate}
+              />
+            ) : viewMode === "timeline" ? (
+              <TimelineView
+                date={startDate}
+                onNavigate={handleNavigate}
+              />
+            ) : (
+              <TodayView />
+            )}
           </ErrorBoundary>
         </main>
 

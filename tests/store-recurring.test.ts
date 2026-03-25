@@ -9,7 +9,7 @@ const resetRecurringTestState = () => {
     calendarTodos: [],
     lastCreatedTodoId: null,
     searchQuery: "",
-    tagFilterId: null,
+    labelFilterIds: [],
     activeFilterColor: null,
   })
 }
@@ -25,6 +25,7 @@ test("daily recurring tasks generate a long future window without duplicates", (
     text: "Daily test",
     completed: false,
     date: todayKey,
+    labelIds: [],
     isRecurring: true,
     recurringFrequency: "daily",
   })
@@ -52,6 +53,7 @@ test("monthly recurring tasks roll over month-end correctly", () => {
     text: "Month end",
     completed: false,
     date: formatLocalDateKey(parentDate),
+    labelIds: [],
     isRecurring: true,
     recurringFrequency: "monthly",
   })
@@ -75,6 +77,7 @@ test("updating a recurring parent clears old incomplete children but keeps compl
     text: "Recurring cleanup",
     completed: false,
     date: formatLocalDateKey(today),
+    labelIds: [],
     isRecurring: true,
     recurringFrequency: "daily",
   })
@@ -104,4 +107,3 @@ test("updating a recurring parent clears old incomplete children but keeps compl
   assert.equal(remainingCompletedChild?.completed, true)
   assert.ok(nextMonthChild)
 })
-

@@ -4,7 +4,7 @@ import { useRef, useState, type DragEvent } from "react"
 import { useLemonadeStore, type List } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Plus, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsLeft, ChevronsRight, MoreVertical, Trash2, Equal, PenLine, ArrowRight, CornerUpLeft, CornerUpRight, Link2, Check, ListTodo } from "lucide-react"
+import { Plus, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsLeft, ChevronsRight, MoreVertical, Trash2, Equal, PenLine, ArrowRight, CornerUpLeft, CornerUpRight, Link2, Check, ListTodo, AlertTriangle } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,9 +36,12 @@ export function ListsSection() {
     addListAdjacent,
     moveListToTab,
     addListTodo, 
+    updateListTodo,
     toggleListTodo, 
     deleteListTodo,
     preferences,
+    labels,
+    labelFilterIds,
     isCalendarExpanded,
     toggleCalendar
   } = useLemonadeStore()
@@ -49,13 +52,22 @@ export function ListsSection() {
   const [renameTabDialogOpen, setRenameTabDialogOpen] = useState(false)
   const [renameTabName, setRenameTabName] = useState("")
   const [newTodoTexts, setNewTodoTexts] = useState<Record<string, string>>({})
+  const [newReturnItemName, setNewReturnItemName] = useState("")
+  const [newReturnStoreName, setNewReturnStoreName] = useState("")
+  const [newReturnDeadline, setNewReturnDeadline] = useState("")
+  const [newReturnNotes, setNewReturnNotes] = useState("")
   const [draggedListId, setDraggedListId] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const getListTabId = (list: List) =>
-    list.tabId ?? (list.type === "planning" ? "planning-tab" : "my-lists-tab")
+    list.tabId ?? (list.type === "planning" ? "planning-tab" : list.type === "shopping-returns" ? "shopping-returns-tab" : "my-lists-tab")
 
   const filteredLists = lists.filter((list) => getListTabId(list) === activeTabId)
+  const shoppingReturnsList = lists.find((list) => list.id === "shopping-returns") ?? null
+  const isShoppingReturnsTab = activeTabId === "shopping-returns-tab"
+  const visibleShoppingReturns = (shoppingReturnsList?.todos ?? []).filter(
+    (todo) => preferences.showCompleted || !todo.completed
+  )
   const getTabCount = (tabId: string) => lists.filter((list) => getListTabId(list) === tabId).length
   const activeTab = listTabs.find((tab) => tab.id === activeTabId) ?? null
   const bottomDotGridStyle = preferences.showDotGridBackground
@@ -91,6 +103,10 @@ export function ListsSection() {
   }
 
   const handleCreateList = () => {
+    if (isShoppingReturnsTab) {
+      return
+    }
+
     const existingAutoNamedLists = filteredLists.filter(
       (list) => /^LIST \d+$/.test(list.name)
     )
@@ -137,9 +153,34 @@ export function ListsSection() {
     setManageTabMenuOpen(false)
   }
 
+  const handleAddShoppingReturn = () => {
+    if (!shoppingReturnsList || !newReturnItemName.trim()) {
+      return
+    }
+
+    addListTodo(shoppingReturnsList.id, newReturnItemName.trim())
+    const createdTodo = useLemonadeStore
+      .getState()
+      .lists.find((list) => list.id === shoppingReturnsList.id)
+      ?.todos.at(-1)
+
+    if (createdTodo) {
+      updateListTodo(shoppingReturnsList.id, createdTodo.id, {
+        storeName: newReturnStoreName.trim() || undefined,
+        returnDeadline: newReturnDeadline || undefined,
+        notes: newReturnNotes.trim() || undefined,
+      })
+    }
+
+    setNewReturnItemName("")
+    setNewReturnStoreName("")
+    setNewReturnDeadline("")
+    setNewReturnNotes("")
+  }
+
   return (
     <div
-      className="relative z-20 shrink-0 border-t border-border bg-background/90 transition-all duration-300 dark:bg-[rgba(13,13,13,0.9)]"
+      className="relative z-20 mt-2 shrink-0 border-t border-border bg-background/90 transition-all duration-300 dark:bg-[rgba(13,13,13,0.9)]"
       style={bottomDotGridStyle}
     >
       {/* Tabs */}
@@ -166,29 +207,33 @@ export function ListsSection() {
               <ListTodo className="size-4" />
               Manage lists in tab
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => {
-                if (activeTab) {
-                  setRenameTabName(activeTab.name)
-                  setRenameTabDialogOpen(true)
-                }
-              }}
-              className="px-2 py-3 text-[15px]"
-            >
-              <PenLine className="size-4" />
-              Rename tab
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => {
-                deleteListsInTab(activeTabId)
-                setManageTabMenuOpen(false)
-              }}
-              className="px-2 py-3 text-[15px]"
-              variant="destructive"
-            >
-              <Trash2 className="size-4" />
-              Delete all {getTabCount(activeTabId)} lists
-            </DropdownMenuItem>
+            {!isShoppingReturnsTab ? (
+              <>
+                <DropdownMenuItem
+                  onClick={() => {
+                    if (activeTab) {
+                      setRenameTabName(activeTab.name)
+                      setRenameTabDialogOpen(true)
+                    }
+                  }}
+                  className="px-2 py-3 text-[15px]"
+                >
+                  <PenLine className="size-4" />
+                  Rename tab
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => {
+                    deleteListsInTab(activeTabId)
+                    setManageTabMenuOpen(false)
+                  }}
+                  className="px-2 py-3 text-[15px]"
+                  variant="destructive"
+                >
+                  <Trash2 className="size-4" />
+                  Delete all {getTabCount(activeTabId)} lists
+                </DropdownMenuItem>
+              </>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -237,7 +282,7 @@ export function ListsSection() {
 
         <Dialog open={tabDialogOpen} onOpenChange={setTabDialogOpen}>
           <DialogTrigger asChild>
-            <Button variant="ghost" size="icon" className="size-6 ml-1">
+            <Button variant="ghost" size="icon" className="size-6 ml-1" disabled={isShoppingReturnsTab}>
               <Plus className="size-4" />
             </Button>
           </DialogTrigger>
@@ -272,6 +317,26 @@ export function ListsSection() {
       {/* Lists Grid */}
       {!isCalendarExpanded ? (
         <div className="group/lists-nav relative border-b border-border bg-[rgba(247,248,250,0.9)] dark:bg-transparent">
+          {isShoppingReturnsTab ? (
+            <ShoppingReturnsSection
+              list={shoppingReturnsList}
+              items={visibleShoppingReturns}
+              showCompleted={preferences.showCompleted}
+              newItemName={newReturnItemName}
+              newStoreName={newReturnStoreName}
+              newDeadline={newReturnDeadline}
+              newNotes={newReturnNotes}
+              onNewItemNameChange={setNewReturnItemName}
+              onNewStoreNameChange={setNewReturnStoreName}
+              onNewDeadlineChange={setNewReturnDeadline}
+              onNewNotesChange={setNewReturnNotes}
+              onAddItem={handleAddShoppingReturn}
+              onToggleReturned={(todoId) => shoppingReturnsList && toggleListTodo(shoppingReturnsList.id, todoId)}
+              onDeleteItem={(todoId) => shoppingReturnsList && deleteListTodo(shoppingReturnsList.id, todoId)}
+              onUpdateItem={(todoId, updates) => shoppingReturnsList && updateListTodo(shoppingReturnsList.id, todoId, updates)}
+            />
+          ) : (
+          <>
           <div className="pointer-events-none absolute left-0 top-1/2 z-10 flex -translate-y-1/2 flex-col overflow-hidden rounded-r-md border border-border bg-[rgba(247,248,250,0.9)] opacity-0 transition-opacity duration-200 group-hover/lists-nav:opacity-100 dark:bg-[rgba(13,13,13,0.9)]">
             <Button
               variant="ghost"
@@ -319,6 +384,8 @@ export function ListsSection() {
                 onAddTodo={() => handleAddTodo(list.id)}
                 onToggleTodo={(todoId) => toggleListTodo(list.id, todoId)}
                 onDeleteTodo={(todoId) => deleteListTodo(list.id, todoId)}
+                labels={labels}
+                labelFilterIds={labelFilterIds}
                 listTabs={listTabs}
               />
             ))}
@@ -350,6 +417,8 @@ export function ListsSection() {
               <ChevronsRight className="size-[15px]" />
             </Button>
           </div>
+          </>
+          )}
         </div>
       ) : (
         <div className="h-0 overflow-hidden bg-background/90 dark:bg-transparent" />
@@ -375,7 +444,171 @@ interface ListCardProps {
   onAddTodo: () => void
   onToggleTodo: (todoId: string) => void
   onDeleteTodo: (todoId: string) => void
+  labels: Array<{ id: string; name: string; color: string }>
+  labelFilterIds: string[]
   listTabs: Array<{ id: string; name: string }>
+}
+
+interface ShoppingReturnsSectionProps {
+  list: List | null
+  items: List["todos"]
+  showCompleted: boolean
+  newItemName: string
+  newStoreName: string
+  newDeadline: string
+  newNotes: string
+  onNewItemNameChange: (value: string) => void
+  onNewStoreNameChange: (value: string) => void
+  onNewDeadlineChange: (value: string) => void
+  onNewNotesChange: (value: string) => void
+  onAddItem: () => void
+  onToggleReturned: (todoId: string) => void
+  onDeleteItem: (todoId: string) => void
+  onUpdateItem: (todoId: string, updates: Partial<List["todos"][number]>) => void
+}
+
+function ShoppingReturnsSection({
+  list,
+  items,
+  showCompleted,
+  newItemName,
+  newStoreName,
+  newDeadline,
+  newNotes,
+  onNewItemNameChange,
+  onNewStoreNameChange,
+  onNewDeadlineChange,
+  onNewNotesChange,
+  onAddItem,
+  onToggleReturned,
+  onDeleteItem,
+  onUpdateItem,
+}: ShoppingReturnsSectionProps) {
+  const todayKey = new Date().toISOString().split("T")[0]
+
+  return (
+    <div className="min-h-[500px] bg-[rgba(247,248,250,0.9)] px-6 py-6 dark:bg-transparent">
+      <div className="mx-auto flex max-w-5xl flex-col gap-6">
+        <div className="rounded-2xl border border-border/70 bg-background/90 p-5 shadow-sm dark:bg-[rgba(19,19,19,0.9)]">
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <div>
+              <h3 className="font-heading text-[20px] leading-[20px] uppercase">Shopping Returns</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Track what needs to go back, where, and by when.
+              </p>
+            </div>
+            <div className="text-xs font-medium text-muted-foreground">
+              {showCompleted ? "Returned items visible" : "Returned items hidden"}
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <Input
+              value={newItemName}
+              onChange={(event) => onNewItemNameChange(event.target.value)}
+              placeholder="Item name"
+              onKeyDown={(event) => event.key === "Enter" && onAddItem()}
+            />
+            <Input
+              value={newStoreName}
+              onChange={(event) => onNewStoreNameChange(event.target.value)}
+              placeholder="Store name (optional)"
+              onKeyDown={(event) => event.key === "Enter" && onAddItem()}
+            />
+            <Input
+              type="date"
+              value={newDeadline}
+              onChange={(event) => onNewDeadlineChange(event.target.value)}
+            />
+            <Button onClick={onAddItem} className="md:justify-self-start">
+              Add return
+            </Button>
+          </div>
+
+          <textarea
+            value={newNotes}
+            onChange={(event) => onNewNotesChange(event.target.value)}
+            placeholder="Notes (optional)"
+            className="mt-3 min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+
+        <div className="rounded-2xl border border-border/70 bg-background/90 shadow-sm dark:bg-[rgba(19,19,19,0.9)]">
+          <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_150px_minmax(0,1.4fr)_70px] gap-3 border-b border-border/70 px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            <span>Item</span>
+            <span>Store</span>
+            <span>Deadline</span>
+            <span>Notes</span>
+            <span className="text-right">Returned</span>
+          </div>
+
+          <div className="divide-y divide-border/60">
+            {items.length > 0 ? (
+              items.map((todo) => {
+                const isOverdue = !!todo.returnDeadline && !todo.completed && todo.returnDeadline < todayKey
+
+                return (
+                  <div key={todo.id} className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_150px_minmax(0,1.4fr)_70px] gap-3 px-5 py-4">
+                    <Input
+                      value={todo.text}
+                      onChange={(event) => onUpdateItem(todo.id, { text: event.target.value })}
+                      placeholder="Item name"
+                    />
+                    <Input
+                      value={todo.storeName ?? ""}
+                      onChange={(event) => onUpdateItem(todo.id, { storeName: event.target.value || undefined })}
+                      placeholder="Store"
+                    />
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="date"
+                        value={todo.returnDeadline ?? ""}
+                        onChange={(event) => onUpdateItem(todo.id, { returnDeadline: event.target.value || undefined })}
+                        className={cn(isOverdue && "border-destructive text-destructive")}
+                      />
+                      {isOverdue ? <AlertTriangle className="size-4 text-destructive" /> : null}
+                    </div>
+                    <Input
+                      value={todo.notes ?? ""}
+                      onChange={(event) => onUpdateItem(todo.id, { notes: event.target.value || undefined })}
+                      placeholder="Notes"
+                    />
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onToggleReturned(todo.id)}
+                        className={cn(
+                          "size-4 rounded-full border border-border flex items-center justify-center",
+                          todo.completed && "bg-foreground border-foreground"
+                        )}
+                      >
+                        {todo.completed ? (
+                          <svg className="size-2.5 text-background" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : null}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteItem(todo.id)}
+                        className="text-muted-foreground hover:text-destructive"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    </div>
+                  </div>
+                )
+              })
+            ) : (
+              <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+                {list ? "No return items yet." : "Shopping returns list unavailable."}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function ListCard({ 
@@ -395,6 +628,8 @@ function ListCard({
   onAddTodo,
   onToggleTodo,
   onDeleteTodo,
+  labels,
+  labelFilterIds,
   listTabs,
 }: ListCardProps) {
   const [isEditingName, setIsEditingName] = useState(false)
@@ -415,6 +650,9 @@ function ListCard({
   }
 
   const currentTabId = list.tabId ?? (list.type === "planning" ? "planning-tab" : "my-lists-tab")
+  const visibleTodos = list.todos.filter((todo) =>
+    labelFilterIds.length === 0 || todo.labelIds.some((labelId) => labelFilterIds.includes(labelId))
+  )
 
   return (
     <div
@@ -559,7 +797,7 @@ function ListCard({
 
       <div className="relative z-20 flex min-h-[360px] flex-1 flex-col">
         {Array.from({ length: 9 }).map((_, index) => {
-          const todo = list.todos[index]
+          const todo = visibleTodos[index]
 
           if (todo) {
             return (
@@ -577,12 +815,32 @@ function ListCard({
                     </svg>
                   )}
                 </button>
-                <span className={cn(
-                  "flex-1 truncate text-sm text-foreground",
-                  todo.completed && "line-through opacity-50"
-                )}>
-                  {todo.text}
-                </span>
+                <div className="flex-1 min-w-0">
+                  <div className={cn(
+                    "truncate text-sm text-foreground",
+                    todo.completed && "line-through opacity-50"
+                  )}>
+                    {todo.text}
+                  </div>
+                  {todo.labelIds.length > 0 ? (
+                    <div className="mt-0.5 flex flex-wrap gap-1">
+                      {todo.labelIds.slice(0, 2).map((labelId) => {
+                        const label = labels.find((item) => item.id === labelId)
+                        if (!label) return null
+
+                        return (
+                          <span
+                            key={label.id}
+                            className="rounded-full px-1.5 py-0.5 text-[9px] font-medium text-white"
+                            style={{ backgroundColor: label.color }}
+                          >
+                            {label.name}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  ) : null}
+                </div>
                 <button
                   onClick={() => onDeleteTodo(todo.id)}
                   className="opacity-0 text-muted-foreground transition-opacity hover:text-destructive group-hover/todo:opacity-100"
@@ -593,7 +851,7 @@ function ListCard({
             )
           }
 
-          const isInputRow = index === Math.min(list.todos.length, 8)
+          const isInputRow = index === Math.min(visibleTodos.length, 8)
 
           return (
             <div key={`${list.id}-line-${index}`} className="flex h-10 items-center border-b border-[#e8e8ec] dark:border-[#2a2d34]">

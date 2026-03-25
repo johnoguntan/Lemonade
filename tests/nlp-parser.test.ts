@@ -7,15 +7,15 @@ const referenceDate = new Date("2026-03-24T09:00:00")
 
 const parse = (input: string) =>
   parseNaturalLanguageTaskInput(input, {
-    tags: [],
+    labels: [],
     referenceDate,
   })
 
-test("defaults to today when no date is found", () => {
+test("does not invent a date when no date is found", () => {
   const result = parse("Plain task with no date")
 
   assert.equal(result.cleanText, "Plain task with no date")
-  assert.equal(result.scheduledDate, "2026-03-24")
+  assert.equal(result.scheduledDate, undefined)
 })
 
 test("parses relative day phrases", () => {
@@ -51,7 +51,7 @@ test("does not strip bridge words when no date or time token is found", () => {
   const result = parse("Search for gold")
 
   assert.equal(result.cleanText, "Search for gold")
-  assert.equal(result.scheduledDate, "2026-03-24")
+  assert.equal(result.scheduledDate, undefined)
 })
 
 test("preserves numeric nouns that are not time commands", () => {
@@ -91,3 +91,9 @@ test("cleans title while keeping parsed time and date data together", () => {
   assert.equal(result.time, "5pm")
 })
 
+test("parses > separated subtasks", () => {
+  const result = parse("Call Marco > confirm venue > send invite")
+
+  assert.equal(result.cleanText, "Call Marco")
+  assert.deepEqual(result.subtaskTitles, ["confirm venue", "send invite"])
+})

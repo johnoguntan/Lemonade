@@ -2,10 +2,10 @@
 
 import { useLemonadeStore, type BulletStyle } from "@/lib/store"
 import { Switch } from "@/components/ui/switch"
-import { Sun, Moon, Eye, EyeOff, Circle, Minus, ArrowRight, Ban, ChevronsLeft, Plus, Pencil, Trash2 } from "lucide-react"
+import { Sun, Moon, Eye, EyeOff, Circle, Minus, ArrowRight, Ban, ChevronsLeft, Plus, Pencil, Trash2, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTheme } from "next-themes"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { Input } from "@/components/ui/input"
 import {
   Popover,
@@ -26,25 +26,49 @@ const THEME_COLORS = [
   { label: 'black', hex: '#1A1A1A' },
 ]
 
+const TIMELINE_HOUR_OPTIONS = Array.from({ length: 24 }, (_, hour) => {
+  const suffix = hour >= 12 ? "PM" : "AM"
+  const normalized = hour % 12 === 0 ? 12 : hour % 12
+  return {
+    label: `${normalized}:00 ${suffix}`,
+    value: hour,
+  }
+})
+
 export function PreferencesPanel() {
-  const { preferences, setPreferences, setSidebarOpen, sidebarOpen, tags, addTag, editTag, deleteTag } = useLemonadeStore()
+  const {
+    preferences,
+    setPreferences,
+    setSidebarOpen,
+    sidebarOpen,
+    labels,
+    addLabel,
+    editLabel,
+    deleteLabel,
+    labelFilterIds,
+    toggleLabelFilter,
+    clearLabelFilters,
+  } = useLemonadeStore()
   const { setTheme } = useTheme()
   const [newTagName, setNewTagName] = useState("")
   const [newTagColor, setNewTagColor] = useState("#852CE6")
   const [editingTagId, setEditingTagId] = useState<string | null>(null)
   const [editTagName, setEditTagName] = useState("")
   const [editTagColor, setEditTagColor] = useState("")
+  const [isCreatingTag, setIsCreatingTag] = useState(false)
+  const newTagInputRef = useRef<HTMLInputElement>(null)
 
   const handleAddTag = () => {
     if (newTagName.trim()) {
-      addTag(newTagName.trim(), newTagColor)
+      addLabel(newTagName.trim(), newTagColor)
       setNewTagName("")
+      setIsCreatingTag(false)
     }
   }
 
   const handleEditTag = (id: string) => {
     if (editTagName.trim()) {
-      editTag(id, editTagName.trim(), editTagColor)
+      editLabel(id, editTagName.trim(), editTagColor)
       setEditingTagId(null)
     }
   }
@@ -52,6 +76,14 @@ export function PreferencesPanel() {
   const handleThemeChange = (theme: 'light' | 'dark') => {
     setPreferences({ theme })
     setTheme(theme)
+  }
+
+  const handleStartCreatingTag = (color: string) => {
+    setNewTagColor(color)
+    setIsCreatingTag(true)
+    requestAnimationFrame(() => {
+      newTagInputRef.current?.focus()
+    })
   }
 
   return (
@@ -141,6 +173,42 @@ export function PreferencesPanel() {
                   {label}
                 </button>
               ))}
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <div className="mb-3 flex items-center justify-between">
+              <label className="text-sm font-normal text-gray-300">Timeline hours</label>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="space-y-1">
+                <span className="block text-[10px] font-medium uppercase tracking-[0.12em] text-gray-500">Start</span>
+                <select
+                  value={preferences.timelineStartHour}
+                  onChange={(event) => setPreferences({ timelineStartHour: Number(event.target.value) })}
+                  className="h-9 w-full rounded border border-gray-700 bg-[#2a2a2a] px-3 text-xs text-gray-200 outline-none transition-colors focus:border-[var(--accent-color)]"
+                >
+                  {TIMELINE_HOUR_OPTIONS.map((option) => (
+                    <option key={`timeline-start-${option.value}`} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="block text-[10px] font-medium uppercase tracking-[0.12em] text-gray-500">End</span>
+                <select
+                  value={preferences.timelineEndHour}
+                  onChange={(event) => setPreferences({ timelineEndHour: Number(event.target.value) })}
+                  className="h-9 w-full rounded border border-gray-700 bg-[#2a2a2a] px-3 text-xs text-gray-200 outline-none transition-colors focus:border-[var(--accent-color)]"
+                >
+                  {TIMELINE_HOUR_OPTIONS.map((option) => (
+                    <option key={`timeline-end-${option.value}`} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
           </div>
 
@@ -270,17 +338,122 @@ export function PreferencesPanel() {
             </div>
           </div>
 
+          <div className="mb-6 flex items-center justify-between">
+            <label className="text-sm font-normal text-gray-300">Auto-move undone tasks to today</label>
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] text-gray-500 font-medium">OFF</span>
+              <Switch
+                checked={preferences.autoMoveUndoneToToday}
+                onCheckedChange={(checked) => setPreferences({ autoMoveUndoneToToday: checked })}
+                className="data-[state=checked]:bg-[var(--accent-color)] scale-75"
+              />
+              <span className="text-[10px] text-gray-500 font-medium">ON</span>
+            </div>
+          </div>
+
           <Separator className="bg-gray-800 my-6" />
 
-          {/* Tags Section */}
+          {/* Labels Section */}
           <div className="mb-6">
-            <h3 className="text-sm font-semibold text-gray-300 mb-4 uppercase tracking-wider">Tags</h3>
+            <h3 className="text-sm font-semibold text-gray-300 mb-4 uppercase tracking-wider">Labels</h3>
+
+            <div className="mb-4">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs text-gray-400 uppercase tracking-wider">Default label</span>
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                <button
+                  type="button"
+                  onClick={() => setPreferences({ defaultLabelId: null })}
+                  className={cn(
+                    "shrink-0 rounded-full border px-3 py-1.5 text-[11px] font-medium transition-colors",
+                    preferences.defaultLabelId === null
+                      ? "border-transparent bg-white text-black"
+                      : "border-gray-700 text-gray-300 hover:text-white"
+                  )}
+                >
+                  None
+                </button>
+                {labels.map((label) => (
+                  <button
+                    key={label.id}
+                    type="button"
+                    onClick={() => setPreferences({ defaultLabelId: label.id })}
+                    className={cn(
+                      "inline-flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-medium transition-colors",
+                      preferences.defaultLabelId === label.id
+                        ? "border-transparent text-white"
+                        : "border-gray-700 text-gray-300 hover:text-white"
+                    )}
+                    style={preferences.defaultLabelId === label.id ? { backgroundColor: label.color } : undefined}
+                  >
+                    <span className="size-2 rounded-full" style={{ backgroundColor: label.color }} />
+                    <span>{label.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs text-gray-400 uppercase tracking-wider">Filter labels</span>
+                {labelFilterIds.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => clearLabelFilters()}
+                    className="text-[10px] text-gray-500 hover:text-white"
+                  >
+                    Clear all
+                  </button>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {labels.map((label) => (
+                  <button
+                    key={label.id}
+                    type="button"
+                    onClick={() => toggleLabelFilter(label.id)}
+                    className={cn(
+                      "inline-flex items-center gap-2 rounded-full border px-2 py-1 text-[11px] transition-colors",
+                      labelFilterIds.includes(label.id)
+                        ? "border-transparent text-white"
+                        : "border-gray-700 text-gray-300 hover:text-white"
+                    )}
+                    style={labelFilterIds.includes(label.id) ? { backgroundColor: label.color } : undefined}
+                  >
+                    <span className="size-2 rounded-full" style={{ backgroundColor: label.color }} />
+                    <span>{label.name}</span>
+                    {labelFilterIds.includes(label.id) ? (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          toggleLabelFilter(label.id)
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            toggleLabelFilter(label.id)
+                          }
+                        }}
+                        className="inline-flex items-center justify-center rounded-full bg-black/10 p-0.5 text-white/90"
+                        aria-label={`Remove ${label.name} filter`}
+                      >
+                        <X className="size-2.5" />
+                      </span>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+            </div>
             
-            {/* Tag List */}
+            {/* Label List */}
             <div className="space-y-2 mb-4">
-              {tags.map((tag) => (
-                <div key={tag.id} className="flex items-center justify-between group/tag">
-                  {editingTagId === tag.id ? (
+              {labels.map((label) => (
+                <div key={label.id} className="flex items-center justify-between group/tag">
+                  {editingTagId === label.id ? (
                     <div className="flex items-center gap-2 w-full">
                       <div className="flex-1 flex items-center bg-[#2a2a2a] rounded px-2 gap-2">
                         <Popover>
@@ -303,33 +476,33 @@ export function PreferencesPanel() {
                         <Input
                           value={editTagName}
                           onChange={(e) => setEditTagName(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && handleEditTag(tag.id)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleEditTag(label.id)}
                           className="h-7 text-xs bg-transparent border-none focus-visible:ring-0 text-white p-0"
                           autoFocus
                         />
                       </div>
-                      <button onClick={() => handleEditTag(tag.id)} className="text-gray-400 hover:text-white">
+                      <button onClick={() => handleEditTag(label.id)} className="text-gray-400 hover:text-white">
                         <Plus className="size-4 rotate-45" />
                       </button>
                     </div>
                   ) : (
                     <>
                       <div className="flex items-center gap-2">
-                        <div className="size-2 rounded-full" style={{ backgroundColor: tag.color }} />
-                        <span className="text-xs text-gray-300">{tag.name}</span>
+                        <div className="size-2 rounded-full" style={{ backgroundColor: label.color }} />
+                        <span className="text-xs text-gray-300">{label.name}</span>
                       </div>
                       <div className="flex items-center gap-1 opacity-0 group-hover/tag:opacity-100 transition-opacity">
                         <button 
                           onClick={() => {
-                            setEditingTagId(tag.id)
-                            setEditTagName(tag.name)
-                            setEditTagColor(tag.color)
+                            setEditingTagId(label.id)
+                            setEditTagName(label.name)
+                            setEditTagColor(label.color)
                           }}
                           className="p-1 text-gray-500 hover:text-white"
                         >
                           <Pencil className="size-3" />
                         </button>
-                        <button onClick={() => deleteTag(tag.id)} className="p-1 text-gray-500 hover:text-red-400">
+                        <button onClick={() => deleteLabel(label.id)} className="p-1 text-gray-500 hover:text-red-400">
                           <Trash2 className="size-3" />
                         </button>
                       </div>
@@ -339,40 +512,71 @@ export function PreferencesPanel() {
               ))}
             </div>
 
-            {/* Add Tag */}
-            <div className="flex items-center gap-2">
-              <div className="flex-1 flex items-center bg-[#2a2a2a] rounded px-2 gap-2">
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <button className="size-3 rounded-full shrink-0" style={{ backgroundColor: newTagColor }} />
-                  </PopoverTrigger>
-                  <PopoverContent className="w-40 bg-[#2a2a2a] border-gray-700 p-2">
-                    <div className="grid grid-cols-4 gap-2">
-                      {THEME_COLORS.map(c => (
-                        <button
-                          key={c.hex}
-                          className="size-6 rounded-full"
-                          style={{ backgroundColor: c.hex }}
-                          onClick={() => setNewTagColor(c.hex)}
-                        />
-                      ))}
-                    </div>
-                  </PopoverContent>
-                </Popover>
-                <Input
-                  placeholder="New tag..."
-                  value={newTagName}
-                  onChange={(e) => setNewTagName(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAddTag()}
-                  className="h-8 text-xs bg-transparent border-none focus-visible:ring-0 text-white p-0"
-                />
+            {/* Add Label */}
+            <div className="space-y-3">
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs text-gray-400 uppercase tracking-wider">Create label</span>
+                  {isCreatingTag ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsCreatingTag(false)
+                        setNewTagName("")
+                      }}
+                      className="text-[10px] text-gray-500 hover:text-white"
+                    >
+                      Cancel
+                    </button>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {THEME_COLORS.map((color) => (
+                    <button
+                      key={color.hex}
+                      type="button"
+                      onClick={() => handleStartCreatingTag(color.hex)}
+                      className={cn(
+                        "size-6 rounded-full border transition-transform hover:scale-105",
+                        isCreatingTag && newTagColor === color.hex ? "border-white ring-1 ring-white/50" : "border-white/10"
+                      )}
+                      style={{ backgroundColor: color.hex }}
+                      title={`Create label with ${color.label}`}
+                    />
+                  ))}
+                </div>
               </div>
-              <button 
-                onClick={handleAddTag}
-                className="size-8 flex items-center justify-center bg-[#2a2a2a] rounded hover:bg-[#3a3a3a] text-gray-400 hover:text-white transition-colors"
-              >
-                <Plus className="size-4" />
-              </button>
+
+              {isCreatingTag ? (
+                <div className="flex items-center gap-2">
+                  <div className="flex flex-1 items-center bg-[#2a2a2a] rounded px-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsCreatingTag(false)}
+                      className="size-3 rounded-full shrink-0"
+                      style={{ backgroundColor: newTagColor }}
+                      aria-label="Selected label color"
+                    />
+                    <Input
+                      ref={newTagInputRef}
+                      placeholder="Type label name..."
+                      value={newTagName}
+                      onChange={(e) => setNewTagName(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleAddTag()}
+                      className="h-8 text-xs bg-transparent border-none focus-visible:ring-0 text-white p-0"
+                    />
+                  </div>
+                  {newTagName.trim() ? (
+                    <button
+                      type="button"
+                      onClick={handleAddTag}
+                      className="rounded bg-[#2a2a2a] px-2.5 py-2 text-[11px] font-medium text-gray-300 transition-colors hover:bg-[#3a3a3a] hover:text-white"
+                    >
+                      Save
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>

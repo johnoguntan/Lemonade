@@ -12,11 +12,12 @@ export type BulletStyle = 'none' | 'dot' | 'dash' | 'arrow'
 
 export interface SubTask {
   id: string
-  text: string
+  title: string
   completed: boolean
+  parentId: string
 }
 
-export interface Tag {
+export interface Label {
   id: string
   name: string
   color: string
@@ -38,14 +39,18 @@ export interface Todo {
   recurringDays?: number[] // 0-6 for Sunday-Saturday
   parentId?: string | null // For recurring instances
   priority?: 'high' | 'medium' | 'low' | 'none'
-  tags?: string[] // Array of tag IDs
+  labelIds: string[]
+  tags?: string[] // Legacy migrated tag IDs
+  storeName?: string
+  returnDeadline?: string
+  notes?: string
 }
 
 export interface List {
   id: string
   name: string
   todos: Todo[]
-  type: 'list' | 'planning'
+  type: 'list' | 'planning' | 'shopping-returns'
   tabId?: string
 }
 
@@ -58,14 +63,18 @@ export interface UserPreferences {
   columns: 1 | 3 | 5 | 7
   textSize: 'sm' | 'md' | 'lg'
   spacing: 'compact' | 'normal' | 'comfortable'
+  timelineStartHour: number
+  timelineEndHour: number
   showCompleted: boolean
   bulletStyle: BulletStyle
   startOnYesterday: boolean
+  autoMoveUndoneToToday: boolean
   theme: 'light' | 'dark'
   accentColor: string
   showCelebrations: boolean
   colorPalette: string[]
   showDotGridBackground: boolean
+  defaultLabelId: string | null
 }
 
 export interface NaturalLanguagePreviewToken {
@@ -76,6 +85,7 @@ export interface NaturalLanguagePreviewToken {
 export interface ParsedNaturalLanguageTask {
   cleanText: string
   scheduledDate?: string
+  subtaskTitles: string[]
   recurrence?: {
     isRecurring: boolean
     recurringFrequency?: 'daily' | 'weekday' | 'weekly' | 'monthly'
@@ -83,8 +93,8 @@ export interface ParsedNaturalLanguageTask {
     label: string
   }
   priority?: Todo['priority']
-  tagIds: string[]
-  newTagNames: string[]
+  labelIds: string[]
+  newLabelNames: string[]
   time?: string
   previewTokens: NaturalLanguagePreviewToken[]
 }
@@ -92,6 +102,13 @@ export interface ParsedNaturalLanguageTask {
 interface DeletedTodoBuffer {
   items: Todo[]
   token: string
+}
+
+type CalendarTodoInput = Omit<Todo, 'id' | 'subtasks' | 'endOfDay' | 'createdAt' | 'labelIds'> & {
+  endOfDay?: boolean
+  createdAt?: number
+  labelIds?: string[]
+  subtasks?: Array<Partial<SubTask> & { title?: string; text?: string }>
 }
 
 interface LemonadeStore {
@@ -103,9 +120,11 @@ interface LemonadeStore {
   calendarTodos: Todo[]
   lastCreatedTodoId: string | null
   lastDeleted: DeletedTodoBuffer | null
-  addCalendarTodo: (todo: Omit<Todo, 'id' | 'subtasks' | 'endOfDay' | 'createdAt'> & { endOfDay?: boolean; createdAt?: number }) => string
+  lastAutoMovedCount: number
+  addCalendarTodo: (todo: CalendarTodoInput) => string
   clearLastCreatedTodoId: () => void
   clearLastDeleted: (token?: string) => void
+  clearLastAutoMovedCount: () => void
   restoreLastDeletedTodo: () => void
   updateCalendarTodo: (id: string, updates: Partial<Todo>) => void
   updateCalendarTodoInstance: (id: string, updates: Partial<Todo>) => void
@@ -113,6 +132,7 @@ interface LemonadeStore {
   toggleCalendarTodo: (id: string) => void
   toggleEndOfDay: (id: string) => void
   addSubtask: (todoId: string, text: string) => void
+  editSubtask: (todoId: string, subtaskId: string, title: string) => void
   toggleSubtask: (todoId: string, subtaskId: string) => void
   deleteSubtask: (todoId: string, subtaskId: string) => void
   moveTodoToDate: (todoId: string, newDate: string) => void
@@ -130,26 +150,31 @@ interface LemonadeStore {
   addListAdjacent: (referenceListId: string, position: 'left' | 'right') => void
   moveListToTab: (listId: string, tabId: string) => void
   addListTodo: (listId: string, text: string) => void
+  updateListTodo: (listId: string, todoId: string, updates: Partial<Todo>) => void
   deleteListTodo: (listId: string, todoId: string) => void
   toggleListTodo: (listId: string, todoId: string) => void
   
  
   
-  // Tags
-  tags: Tag[]
-  addTag: (name: string, color: string) => void
-  ensureTagIds: (names: string[]) => string[]
-  editTag: (id: string, name: string, color: string) => void
-  deleteTag: (id: string) => void
+  // Labels
+  labels: Label[]
+  addLabel: (name: string, color: string) => void
+  ensureLabelIds: (names: string[]) => string[]
+  editLabel: (id: string, name: string, color: string) => void
+  deleteLabel: (id: string) => void
+  addLabelToTask: (taskId: string, labelId: string) => void
+  removeLabelFromTask: (taskId: string, labelId: string) => void
   
   // Search
   searchQuery: string
   setSearchQuery: (query: string) => void
   
   // Filter
-  tagFilterId: string | null
+  labelFilterIds: string[]
   activeFilterColor: string | null
   setActiveFilterColor: (color: string | null) => void
+  toggleLabelFilter: (labelId: string) => void
+  clearLabelFilters: () => void
   
   // Sidebar
   sidebarOpen: boolean
@@ -159,6 +184,7 @@ interface LemonadeStore {
   selectedCalendarDate: string
   setSelectedCalendarDate: (date: string) => void
   weekCount: number
+  lastSessionDate: string | null
   incrementWeekCount: () => void
   decrementWeekCount: () => void
 
@@ -180,16 +206,32 @@ type PersistedLemonadeStore = Partial<
     | 'calendarTodos'
     | 'listTabs'
     | 'lists'
-    | 'tags'
+    | 'labels'
     | 'searchQuery'
-    | 'tagFilterId'
+    | 'labelFilterIds'
     | 'sidebarOpen'
     | 'weekCount'
     | 'isCalendarExpanded'
+    | 'lastSessionDate'
   >
 >
 
 const generateId = () => Math.random().toString(36).substring(2, 15)
+
+const normalizeSubtask = (
+  subtask: Partial<SubTask> & { id?: string; title?: string; text?: string; completed?: boolean; parentId?: string },
+  fallbackParentId: string
+): SubTask => ({
+  id: typeof subtask.id === "string" ? subtask.id : generateId(),
+  title:
+    typeof subtask.title === "string"
+      ? subtask.title
+      : typeof subtask.text === "string"
+        ? subtask.text
+        : "",
+  completed: typeof subtask.completed === "boolean" ? subtask.completed : false,
+  parentId: typeof subtask.parentId === "string" ? subtask.parentId : fallbackParentId,
+})
 
 // Persisted storage version history:
 // 0: legacy persisted state before explicit versioning/migrations
@@ -202,17 +244,28 @@ const generateId = () => Math.random().toString(36).substring(2, 15)
 export const STORAGE_VERSION = 1
 export const LEMONADE_STORAGE_KEY = "lemonade-storage"
 
-const normalizeTodo = (todo: Todo, fallbackCreatedAt: number): Todo => ({
-  ...todo,
-  createdAt: typeof todo.createdAt === "number" ? todo.createdAt : fallbackCreatedAt,
-  endOfDay: typeof todo.endOfDay === "boolean" ? todo.endOfDay : false,
-  subtasks: Array.isArray(todo.subtasks) ? todo.subtasks : [],
-})
+const normalizeTodo = (todo: Todo, fallbackCreatedAt: number): Todo => {
+  const fallbackLabelIds = Array.isArray(todo.labelIds)
+    ? todo.labelIds
+    : Array.isArray(todo.tags)
+      ? todo.tags
+      : []
+
+  return {
+    ...todo,
+    createdAt: typeof todo.createdAt === "number" ? todo.createdAt : fallbackCreatedAt,
+    endOfDay: typeof todo.endOfDay === "boolean" ? todo.endOfDay : false,
+    subtasks: Array.isArray(todo.subtasks) ? todo.subtasks.map((subtask) => normalizeSubtask(subtask, todo.id)) : [],
+    labelIds: fallbackLabelIds,
+    storeName: typeof todo.storeName === "string" ? todo.storeName : undefined,
+    returnDeadline: typeof todo.returnDeadline === "string" ? todo.returnDeadline : undefined,
+    notes: typeof todo.notes === "string" ? todo.notes : undefined,
+  }
+}
 
 const normalizeLegacyTodo = (todo: Todo, fallbackCreatedAt: number): Todo => ({
   ...normalizeTodo(todo, fallbackCreatedAt),
   parentId: todo.parentId ?? null,
-  subtasks: Array.isArray(todo.subtasks) ? todo.subtasks : [],
 })
 
 const normalizePersistedPreferences = (
@@ -223,12 +276,72 @@ const normalizePersistedPreferences = (
   ...preferences,
   textSize: normalizeTextSizePreference(preferences?.textSize),
   spacing: normalizeSpacingPreference(preferences?.spacing),
+  timelineStartHour: normalizeTimelineHourPreference(preferences?.timelineStartHour, fallbackPreferences.timelineStartHour),
+  timelineEndHour: normalizeTimelineHourPreference(preferences?.timelineEndHour, fallbackPreferences.timelineEndHour),
+  autoMoveUndoneToToday: preferences?.autoMoveUndoneToToday ?? fallbackPreferences.autoMoveUndoneToToday,
   colorPalette: preferences?.colorPalette ?? fallbackPreferences.colorPalette,
   showDotGridBackground: preferences?.showDotGridBackground ?? fallbackPreferences.showDotGridBackground,
+  defaultLabelId:
+    typeof preferences?.defaultLabelId === "string" ? preferences.defaultLabelId : null,
 })
 
 const clampWeekCount = (value: unknown, fallback: number) =>
   typeof value === "number" ? Math.min(4, Math.max(1, value)) : fallback
+
+const FIXED_LIST_TABS: ListTab[] = [
+  { id: 'planning-tab', name: 'PLANNING' },
+  { id: 'my-lists-tab', name: 'MY LISTS' },
+  { id: 'shopping-returns-tab', name: 'SHOPPING RETURNS' },
+]
+
+const FIXED_LISTS: List[] = [
+  { id: 'brain-dump', name: 'BRAIN DUMP', todos: [], type: 'list', tabId: 'my-lists-tab' },
+  { id: 'grocery', name: 'GROCERY LIST', todos: [], type: 'list', tabId: 'my-lists-tab' },
+  { id: 'to-buy', name: 'TO BUY', todos: [], type: 'list', tabId: 'my-lists-tab' },
+  { id: 'shopping-returns', name: 'SHOPPING RETURNS', todos: [], type: 'shopping-returns', tabId: 'shopping-returns-tab' },
+  { id: 'to-read', name: 'TO READ', todos: [], type: 'list', tabId: 'my-lists-tab' },
+  { id: 'goals', name: 'GOALS', todos: [], type: 'planning', tabId: 'planning-tab' },
+  { id: 'someday', name: 'SOMEDAY', todos: [], type: 'planning', tabId: 'planning-tab' },
+  { id: 'ideas', name: 'IDEAS', todos: [], type: 'planning', tabId: 'planning-tab' },
+]
+
+const ensureFixedTabs = (tabs: ListTab[]): ListTab[] => {
+  const byId = new Map(tabs.map((tab) => [tab.id, tab]))
+  return FIXED_LIST_TABS.map((tab) => byId.get(tab.id) ?? tab).concat(
+    tabs.filter((tab) => !FIXED_LIST_TABS.some((fixedTab) => fixedTab.id === tab.id))
+  )
+}
+
+const ensureFixedLists = (lists: List[]): List[] => {
+  const existing = new Map(lists.map((list) => [list.id, list]))
+  const normalizedExisting = lists.map((list) =>
+    list.id === "shopping-returns"
+      ? { ...list, type: "shopping-returns" as const, tabId: "shopping-returns-tab" }
+      : list
+  )
+
+  const fixedLists = FIXED_LISTS.map((list) => {
+    const current = existing.get(list.id)
+    if (!current) {
+      return list
+    }
+
+    if (list.id === "shopping-returns") {
+      return {
+        ...current,
+        name: "SHOPPING RETURNS",
+        type: "shopping-returns" as const,
+        tabId: "shopping-returns-tab",
+      }
+    }
+
+    return current
+  })
+
+  return fixedLists.concat(
+    normalizedExisting.filter((list) => !FIXED_LISTS.some((fixedList) => fixedList.id === list.id))
+  )
+}
 
 export const migratePersistedLemonadeState = (
   persistedState: unknown,
@@ -242,14 +355,18 @@ export const migratePersistedLemonadeState = (
     columns: 5,
     textSize: "md",
     spacing: "normal",
+    timelineStartHour: 6,
+    timelineEndHour: 23,
     showCompleted: true,
     bulletStyle: "none",
     startOnYesterday: false,
+    autoMoveUndoneToToday: true,
     theme: "light",
     accentColor: "#852CE6",
     showCelebrations: false,
     colorPalette: DEFAULT_COLOR_PALETTE,
     showDotGridBackground: true,
+    defaultLabelId: null,
   }
 
   const isLegacyVersion = typeof fallbackState === "undefined"
@@ -262,8 +379,9 @@ export const migratePersistedLemonadeState = (
           isLegacyVersion ? normalizeLegacyTodo(todo, index) : normalizeTodo(todo, index)
         )
       : [],
-    listTabs: Array.isArray(persisted.listTabs) ? persisted.listTabs : [],
-    lists: Array.isArray(persisted.lists)
+    listTabs: ensureFixedTabs(Array.isArray(persisted.listTabs) ? persisted.listTabs : []),
+    lists: ensureFixedLists(
+      Array.isArray(persisted.lists)
       ? persisted.lists.map((list, listIndex) => ({
           ...list,
           todos: Array.isArray(list.todos)
@@ -274,12 +392,25 @@ export const migratePersistedLemonadeState = (
               )
             : [],
         }))
-      : [],
-    tags: Array.isArray(persisted.tags) ? persisted.tags : [],
+      : []
+    ),
+    labels: Array.isArray((persisted as { labels?: Label[] }).labels)
+      ? (persisted as { labels: Label[] }).labels
+      : Array.isArray((persisted as { tags?: Label[] }).tags)
+        ? (persisted as { tags: Label[] }).tags
+        : [],
     searchQuery: typeof persisted.searchQuery === "string" ? persisted.searchQuery : "",
-    tagFilterId: typeof persisted.tagFilterId === "string" ? persisted.tagFilterId : null,
+    labelFilterIds: Array.isArray((persisted as { labelFilterIds?: string[] }).labelFilterIds)
+      ? (persisted as { labelFilterIds: string[] }).labelFilterIds
+      : typeof (persisted as { tagFilterId?: string }).tagFilterId === "string"
+        ? [(persisted as { tagFilterId: string }).tagFilterId]
+        : [],
     sidebarOpen: typeof persisted.sidebarOpen === "boolean" ? persisted.sidebarOpen : false,
     weekCount: clampWeekCount(persisted.weekCount, fallbackState?.weekCount ?? 2),
+    lastSessionDate:
+      typeof (persisted as { lastSessionDate?: string }).lastSessionDate === "string"
+        ? (persisted as { lastSessionDate: string }).lastSessionDate
+        : null,
     isCalendarExpanded:
       typeof persisted.isCalendarExpanded === "boolean"
         ? persisted.isCalendarExpanded
@@ -371,6 +502,14 @@ export const parseLocalDateKey = (value: string) => {
 
 const toIsoDate = (date: Date) => formatLocalDateKey(date)
 
+const normalizeTodoDate = (value: string | null | undefined) => {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return toIsoDate(new Date())
+  }
+
+  return value
+}
+
 const getInitialCalendarDate = (startOnYesterday: boolean) => {
   const date = new Date()
   if (startOnYesterday) {
@@ -397,6 +536,17 @@ const normalizeSpacingPreference = (value: unknown): UserPreferences["spacing"] 
   if (value === "S") return "compact"
   if (value === "L") return "comfortable"
   return "normal"
+}
+
+const normalizeTimelineHourPreference = (value: unknown, fallback: number) => {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return fallback
+  }
+
+  const normalized = Math.floor(value)
+  if (normalized < 0) return 0
+  if (normalized > 23) return 23
+  return normalized
 }
 
 const titleCase = (value: string) =>
@@ -506,8 +656,12 @@ const stripTokenRanges = (input: string, ranges: TokenRange[]) => {
 
 export function parseNaturalLanguageTaskInput(
   input: string,
-  options: { tags: Tag[]; referenceDate?: Date }
+  options: { labels: Label[]; referenceDate?: Date }
 ): ParsedNaturalLanguageTask {
+  const [taskInput = "", ...subtaskParts] = input
+    .split(/\s*>\s*/)
+    .map((segment) => segment.trim())
+    .filter(Boolean)
   const referenceDate = options.referenceDate ?? new Date()
   const ranges: TokenRange[] = []
   let selectedDateValue: string | undefined
@@ -522,9 +676,9 @@ export function parseNaturalLanguageTaskInput(
   let timeSelection: string | undefined
   let timePreview: NaturalLanguagePreviewToken | null = null
   let timeIndex = -1
-  const tagIds: string[] = []
-  const newTagNames: string[] = []
-  const tagPreviews: NaturalLanguagePreviewToken[] = []
+  const labelIds: string[] = []
+  const newLabelNames: string[] = []
+  const labelPreviews: NaturalLanguagePreviewToken[] = []
 
   const pushRange = (range: TokenRange) => {
     if (!hasOverlap(ranges, range.start, range.end)) {
@@ -570,16 +724,16 @@ export function parseNaturalLanguageTaskInput(
       .map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day])
       .join("/")
 
-  for (const match of input.matchAll(/\bday after tomorrow\b/gi)) {
+  for (const match of taskInput.matchAll(/\bday after tomorrow\b/gi)) {
     registerDate(match as RegExpExecArray, addDays(referenceDate, 2), "Day After Tomorrow")
   }
 
-  for (const match of input.matchAll(/\btonight\b/gi)) {
+  for (const match of taskInput.matchAll(/\btonight\b/gi)) {
     registerDate(match as RegExpExecArray, referenceDate, "Tonight")
     setTimeFromOverlappingToken(match as RegExpExecArray, "9pm", "Tonight")
   }
 
-  for (const match of input.matchAll(/\bin\s+(\d+)\s+days?\b/gi)) {
+  for (const match of taskInput.matchAll(/\bin\s+(\d+)\s+days?\b/gi)) {
     const dayCount = Number.parseInt(match[1], 10)
     if (Number.isNaN(dayCount)) {
       continue
@@ -587,20 +741,20 @@ export function parseNaturalLanguageTaskInput(
     registerDate(match as RegExpExecArray, addDays(referenceDate, dayCount), `In ${dayCount} Day${dayCount === 1 ? "" : "s"}`)
   }
 
-  for (const match of input.matchAll(/\b(today|tomorrow)\b/gi)) {
+  for (const match of taskInput.matchAll(/\b(today|tomorrow)\b/gi)) {
     const keyword = match[0].toLowerCase()
     const resolved = keyword === "tomorrow" ? addDays(referenceDate, 1) : referenceDate
     registerDate(match as RegExpExecArray, resolved, titleCase(keyword))
   }
 
-  for (const match of input.matchAll(/\bnext\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi)) {
+  for (const match of taskInput.matchAll(/\bnext\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi)) {
     const weekday = weekdayLookup[match[1].toLowerCase()]
     registerDate(match as RegExpExecArray, buildUpcomingWeekday(weekday, referenceDate), `Next ${titleCase(match[1])}`)
   }
 
-  for (const match of input.matchAll(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi)) {
+  for (const match of taskInput.matchAll(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi)) {
     const matchIndex = match.index ?? 0
-    const before = input.slice(Math.max(0, matchIndex - 6), matchIndex).toLowerCase()
+    const before = taskInput.slice(Math.max(0, matchIndex - 6), matchIndex).toLowerCase()
     if (/\b(next|every)\s*$/.test(before)) {
       continue
     }
@@ -608,7 +762,7 @@ export function parseNaturalLanguageTaskInput(
     registerDate(match as RegExpExecArray, buildUpcomingWeekday(weekday, referenceDate), titleCase(match[1]))
   }
 
-  for (const match of input.matchAll(/\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|sept|october|oct|november|nov|december|dec)\s+(\d{1,2})(?:st|nd|rd|th)?\b/gi)) {
+  for (const match of taskInput.matchAll(/\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|sept|october|oct|november|nov|december|dec)\s+(\d{1,2})(?:st|nd|rd|th)?\b/gi)) {
     const month = monthLookup[match[1].toLowerCase()]
     const day = Number.parseInt(match[2], 10)
     if (Number.isNaN(day)) {
@@ -617,7 +771,7 @@ export function parseNaturalLanguageTaskInput(
     registerDate(match as RegExpExecArray, resolveMonthDayDate(month, day, referenceDate), `${titleCase(match[1])} ${day}`)
   }
 
-  for (const match of input.matchAll(/\bevery\s+(day|weekday|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi)) {
+  for (const match of taskInput.matchAll(/\bevery\s+(day|weekday|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi)) {
     const value = match[1].toLowerCase()
     const preview = {
       key: `recurrence-${match.index}`,
@@ -647,7 +801,7 @@ export function parseNaturalLanguageTaskInput(
     }
   }
 
-  for (const match of input.matchAll(/\bevery\s+((?:sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat)(?:\s*\/\s*(?:sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat))*)\b/gi)) {
+  for (const match of taskInput.matchAll(/\bevery\s+((?:sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat)(?:\s*\/\s*(?:sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat))*)\b/gi)) {
     const aliases = match[1]
       .split("/")
       .map((value) => normalizeTagName(value))
@@ -678,7 +832,7 @@ export function parseNaturalLanguageTaskInput(
     }
   }
 
-  for (const match of input.matchAll(/\bweekly\b/gi)) {
+  for (const match of taskInput.matchAll(/\bweekly\b/gi)) {
     const recurrence: ParsedNaturalLanguageTask["recurrence"] = {
       isRecurring: true,
       recurringFrequency: "weekly",
@@ -698,7 +852,7 @@ export function parseNaturalLanguageTaskInput(
     }
   }
 
-  for (const match of input.matchAll(/!(high|medium|low)\b/gi)) {
+  for (const match of taskInput.matchAll(/!(high|medium|low)\b/gi)) {
     const value = match[1].toLowerCase() as NonNullable<Todo["priority"]>
     const preview = { key: `priority-${match.index}`, label: `❗ ${titleCase(value)}` }
     if (pushRange({ start: match.index!, end: match.index! + match[0].length, type: "priority", preview, payload: value })) {
@@ -710,49 +864,49 @@ export function parseNaturalLanguageTaskInput(
     }
   }
 
-  for (const match of input.matchAll(/#([a-z0-9_-]+)/gi)) {
+  for (const match of taskInput.matchAll(/#([a-z0-9_-]+)/gi)) {
     const tagName = normalizeTagName(match[1])
-    const existingTag = options.tags.find((tag) => normalizeTagName(tag.name) === tagName)
+    const existingLabel = options.labels.find((label) => normalizeTagName(label.name) === tagName)
     if (!pushRange({
       start: match.index!,
       end: match.index! + match[0].length,
       type: "tag",
       preview: {
         key: `tag-${match.index}`,
-        label: existingTag ? `#${tagName}` : `#${tagName} (new)`,
+        label: existingLabel ? `#${tagName}` : `#${tagName} (new)`,
       },
       payload: tagName,
     })) {
       continue
     }
 
-    if (existingTag) {
-      tagIds.push(existingTag.id)
-    } else if (!newTagNames.includes(tagName)) {
-      newTagNames.push(tagName)
+    if (existingLabel) {
+      labelIds.push(existingLabel.id)
+    } else if (!newLabelNames.includes(tagName)) {
+      newLabelNames.push(tagName)
     }
 
-    tagPreviews.push({
+    labelPreviews.push({
       key: `tag-${match.index}`,
-      label: existingTag ? `#${tagName}` : `#${tagName} (new)`,
+      label: existingLabel ? `#${tagName}` : `#${tagName} (new)`,
     })
   }
 
-  for (const match of input.matchAll(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/gi)) {
+  for (const match of taskInput.matchAll(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/gi)) {
     const normalized = normalizeTimeValue(match[0])
     registerTime(match as RegExpExecArray, normalized.replace(/^at/, ""), normalized)
   }
 
-  for (const match of input.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/gi)) {
+  for (const match of taskInput.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/gi)) {
     const normalized = normalizeTimeValue(match[0])
     registerTime(match as RegExpExecArray, normalized, normalized)
   }
 
-  for (const match of input.matchAll(/\b(?:at\s+)?noon\b/gi)) {
+  for (const match of taskInput.matchAll(/\b(?:at\s+)?noon\b/gi)) {
     registerTime(match as RegExpExecArray, "12pm", "Noon")
   }
 
-  for (const match of input.matchAll(/\b(?:this\s+)?(morning|evening)\b/gi)) {
+  for (const match of taskInput.matchAll(/\b(?:this\s+)?(morning|evening)\b/gi)) {
     const normalized = match[1].toLowerCase()
     const value = normalized === "evening" ? "6pm" : normalized
     registerTime(match as RegExpExecArray, value, titleCase(normalized))
@@ -769,7 +923,7 @@ export function parseNaturalLanguageTaskInput(
   if (prioritySelection && priorityPreview && priorityIndex >= 0) {
     previewTokens.push(priorityPreview)
   }
-  previewTokens.push(...tagPreviews)
+  previewTokens.push(...labelPreviews)
   if (timeSelection && timePreview && timeIndex >= 0) {
     previewTokens.push(timePreview)
   }
@@ -780,13 +934,16 @@ export function parseNaturalLanguageTaskInput(
     return leftIndex - rightIndex
   })
 
+  const scheduledDate = selectedDateValue
+
   return {
-    cleanText: stripTokenRanges(input, ranges),
-    scheduledDate: selectedDateValue ?? toIsoDate(referenceDate),
+    cleanText: stripTokenRanges(taskInput, ranges),
+    scheduledDate,
+    subtaskTitles: subtaskParts,
     recurrence: recurrenceSelection ?? undefined,
     priority: prioritySelection,
-    tagIds,
-    newTagNames,
+    labelIds,
+    newLabelNames,
     time: timeSelection,
     previewTokens,
   }
@@ -798,14 +955,28 @@ const removeRecurringChildren = (todos: Todo[], parentId: string) =>
 const removeIncompleteRecurringChildren = (todos: Todo[], parentId: string) =>
   todos.filter((todo) => todo.parentId !== parentId || todo.completed)
 
-const cloneRecurringSubtasks = (subtasks: SubTask[]) =>
+const cloneRecurringSubtasks = (subtasks: SubTask[], parentId: string) =>
   subtasks.map((subtask) => ({
     ...subtask,
     id: generateId(),
+    parentId,
     completed: false,
   }))
 
+const mapTodosInStore = (
+  state: Pick<LemonadeStore, "calendarTodos" | "lists">,
+  todoId: string,
+  updater: (todo: Todo) => Todo
+) => ({
+  calendarTodos: state.calendarTodos.map((todo) => (todo.id === todoId ? updater(todo) : todo)),
+  lists: state.lists.map((list) => ({
+    ...list,
+    todos: list.todos.map((todo) => (todo.id === todoId ? updater(todo) : todo)),
+  })),
+})
+
 const RECURRING_GENERATION_DAYS = 730
+const DEFAULT_LABEL_COLOR = "#6b7280"
 
 const getHolidays = (year: number): Record<string, string> => {
   return {
@@ -833,14 +1004,18 @@ export const useLemonadeStore = create<LemonadeStore>()(
         columns: 5,
         textSize: 'md',
         spacing: 'normal',
+        timelineStartHour: 6,
+        timelineEndHour: 23,
         showCompleted: true,
         bulletStyle: 'none',
         startOnYesterday: false,
+        autoMoveUndoneToToday: true,
         theme: 'light',
         accentColor: '#852CE6',
         showCelebrations: false,
         colorPalette: DEFAULT_COLOR_PALETTE,
         showDotGridBackground: true,
+        defaultLabelId: null,
       },
       
       setPreferences: (prefs) => set((state) => ({
@@ -851,16 +1026,32 @@ export const useLemonadeStore = create<LemonadeStore>()(
       calendarTodos: [],
       lastCreatedTodoId: null,
       lastDeleted: null,
+      lastAutoMovedCount: 0,
       
       addCalendarTodo: (todo) => {
         const id = generateId()
+        const resolvedDate = normalizeTodoDate(todo.date)
+        const defaultLabelId = get().preferences.defaultLabelId
+        const resolvedLabelIds =
+          Array.isArray(todo.labelIds) && todo.labelIds.length > 0
+            ? todo.labelIds
+            : defaultLabelId
+              ? [defaultLabelId]
+              : []
+        const resolvedSubtasks = Array.isArray(todo.subtasks)
+          ? todo.subtasks
+              .map((subtask) => normalizeSubtask(subtask, id))
+              .filter((subtask) => subtask.title.trim().length > 0)
+          : []
         set((state) => ({
           calendarTodos: [...state.calendarTodos, {
             ...todo,
             id,
+            date: resolvedDate,
+            labelIds: resolvedLabelIds,
             createdAt: todo.createdAt ?? Date.now(),
             endOfDay: todo.endOfDay ?? false,
-            subtasks: [],
+            subtasks: resolvedSubtasks,
           }],
           lastCreatedTodoId: id,
         }))
@@ -882,6 +1073,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
 
           return { lastDeleted: null }
         }),
+      clearLastAutoMovedCount: () => set({ lastAutoMovedCount: 0 }),
       restoreLastDeletedTodo: () =>
         set((state) => {
           if (!state.lastDeleted) {
@@ -982,40 +1174,45 @@ export const useLemonadeStore = create<LemonadeStore>()(
         )
       })),
       
-      addSubtask: (todoId, text) => set((state) => ({
-        calendarTodos: state.calendarTodos.map((todo) =>
-          todo.id === todoId
-            ? {
-                ...todo,
-                subtasks: [...todo.subtasks, { id: generateId(), text, completed: false }]
-              }
-            : todo
-        )
-      })),
-      
-      toggleSubtask: (todoId, subtaskId) => set((state) => ({
-        calendarTodos: state.calendarTodos.map((todo) =>
-          todo.id === todoId
-            ? {
-                ...todo,
-                subtasks: todo.subtasks.map((st) =>
-                  st.id === subtaskId ? { ...st, completed: !st.completed } : st
-                )
-              }
-            : todo
-        )
-      })),
-      
-      deleteSubtask: (todoId, subtaskId) => set((state) => ({
-        calendarTodos: state.calendarTodos.map((todo) =>
-          todo.id === todoId
-            ? {
-                ...todo,
-                subtasks: todo.subtasks.filter((st) => st.id !== subtaskId)
-              }
-            : todo
-        )
-      })),
+      addSubtask: (todoId, text) => set((state) =>
+        mapTodosInStore(state, todoId, (todo) => ({
+          ...todo,
+          subtasks: [
+            ...todo.subtasks,
+            {
+              id: generateId(),
+              title: text,
+              completed: false,
+              parentId: todo.id,
+            },
+          ],
+        }))
+      ),
+
+      editSubtask: (todoId, subtaskId, title) => set((state) =>
+        mapTodosInStore(state, todoId, (todo) => ({
+          ...todo,
+          subtasks: todo.subtasks.map((subtask) =>
+            subtask.id === subtaskId ? { ...subtask, title } : subtask
+          ),
+        }))
+      ),
+
+      toggleSubtask: (todoId, subtaskId) => set((state) =>
+        mapTodosInStore(state, todoId, (todo) => ({
+          ...todo,
+          subtasks: todo.subtasks.map((subtask) =>
+            subtask.id === subtaskId ? { ...subtask, completed: !subtask.completed } : subtask
+          ),
+        }))
+      ),
+
+      deleteSubtask: (todoId, subtaskId) => set((state) =>
+        mapTodosInStore(state, todoId, (todo) => ({
+          ...todo,
+          subtasks: todo.subtasks.filter((subtask) => subtask.id !== subtaskId),
+        }))
+      ),
       
       moveTodoToDate: (todoId, newDate) => set((state) => ({
         calendarTodos: state.calendarTodos.map((todo) =>
@@ -1024,10 +1221,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
       })),
       
       // Lists
-      listTabs: [
-        { id: 'planning-tab', name: 'PLANNING' },
-        { id: 'my-lists-tab', name: 'MY LISTS' },
-      ],
+      listTabs: FIXED_LIST_TABS,
 
       addListTab: (name) => set((state) => ({
         listTabs: [...state.listTabs, { id: generateId(), name }]
@@ -1035,45 +1229,57 @@ export const useLemonadeStore = create<LemonadeStore>()(
 
       renameListTab: (id, name) => set((state) => ({
         listTabs: state.listTabs.map((tab) =>
-          tab.id === id ? { ...tab, name } : tab
+          FIXED_LIST_TABS.some((fixedTab) => fixedTab.id === id)
+            ? tab
+            : tab.id === id
+              ? { ...tab, name }
+              : tab
         )
       })),
 
       deleteListsInTab: (tabId) => set((state) => ({
+        listTabs: state.listTabs,
         lists: state.lists.filter((list) => {
+          if (tabId === 'shopping-returns-tab') {
+            return true
+          }
           const listTabId = list.tabId ?? (list.type === 'planning' ? 'planning-tab' : 'my-lists-tab')
           return listTabId !== tabId
         })
       })),
 
-      lists: [
-        { id: 'brain-dump', name: 'BRAIN DUMP', todos: [], type: 'list', tabId: 'my-lists-tab' },
-        { id: 'grocery', name: 'GROCERY LIST', todos: [], type: 'list', tabId: 'my-lists-tab' },
-        { id: 'to-buy', name: 'TO BUY', todos: [], type: 'list', tabId: 'my-lists-tab' },
-        { id: 'shopping-returns', name: 'SHOPPING RETURNS', todos: [], type: 'list', tabId: 'my-lists-tab' },
-        { id: 'to-read', name: 'TO READ', todos: [], type: 'list', tabId: 'my-lists-tab' },
-        { id: 'goals', name: 'GOALS', todos: [], type: 'planning', tabId: 'planning-tab' },
-        { id: 'someday', name: 'SOMEDAY', todos: [], type: 'planning', tabId: 'planning-tab' },
-        { id: 'ideas', name: 'IDEAS', todos: [], type: 'planning', tabId: 'planning-tab' },
-      ],
+      lists: FIXED_LISTS,
       
-      addList: (name, type, tabId) => set((state) => ({
-        lists: [...state.lists, {
-          id: generateId(),
-          name,
-          todos: [],
-          type,
-          tabId: tabId ?? (type === 'planning' ? 'planning-tab' : 'my-lists-tab')
-        }]
-      })),
+      addList: (name, type, tabId) => set((state) => {
+        const resolvedTabId = tabId ?? (type === 'planning' ? 'planning-tab' : 'my-lists-tab')
+        if (resolvedTabId === 'shopping-returns-tab') {
+          return state
+        }
+
+        return {
+          lists: [...state.lists, {
+            id: generateId(),
+            name,
+            todos: [],
+            type,
+            tabId: resolvedTabId
+          }]
+        }
+      }),
       
       deleteList: (id) => set((state) => ({
-        lists: state.lists.filter((list) => list.id !== id)
+        lists: FIXED_LISTS.some((list) => list.id === id)
+          ? state.lists
+          : state.lists.filter((list) => list.id !== id)
       })),
       
       renameList: (id, name) => set((state) => ({
         lists: state.lists.map((list) =>
-          list.id === id ? { ...list, name } : list
+          FIXED_LISTS.some((fixedList) => fixedList.id === id)
+            ? list
+            : list.id === id
+              ? { ...list, name }
+              : list
         )
       })),
 
@@ -1145,6 +1351,10 @@ export const useLemonadeStore = create<LemonadeStore>()(
           return state
         }
 
+        if (sourceList.id === "shopping-returns" || tabId === "shopping-returns-tab") {
+          return state
+        }
+
         const updatedList: List = {
           ...sourceList,
           tabId,
@@ -1167,23 +1377,41 @@ export const useLemonadeStore = create<LemonadeStore>()(
         return { lists }
       }),
       
-      addListTodo: (listId, text) => set((state) => ({
+      addListTodo: (listId, text) => set((state) => {
+        const defaultLabelId = state.preferences.defaultLabelId
+
+        return {
+          lists: state.lists.map((list) =>
+            list.id === listId
+              ? {
+                  ...list,
+                  todos: [...list.todos, {
+                    id: generateId(),
+                    text,
+                    completed: false,
+                    date: new Date().toISOString().split('T')[0],
+                    createdAt: Date.now(),
+                    endOfDay: false,
+                    subtasks: [],
+                    labelIds: defaultLabelId ? [defaultLabelId] : [],
+                  }]
+                }
+              : list
+          )
+        }
+      }),
+
+      updateListTodo: (listId, todoId, updates) => set((state) => ({
         lists: state.lists.map((list) =>
           list.id === listId
             ? {
                 ...list,
-                todos: [...list.todos, {
-                  id: generateId(),
-                  text,
-                  completed: false,
-                  date: new Date().toISOString().split('T')[0],
-                  createdAt: Date.now(),
-                  endOfDay: false,
-                  subtasks: [],
-                }]
+                todos: list.todos.map((todo) =>
+                  todo.id === todoId ? { ...todo, ...updates } : todo
+                ),
               }
             : list
-        )
+        ),
       })),
       
       deleteListTodo: (listId, todoId) => set((state) => ({
@@ -1212,22 +1440,29 @@ export const useLemonadeStore = create<LemonadeStore>()(
       setSearchQuery: (query) => set({ searchQuery: query }),
       
       // Filter
-      tagFilterId: null,
+      labelFilterIds: [],
       activeFilterColor: null,
       setActiveFilterColor: (color) => set({ activeFilterColor: color }),
+      toggleLabelFilter: (labelId) =>
+        set((state) => ({
+          labelFilterIds: state.labelFilterIds.includes(labelId)
+            ? state.labelFilterIds.filter((id) => id !== labelId)
+            : [...state.labelFilterIds, labelId],
+        })),
+      clearLabelFilters: () => set({ labelFilterIds: [] }),
 
-      // Tags
-      tags: [],
-      addTag: (name, color) => set((state) => ({
-        tags: [...state.tags, { id: generateId(), name, color }]
+      // Labels
+      labels: [],
+      addLabel: (name, color) => set((state) => ({
+        labels: [...state.labels, { id: generateId(), name, color }]
       })),
-      ensureTagIds: (names) => {
+      ensureLabelIds: (names) => {
         const state = get()
         const resolvedIds: string[] = []
         const existingByName = new Map(
-          state.tags.map((tag) => [normalizeTagName(tag.name), tag])
+          state.labels.map((label) => [normalizeTagName(label.name), label])
         )
-        const nextTags = [...state.tags]
+        const nextLabels = [...state.labels]
 
         for (const rawName of names) {
           const normalized = normalizeTagName(rawName)
@@ -1238,39 +1473,74 @@ export const useLemonadeStore = create<LemonadeStore>()(
             continue
           }
 
-          const newTag = {
+          const newLabel = {
             id: generateId(),
             name: normalized,
-            color: state.preferences.accentColor,
+            color: DEFAULT_LABEL_COLOR,
           }
 
-          existingByName.set(normalized, newTag)
-          nextTags.push(newTag)
-          resolvedIds.push(newTag.id)
+          existingByName.set(normalized, newLabel)
+          nextLabels.push(newLabel)
+          resolvedIds.push(newLabel.id)
         }
 
-        if (nextTags.length !== state.tags.length) {
-          set({ tags: nextTags })
+        if (nextLabels.length !== state.labels.length) {
+          set({ labels: nextLabels })
         }
 
         return resolvedIds
       },
-      editTag: (id, name, color) => set((state) => ({
-        tags: state.tags.map((tag) => tag.id === id ? { ...tag, name, color } : tag)
+      editLabel: (id, name, color) => set((state) => ({
+        labels: state.labels.map((label) => label.id === id ? { ...label, name, color } : label)
       })),
-      deleteTag: (id) => set((state) => ({
-        tags: state.tags.filter((tag) => tag.id !== id),
+      deleteLabel: (id) => set((state) => ({
+        labels: state.labels.filter((label) => label.id !== id),
+        preferences: {
+          ...state.preferences,
+          defaultLabelId: state.preferences.defaultLabelId === id ? null : state.preferences.defaultLabelId,
+        },
+        labelFilterIds: state.labelFilterIds.filter((labelId) => labelId !== id),
         calendarTodos: state.calendarTodos.map(todo => ({
           ...todo,
-          tags: todo.tags?.filter(tagId => tagId !== id)
+          labelIds: todo.labelIds.filter((labelId) => labelId !== id)
         })),
         lists: state.lists.map(list => ({
           ...list,
           todos: list.todos.map(todo => ({
             ...todo,
-            tags: todo.tags?.filter(tagId => tagId !== id)
+            labelIds: todo.labelIds.filter((labelId) => labelId !== id)
           }))
         }))
+      })),
+      addLabelToTask: (taskId, labelId) => set((state) => ({
+        calendarTodos: state.calendarTodos.map((todo) =>
+          todo.id === taskId && !todo.labelIds.includes(labelId)
+            ? { ...todo, labelIds: [...todo.labelIds, labelId] }
+            : todo
+        ),
+        lists: state.lists.map((list) => ({
+          ...list,
+          todos: list.todos.map((todo) =>
+            todo.id === taskId && !todo.labelIds.includes(labelId)
+              ? { ...todo, labelIds: [...todo.labelIds, labelId] }
+              : todo
+          ),
+        })),
+      })),
+      removeLabelFromTask: (taskId, labelId) => set((state) => ({
+        calendarTodos: state.calendarTodos.map((todo) =>
+          todo.id === taskId
+            ? { ...todo, labelIds: todo.labelIds.filter((id) => id !== labelId) }
+            : todo
+        ),
+        lists: state.lists.map((list) => ({
+          ...list,
+          todos: list.todos.map((todo) =>
+            todo.id === taskId
+              ? { ...todo, labelIds: todo.labelIds.filter((id) => id !== labelId) }
+              : todo
+          ),
+        })),
       })),
 
       // Sidebar
@@ -1281,6 +1551,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
       selectedCalendarDate: getInitialCalendarDate(false),
       setSelectedCalendarDate: (date) => set({ selectedCalendarDate: date }),
       weekCount: 2,
+      lastSessionDate: null,
       incrementWeekCount: () => set((state) => ({ weekCount: Math.min(4, state.weekCount + 1) })),
       decrementWeekCount: () => set((state) => ({ weekCount: Math.max(1, state.weekCount - 1) })),
 
@@ -1325,16 +1596,18 @@ export const useLemonadeStore = create<LemonadeStore>()(
               const candidateDate = formatLocalDateKey(candidate)
               if (existingChildDates.has(candidateDate)) continue
 
+              const childId = generateId()
+
               nextInstances.push({
                 ...parent,
-                id: generateId(),
+                id: childId,
                 text: parent.text,
                 date: candidateDate,
                 createdAt: createdAtBase + offset,
                 completed: false,
                 parentId: parent.id,
                 isRecurring: true,
-                subtasks: cloneRecurringSubtasks(parent.subtasks),
+                subtasks: cloneRecurringSubtasks(parent.subtasks, childId),
               })
               existingChildDates.add(candidateDate)
             }
@@ -1348,16 +1621,18 @@ export const useLemonadeStore = create<LemonadeStore>()(
               const candidateDate = formatLocalDateKey(candidate)
               if (existingChildDates.has(candidateDate)) continue
 
+              const childId = generateId()
+
               nextInstances.push({
                 ...parent,
-                id: generateId(),
+                id: childId,
                 text: parent.text,
                 date: candidateDate,
                 createdAt: createdAtBase + offset,
                 completed: false,
                 parentId: parent.id,
                 isRecurring: true,
-                subtasks: cloneRecurringSubtasks(parent.subtasks),
+                subtasks: cloneRecurringSubtasks(parent.subtasks, childId),
               })
               existingChildDates.add(candidateDate)
             }
@@ -1375,16 +1650,18 @@ export const useLemonadeStore = create<LemonadeStore>()(
               const candidateDate = formatLocalDateKey(candidate)
               if (existingChildDates.has(candidateDate)) continue
 
+              const childId = generateId()
+
               nextInstances.push({
                 ...parent,
-                id: generateId(),
+                id: childId,
                 text: parent.text,
                 date: candidateDate,
                 createdAt: createdAtBase + offset,
                 completed: false,
                 parentId: parent.id,
                 isRecurring: true,
-                subtasks: cloneRecurringSubtasks(parent.subtasks),
+                subtasks: cloneRecurringSubtasks(parent.subtasks, childId),
               })
               existingChildDates.add(candidateDate)
             }
@@ -1397,16 +1674,18 @@ export const useLemonadeStore = create<LemonadeStore>()(
               const candidateDate = formatLocalDateKey(candidate)
               if (existingChildDates.has(candidateDate)) continue
 
+              const childId = generateId()
+
               nextInstances.push({
                 ...parent,
-                id: generateId(),
+                id: childId,
                 text: parent.text,
                 date: candidateDate,
                 createdAt: createdAtBase + monthOffset,
                 completed: false,
                 parentId: parent.id,
                 isRecurring: true,
-                subtasks: cloneRecurringSubtasks(parent.subtasks),
+                subtasks: cloneRecurringSubtasks(parent.subtasks, childId),
               })
               existingChildDates.add(candidateDate)
             }
@@ -1426,22 +1705,41 @@ export const useLemonadeStore = create<LemonadeStore>()(
       // Auto-rollover
       autoRollover: () => {
         const todayStr = formatLocalDateKey(new Date())
-        const lastOpenedDate = localStorage.getItem('lemonade-last-opened')
-        
-        if (lastOpenedDate && lastOpenedDate < todayStr) {
-          set((state) => {
-            const updatedTodos = state.calendarTodos.map(todo => {
-              // If todo is not completed, not recurring, not a heading, and is from a previous date
-              if (!todo.completed && !todo.isRecurring && !todo.parentId && !todo.isHeading && todo.date < todayStr) {
-                return { ...todo, date: todayStr }
-              }
-              return todo
-            })
-            return { calendarTodos: updatedTodos }
-          })
+        const { lastSessionDate, preferences } = get()
+
+        if (!lastSessionDate || lastSessionDate >= todayStr) {
+          set({ lastSessionDate: todayStr, lastAutoMovedCount: 0 })
+          return
         }
-        
-        localStorage.setItem('lemonade-last-opened', todayStr)
+
+        if (!preferences.autoMoveUndoneToToday) {
+          set({ lastSessionDate: todayStr, lastAutoMovedCount: 0 })
+          return
+        }
+
+        set((state) => {
+          let movedCount = 0
+          const updatedTodos = state.calendarTodos.map((todo) => {
+            if (
+              !todo.completed &&
+              !todo.isRecurring &&
+              !todo.parentId &&
+              !todo.isHeading &&
+              todo.date < todayStr
+            ) {
+              movedCount += 1
+              return { ...todo, date: todayStr }
+            }
+
+            return todo
+          })
+
+          return {
+            calendarTodos: updatedTodos,
+            lastSessionDate: todayStr,
+            lastAutoMovedCount: movedCount,
+          }
+        })
       },
     }),
     {
@@ -1452,11 +1750,12 @@ export const useLemonadeStore = create<LemonadeStore>()(
         calendarTodos: state.calendarTodos,
         listTabs: state.listTabs,
         lists: state.lists,
-        tags: state.tags,
+        labels: state.labels,
         searchQuery: state.searchQuery,
-        tagFilterId: state.tagFilterId,
+        labelFilterIds: state.labelFilterIds,
         sidebarOpen: state.sidebarOpen,
         weekCount: state.weekCount,
+        lastSessionDate: state.lastSessionDate,
         isCalendarExpanded: state.isCalendarExpanded,
       }),
       migrate: (persistedState, version) => {
@@ -1483,6 +1782,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
           preferences: persisted.preferences ?? currentState.preferences,
           selectedCalendarDate: getInitialCalendarDate((persisted.preferences ?? currentState.preferences).startOnYesterday),
           weekCount: persisted.weekCount ?? currentState.weekCount,
+          lastSessionDate: persisted.lastSessionDate ?? currentState.lastSessionDate,
         }
       },
     }

@@ -268,3 +268,55 @@
 .lemonade-app-root .lemonade-list-card {
   padding: var(--app-card-padding-y) var(--app-card-padding-x) !important;
 }
+
+@media print {
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  .print-root,
+  .print-root * {
+    visibility: visible !important;
+  }
+
+  .print-root {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
+    box-shadow: none !important;
+  }
+
+  .print-controls,
+  [data-slot="dialog-close"],
+  [data-slot="dialog-overlay"] {
+    display: none !important;
+  }
+
+  .print-root .text-muted-foreground,
+  .print-root .text-foreground,
+  .print-root .text-destructive {
+    color: #000 !important;
+  }
+
+  .print-root .bg-background,
+  .print-root .bg-muted,
+  .print-root .bg-popover,
+  .print-root .bg-card {
+    background: #fff !important;
+  }
+
+  .print-root [class*="shadow"] {
+    box-shadow: none !important;
+  }
+}

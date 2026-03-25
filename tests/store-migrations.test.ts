@@ -25,7 +25,7 @@ test("legacy todos gain normalized createdAt and endOfDay values", () => {
         text: "Legacy todo",
         completed: false,
         date: "2026-03-24",
-        subtasks: [],
+        subtasks: [{ id: "sub-1", text: "Legacy subtask", completed: false }],
       },
     ],
   })
@@ -34,7 +34,9 @@ test("legacy todos gain normalized createdAt and endOfDay values", () => {
   assert.equal(migrated.calendarTodos?.[0]?.createdAt, 0)
   assert.equal(migrated.calendarTodos?.[0]?.endOfDay, false)
   assert.equal(migrated.calendarTodos?.[0]?.parentId, null)
-  assert.deepEqual(migrated.calendarTodos?.[0]?.subtasks, [])
+  assert.deepEqual(migrated.calendarTodos?.[0]?.subtasks, [
+    { id: "sub-1", title: "Legacy subtask", completed: false, parentId: "todo-1" },
+  ])
 })
 
 test("legacy list todos are normalized during migration", () => {
@@ -50,17 +52,21 @@ test("legacy list todos are normalized during migration", () => {
             text: "Legacy list todo",
             completed: false,
             date: "2026-03-24",
-            subtasks: [],
+            subtasks: [{ id: "sub-1", text: "Legacy subtask", completed: true }],
           },
         ],
       },
     ],
   })
 
-  assert.equal(migrated.lists?.[0]?.todos[0]?.createdAt, 0)
-  assert.equal(migrated.lists?.[0]?.todos[0]?.endOfDay, false)
-  assert.equal(migrated.lists?.[0]?.todos[0]?.parentId, null)
-  assert.deepEqual(migrated.lists?.[0]?.todos[0]?.subtasks, [])
+  const legacyList = migrated.lists?.find((list) => list.id === "list-1")
+
+  assert.equal(legacyList?.todos[0]?.createdAt, 0)
+  assert.equal(legacyList?.todos[0]?.endOfDay, false)
+  assert.equal(legacyList?.todos[0]?.parentId, null)
+  assert.deepEqual(legacyList?.todos[0]?.subtasks, [
+    { id: "sub-1", title: "Legacy subtask", completed: true, parentId: "todo-1" },
+  ])
 })
 
 test("weekCount is clamped into the supported range", () => {
@@ -76,11 +82,25 @@ test("invalid persisted arrays fall back safely", () => {
     calendarTodos: null,
     lists: null,
     listTabs: null,
-    tags: null,
+    labels: null,
   })
 
   assert.deepEqual(migrated.calendarTodos, [])
-  assert.deepEqual(migrated.lists, [])
-  assert.deepEqual(migrated.listTabs, [])
-  assert.deepEqual(migrated.tags, [])
+  assert.ok(Array.isArray(migrated.lists))
+  assert.ok(Array.isArray(migrated.listTabs))
+  assert.deepEqual(migrated.labels, [])
+})
+
+test("fixed shopping returns tab and list are present after migration", () => {
+  const migrated = migratePersistedLemonadeState({
+    listTabs: [{ id: "my-lists-tab", name: "MY LISTS" }],
+    lists: [],
+  })
+
+  assert.ok(migrated.listTabs?.some((tab) => tab.id === "shopping-returns-tab"))
+  assert.ok(
+    migrated.lists?.some(
+      (list) => list.id === "shopping-returns" && list.tabId === "shopping-returns-tab"
+    )
+  )
 })

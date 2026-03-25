@@ -64,13 +64,13 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
   const lastCreatedTodoId = useLemonadeStore((state) => state.lastCreatedTodoId)
   const addCalendarTodo = useLemonadeStore((state) => state.addCalendarTodo)
   const clearLastCreatedTodoId = useLemonadeStore((state) => state.clearLastCreatedTodoId)
-  const ensureTagIds = useLemonadeStore((state) => state.ensureTagIds)
+  const ensureLabelIds = useLemonadeStore((state) => state.ensureLabelIds)
   const moveTodoToDate = useLemonadeStore((state) => state.moveTodoToDate)
   const searchQuery = useLemonadeStore((state) => state.searchQuery)
   const isCalendarExpanded = useLemonadeStore((state) => state.isCalendarExpanded)
-  const tagFilterId = useLemonadeStore((state) => state.tagFilterId)
+  const labelFilterIds = useLemonadeStore((state) => state.labelFilterIds)
   const activeFilterColor = useLemonadeStore((state) => state.activeFilterColor)
-  const tags = useLemonadeStore((state) => state.tags)
+  const labels = useLemonadeStore((state) => state.labels)
   const [newTodoText, setNewTodoText] = useState("")
   const [isAdding, setIsAdding] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
@@ -88,12 +88,12 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
           if (todo.date !== dateStr) return false
           if (!preferences.showCompleted && todo.completed) return false
           if (searchQuery && !todo.text.toLowerCase().includes(searchQuery.toLowerCase())) return false
-          if (tagFilterId && !todo.tags?.includes(tagFilterId)) return false
+          if (labelFilterIds.length > 0 && !todo.labelIds.some((labelId) => labelFilterIds.includes(labelId))) return false
           if (activeFilterColor && todo.color !== activeFilterColor) return false
           return true
         })
       ),
-    [activeFilterColor, calendarTodos, dateStr, preferences.showCompleted, searchQuery, tagFilterId]
+    [activeFilterColor, calendarTodos, dateStr, labelFilterIds, preferences.showCompleted, searchQuery]
   )
 
   const textSizeClass = "lemonade-task-text"
@@ -120,7 +120,7 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
   const { date: dateFontSize } = getResponsiveFontSizes()
   const visibleLineCount = isCalendarExpanded ? 18 : 9
   const fillerRowCount = Math.max(visibleLineCount - todosForDay.length - 1, 0)
-  const parsedInput = parseNaturalLanguageTaskInput(newTodoText, { tags })
+  const parsedInput = parseNaturalLanguageTaskInput(newTodoText, { labels })
 
   const handleTodoDragStart = (event: DragEvent<HTMLDivElement>, todoId: string) => {
     event.dataTransfer.setData("text/plain", todoId)
@@ -148,8 +148,8 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
   }
 
   const handleCreateNaturalLanguageTodo = () => {
-    const parsed = parseNaturalLanguageTaskInput(newTodoText, { tags })
-    const tagIds = [...parsed.tagIds, ...ensureTagIds(parsed.newTagNames)]
+    const parsed = parseNaturalLanguageTaskInput(newTodoText, { labels })
+    const labelIds = [...parsed.labelIds, ...ensureLabelIds(parsed.newLabelNames)]
 
     if (!parsed.cleanText) {
       setNewTodoText("")
@@ -169,7 +169,8 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
       recurringFrequency: parsed.recurrence?.recurringFrequency,
       recurringDays: parsed.recurrence?.recurringDays,
       priority: parsed.priority,
-      tags: tagIds.length > 0 ? tagIds : undefined,
+      labelIds,
+      subtasks: parsed.subtaskTitles.map((title) => ({ title })),
       time: parsed.time,
     })
 
@@ -180,8 +181,8 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
 
   return (
     <div className="w-full">
-      <div className="grid w-full grid-cols-[minmax(108px,132px)_minmax(0,1fr)] gap-x-3 xl:grid-cols-[160px_minmax(0,1fr)] 2xl:grid-cols-[220px_minmax(0,1fr)]">
-        <div className="lemonade-day-header pl-4 pr-1 pb-3 pt-3">
+      <div className="w-full px-4">
+        <div className="lemonade-day-header pb-3 pt-3">
           <div
             className={cn("lemonade-day-date font-semibold tracking-[0.08em]", dateFontSize)}
             style={{ color: "#A4A4A4" }}
