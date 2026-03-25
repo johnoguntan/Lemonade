@@ -184,6 +184,7 @@ export function TodoItem({
   }, [autoFocus, clearLastCreatedTodoId])
 
   const completedSubtaskCount = todo.subtasks.filter((subtask) => subtask.completed).length
+  const hasCustomColor = Boolean(todo.color)
 
   if (todo.isHeading) {
     return (
@@ -264,7 +265,8 @@ export function TodoItem({
                   }
                 }}
                 className={cn(
-                  "lemonade-task-text w-full bg-transparent outline-none font-task font-normal text-[14px] leading-[1.15] text-[#000000] dark:text-foreground",
+                  "lemonade-task-text w-full bg-transparent outline-none font-task font-normal text-[14px] leading-[1.15] text-[#000000]",
+                  !hasCustomColor && "dark:text-foreground",
                   todo.completed && "line-through opacity-40"
                 )}
                 autoFocus
@@ -273,7 +275,8 @@ export function TodoItem({
               <span
                 onClick={() => setIsEditing(true)}
                 className={cn(
-                  "lemonade-task-text cursor-text block font-task font-normal text-[14px] leading-[1.15] text-[#000000] dark:text-foreground",
+                  "lemonade-task-text cursor-text block font-task font-normal text-[14px] leading-[1.15] text-[#000000]",
+                  !hasCustomColor && "dark:text-foreground",
                   todo.completed && "line-through opacity-40"
                 )}
               >

@@ -4,7 +4,7 @@ import { useRef, useState, type DragEvent } from "react"
 import { useLemonadeStore, type List } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Plus, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsLeft, ChevronsRight, MoreVertical, Trash2, Equal, PenLine, ArrowRight, CornerUpLeft, CornerUpRight, Link2, Check, ListTodo, AlertTriangle } from "lucide-react"
+import { Plus, ChevronDown, ChevronUp, ChevronRight, MoreVertical, Trash2, Equal, PenLine, ArrowRight, CornerUpLeft, CornerUpRight, Link2, Check, ListTodo, AlertTriangle } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,8 +42,6 @@ export function ListsSection() {
     preferences,
     labels,
     labelFilterIds,
-    isCalendarExpanded,
-    toggleCalendar
   } = useLemonadeStore()
   const [activeTabId, setActiveTabId] = useState("planning-tab")
   const [newTabName, setNewTabName] = useState("")
@@ -57,6 +55,7 @@ export function ListsSection() {
   const [newReturnDeadline, setNewReturnDeadline] = useState("")
   const [newReturnNotes, setNewReturnNotes] = useState("")
   const [draggedListId, setDraggedListId] = useState<string | null>(null)
+  const [isListsCollapsed, setIsListsCollapsed] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const getListTabId = (list: List) =>
@@ -126,28 +125,9 @@ export function ListsSection() {
     }
   }
 
-  const handleScroll = (direction: 'prev' | 'next' | 'prev-page' | 'next-page') => {
-    const container = scrollRef.current
-    if (!container) return
-
-    const cardStep = 292
-    const pageStep = Math.max(container.clientWidth - 120, cardStep)
-
-    const left =
-      direction === 'prev'
-        ? container.scrollLeft - cardStep
-        : direction === 'next'
-          ? container.scrollLeft + cardStep
-          : direction === 'prev-page'
-            ? container.scrollLeft - pageStep
-            : container.scrollLeft + pageStep
-
-    container.scrollTo({ left, behavior: 'smooth' })
-  }
-
   const handleManageListsInTab = () => {
-    if (isCalendarExpanded) {
-      toggleCalendar()
+    if (isListsCollapsed) {
+      setIsListsCollapsed(false)
     }
     scrollRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
     setManageTabMenuOpen(false)
@@ -180,13 +160,13 @@ export function ListsSection() {
 
   return (
     <div
-      className="relative z-20 mt-2 shrink-0 border-t border-border bg-background/90 transition-all duration-300 dark:bg-[rgba(13,13,13,0.9)]"
+      className="relative z-20 mt-2 h-auto border-t-0 bg-transparent transition-all duration-300"
       style={bottomDotGridStyle}
     >
       {/* Tabs */}
       <div className={cn(
-        "flex min-h-10 items-center px-2 py-1 gap-2 bg-background/90 dark:bg-[rgba(19,19,19,0.9)]",
-        !isCalendarExpanded && "border-b border-border"
+        "flex min-h-10 items-center gap-2 overflow-hidden px-2 py-1 bg-background/90 dark:bg-[rgba(19,19,19,0.9)]",
+        !isListsCollapsed && "border-b border-border"
       )}
       style={bottomDotGridStyle}>
         <DropdownMenu open={manageTabMenuOpen} onOpenChange={setManageTabMenuOpen}>
@@ -254,35 +234,42 @@ export function ListsSection() {
           </DialogContent>
         </Dialog>
 
-        {listTabs.map((tab, index) => (
-          <div
-            key={tab.id}
-            className={cn(
-              "flex items-center border-r border-[#edf0f4]",
-              index === 0 && "border-l border-[#edf0f4]"
-            )}
-          >
-            <button
-              onClick={() => setActiveTabId(tab.id)}
-            className={cn(
-              "lemonade-tab-label relative mx-1 my-0.5 flex items-center gap-2 px-3 py-1.5 font-meta text-[10px] leading-[10px] uppercase tracking-[0.08em] transition-colors",
-                activeTabId === tab.id
-                  ? "text-foreground dark:bg-[#131313] dark:text-foreground"
-                  : "text-[#a7a9ac] hover:rounded-2xl hover:bg-[#F2F3F5] hover:text-[#a7a9ac] dark:hover:bg-[#131315] dark:hover:text-foreground"
-              )}
-            >
-              <span>{tab.name}</span>
-              <span className="text-inherit/90">{getTabCount(tab.id)}</span>
-              {activeTabId === tab.id ? (
-                <span className="absolute inset-x-1 -bottom-[5px] h-[2px] bg-[var(--accent-color)]" />
-              ) : null}
-            </button>
+        <div className="min-w-0 flex-1 overflow-x-auto">
+          <div className="flex min-w-max items-center">
+            {listTabs.map((tab, index) => (
+              <div
+                key={tab.id}
+                className={cn(
+                  "flex items-center border-r border-[#edf0f4]",
+                  index === 0 && "border-l border-[#edf0f4]"
+                )}
+              >
+                <button
+                  onClick={() => setActiveTabId(tab.id)}
+                  className={cn(
+                    "lemonade-tab-label relative mx-1 my-0.5 flex items-center gap-2 whitespace-nowrap px-3 py-1.5 font-meta text-[10px] leading-[10px] uppercase tracking-[0.08em] transition-colors",
+                    activeTabId === tab.id
+                      ? "text-foreground dark:bg-[#131313] dark:text-foreground"
+                      : "text-[#a7a9ac] hover:rounded-2xl hover:bg-[#F2F3F5] hover:text-[#a7a9ac] dark:hover:bg-[#131315] dark:hover:text-foreground"
+                  )}
+                >
+                  <span>{tab.name}</span>
+                  <span className="text-inherit/90">{getTabCount(tab.id)}</span>
+                  {activeTabId === tab.id ? (
+                    <span
+                      className="absolute inset-x-1 bottom-[1px] h-[2px] rounded-full bg-[var(--accent-color)]"
+                      style={{ boxShadow: "0 0 0 1px color-mix(in srgb, var(--accent-color) 22%, transparent)" }}
+                    />
+                  ) : null}
+                </button>
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
 
         <Dialog open={tabDialogOpen} onOpenChange={setTabDialogOpen}>
           <DialogTrigger asChild>
-            <Button variant="ghost" size="icon" className="size-6 ml-1" disabled={isShoppingReturnsTab}>
+            <Button variant="ghost" size="icon" className="ml-1 size-6 shrink-0" disabled={isShoppingReturnsTab}>
               <Plus className="size-4" />
             </Button>
           </DialogTrigger>
@@ -302,21 +289,19 @@ export function ListsSection() {
           </DialogContent>
         </Dialog>
 
-        <div className="flex-1" />
-
         <Button
           variant="ghost"
           size="icon"
-          onClick={toggleCalendar}
-          className="size-6"
+          onClick={() => setIsListsCollapsed((current) => !current)}
+          className="size-6 shrink-0"
         >
-          {isCalendarExpanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+          {isListsCollapsed ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
         </Button>
       </div>
 
       {/* Lists Grid */}
-      {!isCalendarExpanded ? (
-        <div className="group/lists-nav relative border-b border-border bg-[rgba(247,248,250,0.9)] dark:bg-transparent">
+      {!isListsCollapsed ? (
+        <div className="lemonade-list-stack relative h-auto bg-transparent">
           {isShoppingReturnsTab ? (
             <ShoppingReturnsSection
               list={shoppingReturnsList}
@@ -337,28 +322,9 @@ export function ListsSection() {
             />
           ) : (
           <>
-          <div className="pointer-events-none absolute left-0 top-1/2 z-10 flex -translate-y-1/2 flex-col overflow-hidden rounded-r-md border border-border bg-[rgba(247,248,250,0.9)] opacity-0 transition-opacity duration-200 group-hover/lists-nav:opacity-100 dark:bg-[rgba(13,13,13,0.9)]">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => handleScroll('prev')}
-              className="pointer-events-auto size-8 rounded-none text-muted-foreground hover:text-foreground"
-            >
-              <ChevronLeft className="size-[15px]" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => handleScroll('prev-page')}
-              className="pointer-events-auto size-8 rounded-none text-muted-foreground hover:text-foreground"
-            >
-              <ChevronsLeft className="size-[15px]" />
-            </Button>
-          </div>
-
           <div
             ref={scrollRef}
-            className="flex min-h-[500px] items-stretch gap-0 overflow-x-auto overflow-y-visible bg-[rgba(247,248,250,0.9)] px-0 py-0 scroll-smooth dark:bg-transparent"
+            className="lemonade-list-card-stack flex h-auto flex-col gap-7 bg-transparent px-0 py-2"
           >
             {filteredLists.map((list) => (
               <ListCard
@@ -392,30 +358,11 @@ export function ListsSection() {
 
             <button
               onClick={handleCreateList}
-              className="flex min-h-[500px] w-[33.333%] min-w-[320px] shrink-0 items-center justify-center gap-2 self-stretch bg-[rgba(247,248,250,0.9)] p-6 text-muted-foreground transition-colors hover:text-foreground dark:bg-transparent"
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border/70 bg-transparent px-4 text-muted-foreground transition-colors hover:border-[var(--accent-color)] hover:text-foreground"
             >
               <Plus className="size-4" />
               <span className="text-sm font-medium">NEW LIST</span>
             </button>
-          </div>
-
-          <div className="pointer-events-none absolute right-0 top-1/2 z-10 flex -translate-y-1/2 flex-col overflow-hidden rounded-l-md border border-border bg-[rgba(247,248,250,0.9)] opacity-0 transition-opacity duration-200 group-hover/lists-nav:opacity-100 dark:bg-[rgba(13,13,13,0.9)]">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => handleScroll('next')}
-              className="pointer-events-auto size-8 rounded-none text-muted-foreground hover:text-foreground"
-            >
-              <ChevronRight className="size-[15px]" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => handleScroll('next-page')}
-              className="pointer-events-auto size-8 rounded-none text-muted-foreground hover:text-foreground"
-            >
-              <ChevronsRight className="size-[15px]" />
-            </Button>
           </div>
           </>
           )}
@@ -487,9 +434,9 @@ function ShoppingReturnsSection({
   const todayKey = new Date().toISOString().split("T")[0]
 
   return (
-    <div className="min-h-[500px] bg-[rgba(247,248,250,0.9)] px-6 py-6 dark:bg-transparent">
+    <div className="h-auto bg-transparent px-0 py-2">
       <div className="mx-auto flex max-w-5xl flex-col gap-6">
-        <div className="rounded-2xl border border-border/70 bg-background/90 p-5 shadow-sm dark:bg-[rgba(19,19,19,0.9)]">
+        <div className="rounded-2xl border border-border/70 bg-background/95 p-5 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-4">
             <div>
               <h3 className="font-heading text-[20px] leading-[20px] uppercase">Shopping Returns</h3>
@@ -533,7 +480,7 @@ function ShoppingReturnsSection({
           />
         </div>
 
-        <div className="rounded-2xl border border-border/70 bg-background/90 shadow-sm dark:bg-[rgba(19,19,19,0.9)]">
+        <div className="rounded-2xl border border-border/70 bg-background/95 shadow-sm">
           <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_150px_minmax(0,1.4fr)_70px] gap-3 border-b border-border/70 px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
             <span>Item</span>
             <span>Store</span>
@@ -662,15 +609,15 @@ function ListCard({
       onDragOver={onDragOver}
       onDrop={onDrop}
       className={cn(
-        "lemonade-list-card group relative flex min-h-[500px] w-[33.333%] min-w-[320px] shrink-0 flex-col self-stretch bg-[rgba(247,248,250,0.95)] px-10 py-5 transition-all dark:bg-transparent",
+        "lemonade-list-card group relative flex h-auto w-full min-w-0 flex-col self-stretch rounded-none bg-transparent px-0 py-1 transition-all",
         isDragging && "opacity-45",
-        "hover:bg-[rgba(247,248,250,0.95)] dark:hover:bg-transparent"
+        "hover:bg-transparent"
       )}
     >
-      <div className="pointer-events-none absolute inset-0 z-10 bg-[#F2F3F5] opacity-0 transition-opacity duration-200 group-hover:opacity-100 dark:bg-[#131315]" />
+      <div className="pointer-events-none absolute inset-0 z-10 rounded-2xl bg-black/[0.015] opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
 
       <div className="relative z-20 mb-4 flex flex-col gap-2">
-        <div className="flex justify-center">
+        <div className="flex justify-start">
           <button
             type="button"
             aria-label={`Drag ${list.name}`}
@@ -795,17 +742,17 @@ function ListCard({
         </div>
       </div>
 
-      <div className="relative z-20 flex min-h-[360px] flex-1 flex-col">
-        {Array.from({ length: 9 }).map((_, index) => {
+      <div className="relative z-20 flex h-auto flex-col rounded-2xl border border-border/50 bg-transparent px-0 py-0">
+        {Array.from({ length: Math.max(visibleTodos.length + 1, 8) }).map((_, index) => {
           const todo = visibleTodos[index]
 
           if (todo) {
             return (
-              <div key={todo.id} className="group/todo flex h-10 items-center gap-2 border-b border-[#e8e8ec] dark:border-[#2a2d34]">
+              <div key={todo.id} className="group/todo flex h-10 items-center gap-2 border-b border-[#e8e8ec] px-2 last:border-b-0 dark:border-white/15">
                 <button
                   onClick={() => onToggleTodo(todo.id)}
                   className={cn(
-                    "size-4 rounded-full border border-border flex-shrink-0 flex items-center justify-center",
+                    "size-4 rounded-full border border-border flex-shrink-0 flex items-center justify-center opacity-55 transition-opacity group-hover/todo:opacity-100",
                     todo.completed && "bg-foreground border-foreground"
                   )}
                 >
@@ -854,7 +801,10 @@ function ListCard({
           const isInputRow = index === Math.min(visibleTodos.length, 8)
 
           return (
-            <div key={`${list.id}-line-${index}`} className="flex h-10 items-center border-b border-[#e8e8ec] dark:border-[#2a2d34]">
+            <div key={`${list.id}-line-${index}`} className="group/add flex h-10 items-center gap-2 border-b border-[#e8e8ec] px-2 last:border-b-0 dark:border-white/15">
+              <span className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground opacity-0 transition-opacity group-hover/add:opacity-100">
+                <Plus className="size-3" />
+              </span>
               {isInputRow ? (
                 <input
                   type="text"
@@ -864,7 +814,7 @@ function ListCard({
                   placeholder={list.todos.length === 0 && index === 0 ? "Add item..." : ""}
                   className="lemonade-list-item-text w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
                 />
-              ) : null}
+              ) : <div className="flex-1" />}
             </div>
           )
         })}

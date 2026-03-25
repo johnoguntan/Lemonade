@@ -88,8 +88,8 @@ export function PreferencesPanel() {
 
   return (
     <div className={cn(
-      "lemonade-sidebar fixed inset-y-0 left-0 w-72 bg-[#1a1a1a] text-white z-50 flex flex-col transition-transform duration-300 ease-in-out shadow-2xl",
-      sidebarOpen ? "translate-x-0" : "-translate-x-full"
+      "lemonade-sidebar fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-[#1a1a1a] text-white transition-transform duration-300 ease-in-out",
+      sidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full shadow-none pointer-events-none"
     )}>
       <div className="lemonade-sidebar-content p-6 flex-1 overflow-y-auto">
           <h2 className="text-base font-normal text-gray-400 mb-8 mt-2">Preferences</h2>

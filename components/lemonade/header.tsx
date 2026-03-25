@@ -120,10 +120,7 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
     return knownNames[hex.toLowerCase()] ?? hex.toUpperCase()
   }
 
-  const isTodayVisible = () => {
-    const todayKey = formatLocalDateKey(new Date())
-    return visibleDates.includes(todayKey)
-  }
+  const isSelectedDateToday = selectedCalendarDate === todayKey
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -255,12 +252,12 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
             >
               <Plus className="size-[15px]" />
             </Button>
-            {!isTodayVisible() && viewMode !== "today" && (
+            {!isSelectedDateToday && viewMode !== "today" && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => onNavigate('today')}
-                className="h-8 px-3 text-[12px] font-medium bg-[#f5f5f5] border-transparent text-black transition-colors hover:bg-black hover:text-white dark:bg-white dark:text-black dark:hover:bg-black dark:hover:text-white"
+                className="ml-[4px] mr-3 h-6 shrink-0 self-center rounded-md border-transparent px-2 text-[9px] font-semibold tracking-[0.05em] bg-[#f5f5f5] text-black transition-colors hover:bg-black hover:text-white dark:bg-white dark:text-black dark:hover:bg-black dark:hover:text-white"
               >
                 TODAY
               </Button>

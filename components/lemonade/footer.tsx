@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { formatLocalDateKey, parseLocalDateKey, useLemonadeStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
-import { CircleHelp, Minus, Moon, RefreshCw, SlidersHorizontal, Sun, User, ChevronLeft, ChevronRight, Plus } from "lucide-react"
+import { CircleHelp, Moon, RefreshCw, SlidersHorizontal, Sun, User, ChevronLeft, ChevronRight } from "lucide-react"
 import { useTheme } from "next-themes"
 import Link from "next/link"
 import {
@@ -23,9 +23,6 @@ export function Footer({ onNavigate }: FooterProps) {
     setPreferences,
     sidebarOpen,
     setSidebarOpen,
-    weekCount,
-    incrementWeekCount,
-    decrementWeekCount,
     selectedCalendarDate,
     setSelectedCalendarDate,
   } = useLemonadeStore()
@@ -46,7 +43,7 @@ export function Footer({ onNavigate }: FooterProps) {
     }
 
     const newDate = new Date(currentStartDate)
-    const dynamicWeekStep = weekCount * 7
+    const dynamicWeekStep = 7
 
     switch (direction) {
       case 'prev-week':
@@ -102,27 +99,6 @@ export function Footer({ onNavigate }: FooterProps) {
             title="Previous range"
           >
             <ChevronLeft className="size-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={decrementWeekCount}
-            className="size-8 text-muted-foreground hover:text-foreground"
-            title="Show fewer weeks"
-          >
-            <Minus className="size-4" />
-          </Button>
-          <span className="min-w-8 text-center text-[12px] font-semibold text-foreground">
-            {weekCount}
-          </span>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={incrementWeekCount}
-            className="size-8 text-muted-foreground hover:text-foreground"
-            title="Show more weeks"
-          >
-            <Plus className="size-4" />
           </Button>
           <Button
             variant="ghost"

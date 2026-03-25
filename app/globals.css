@@ -78,6 +78,7 @@
 
 @theme inline {
   --font-sans: var(--font-inter), 'Inter', system-ui, sans-serif;
+  --font-notebook-display: var(--font-notebook-display), "Oswald", "Archivo Narrow", "Arial Narrow", "Roboto Condensed", sans-serif;
   --font-logo: "Alternate Gothic No2 D", "Arial Narrow", "Roboto Condensed", sans-serif;
   --font-heading: "Neue DIN SemiCond", "DIN Alternate", "Arial Narrow", "Roboto Condensed", sans-serif;
   --font-meta: "PangeaText", "Avenir Next", "Helvetica Neue", Arial, sans-serif;
@@ -149,12 +150,14 @@
 @layer base {
   html {
     font-size: 12px;
+    overflow-x: hidden;
   }
   * {
     @apply border-border outline-ring/50;
   }
   body {
     @apply bg-background text-foreground;
+    overflow-x: hidden;
   }
 }
 
@@ -199,7 +202,84 @@
   --app-tab-padding-y: 0.375rem;
   --app-sidebar-padding: 1.5rem;
   --app-footer-height: 48px;
+  --notebook-desk-bg: #d1d5db;
+  --notebook-paper-bg: #ffffff;
+  --notebook-dot-grid: radial-gradient(#9c978f88 0.8px, transparent 0.8px);
+  --notebook-page-divider: rgba(0, 0, 0, 0.04);
+  --notebook-date-color: #a9a7a1;
+  --notebook-title-color: #111111;
   font-size: var(--app-ui-text-size);
+}
+
+.notebook-cover {
+  background-color: var(--accent-color);
+  border: 1px solid color-mix(in srgb, var(--accent-color) 72%, black 28%);
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 42%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, transparent 28%, rgba(0, 0, 0, 0.08) 100%),
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.018) 0 2px,
+      rgba(0, 0, 0, 0.018) 2px 4px,
+      transparent 4px 8px
+    );
+  box-shadow:
+    0 25px 80px -20px rgba(0, 0, 0, 0.35),
+    0 8px 20px -10px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.notebook-paper {
+  background-color: var(--notebook-paper-bg);
+  min-height: 90vh;
+  height: auto;
+}
+
+.notebook-crease {
+  background: linear-gradient(
+    to right,
+    transparent,
+    rgba(0, 0, 0, 0.06) 40%,
+    rgba(0, 0, 0, 0.12) 50%,
+    rgba(0, 0, 0, 0.06) 60%,
+    transparent
+  );
+}
+
+.notebook-crease-highlight {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.dark .lemonade-app-root {
+  --notebook-desk-bg: #131313;
+  --notebook-paper-bg: #060606;
+  --notebook-dot-grid: radial-gradient(rgba(136, 142, 150, 0.42) 0.8px, transparent 0.8px);
+  --notebook-page-divider: rgba(255, 255, 255, 0.06);
+  --notebook-date-color: #8f949b;
+  --notebook-title-color: #f3f4f6;
+}
+
+.dark .notebook-cover {
+  border-color: color-mix(in srgb, var(--accent-color) 62%, black 38%);
+  box-shadow:
+    0 25px 80px -20px rgba(0, 0, 0, 0.55),
+    0 8px 20px -10px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.dark .notebook-crease {
+  background: linear-gradient(
+    to right,
+    transparent,
+    rgba(255, 255, 255, 0.03) 40%,
+    rgba(0, 0, 0, 0.28) 50%,
+    rgba(255, 255, 255, 0.03) 60%,
+    transparent
+  );
+}
+
+.dark .notebook-crease-highlight {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .lemonade-app-root .lemonade-task-text,
@@ -224,12 +304,24 @@
 
 .lemonade-app-root .lemonade-day-date {
   font-size: var(--app-date-size) !important;
+  font-family: var(--font-notebook-display);
+  font-weight: 500 !important;
+  letter-spacing: -0.02em !important;
+  color: var(--notebook-date-color) !important;
 }
 
 .lemonade-app-root .lemonade-day-label,
 .lemonade-app-root .lemonade-list-title {
+  font-family: var(--font-notebook-display);
   font-size: var(--app-heading-size) !important;
   line-height: var(--app-heading-line-height) !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.05em !important;
+  text-transform: uppercase !important;
+}
+
+.lemonade-app-root .lemonade-list-title {
+  color: var(--notebook-title-color) !important;
 }
 
 .lemonade-app-root .lemonade-tab-label {
@@ -267,6 +359,24 @@
 
 .lemonade-app-root .lemonade-list-card {
   padding: var(--app-card-padding-y) var(--app-card-padding-x) !important;
+}
+
+.notebook-paper .lemonade-list-card {
+  padding: 0.25rem 0 !important;
+}
+
+.notebook-paper .relative.overflow-y-auto[style*="max-height: 70vh"] {
+  max-height: none !important;
+  overflow-y: visible !important;
+}
+
+.notebook-paper .lemonade-list-stack,
+.notebook-paper .lemonade-list-card-stack {
+  overflow: visible !important;
+}
+
+.notebook-main-panel-content {
+  min-height: 0;
 }
 
 @media print {
