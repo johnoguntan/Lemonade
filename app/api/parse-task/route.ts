@@ -2,6 +2,8 @@ import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { format, isValid, parseISO } from "date-fns";
 
+export const dynamic = "force-dynamic";
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const WEEKDAY_PATTERN = "\\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\\b";
