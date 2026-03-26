@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { useLemonadeStore, type Todo } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { RotateCcw, Plus, Minus, X, Moon } from "lucide-react"
+import { RotateCcw, Plus, Minus, X, Moon, Sparkles, PencilLine } from "lucide-react"
 import { toast } from "sonner"
 import {
   DropdownMenu,
@@ -93,6 +93,7 @@ export function TodoItem({
     low: <span className="size-2 rounded-full bg-blue-500 mr-2 flex-shrink-0" />,
     none: null,
   }[todo.priority || 'none']
+  const isLocalOnly = todo.syncStatus === "local"
 
   const handleSave = () => {
     const trimmedText = editText.trim()
@@ -225,7 +226,8 @@ export function TodoItem({
         <div 
         className={cn(
           "lemonade-task-row flex items-center h-[42px] px-0 transition-colors",
-          todo.completed && "bg-transparent"
+          todo.completed && "bg-transparent",
+          todo.isSyncing && "animate-pulse"
         )}
         style={{ backgroundColor: todo.color }}
       >
@@ -251,6 +253,11 @@ export function TodoItem({
         <div className="flex-1 min-w-0 flex flex-col justify-center">
           <div className="flex items-center">
             {priorityIndicator}
+            {todo.isSyncing ? (
+              <Sparkles className="mr-2 size-3.5 text-[var(--accent-color)]" />
+            ) : isLocalOnly ? (
+              <PencilLine className="mr-2 size-3.5 text-muted-foreground" />
+            ) : null}
             {isEditing ? (
               <input
                 ref={inputRef}
@@ -315,6 +322,15 @@ export function TodoItem({
               })}
             </div>
           )}
+          {todo.isSyncing ? (
+            <div className="mt-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+              Syncing...
+            </div>
+          ) : isLocalOnly ? (
+            <div className="mt-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+              Local
+            </div>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">

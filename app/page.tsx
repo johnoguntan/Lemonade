@@ -97,8 +97,6 @@ export default function Home() {
     generateRecurringInstances,
     selectedCalendarDate,
     setSelectedCalendarDate,
-    weekCount,
-    decrementWeekCount,
   } = useLemonadeStore()
   const [viewMode, setViewMode] = useState<"calendar" | "timeline" | "today">("calendar")
   const startDate = parseLocalDateKey(selectedCalendarDate)
@@ -126,12 +124,6 @@ export default function Home() {
     autoRollover()
     generateRecurringInstances()
   }, [autoRollover, generateRecurringInstances])
-
-  useEffect(() => {
-    if (weekCount > 1) {
-      decrementWeekCount()
-    }
-  }, [decrementWeekCount, weekCount])
 
   useEffect(() => {
     if (lastAutoMovedCount <= 0) {
@@ -191,10 +183,13 @@ export default function Home() {
 
   return (
     <div
-      className="notebook-shell min-h-screen overflow-x-hidden px-0 py-10"
       style={{
         ...appPreferenceVars,
-        backgroundColor: "var(--notebook-desk-bg)",
+        position: "relative",
+        width: "100vw",
+        height: "100vh",
+        overflow: "hidden",
+        background: "linear-gradient(to right, #f3f3f3 0 50%, #e6e6e6 50% 100%)",
       }}
     >
       <ErrorBoundary>
@@ -205,76 +200,87 @@ export default function Home() {
       </ErrorBoundary>
 
       <div
-        className={cn("notebook-cover relative mx-auto my-0 transition-all duration-300", sidebarOpen && "ml-72")}
+        className={cn("absolute left-1/2 top-1/2 transition-all duration-300", sidebarOpen && "ml-72")}
         style={{
-          maxWidth: "1280px",
-          borderRadius: "0.5rem",
-          padding: "14px",
+          width: "min(calc(100vw - 6px), calc((100vh - 6px) * 2510 / 1696))",
+          aspectRatio: "2510 / 1696",
+          transform: "translate(-50%, -50%)",
+          zIndex: 1,
         }}
       >
         <div
-          className={cn(notebookDisplay.variable, "lemonade-app-root notebook-paper flex h-auto min-h-[90vh] flex-col")}
+          className="notebook-bg"
           style={{
-            backgroundColor: "var(--notebook-paper-bg)",
-            backgroundImage: "var(--notebook-dot-grid)",
-            backgroundSize: "18px 18px",
+            position: "absolute",
+            inset: 0,
+            backgroundSize: "contain",
+          }}
+        />
+
+        <div
+          className={cn(notebookDisplay.variable, "lemonade-app-root notebook-panel")}
+          style={{
+            position: "absolute",
+            top: "7.25%",
+            left: "15.5%",
+            width: "35.5%",
+            height: "83.5%",
+            overflowY: "auto",
+            zIndex: 1,
+            scrollbarWidth: "none",
+            msOverflowStyle: "none",
           }}
         >
-          <main className="relative grid h-auto grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-start">
-            <div
-              className="notebook-crease"
-              style={{
-                position: "absolute",
-                left: "50%",
-                top: 0,
-                bottom: 0,
-                width: "34px",
-                transform: "translateX(-50%)",
-                pointerEvents: "none",
-              }}
-            />
-            <div
-              className="notebook-crease-highlight"
-              style={{
-                position: "absolute",
-                left: "calc(50% + 1px)",
-                top: 0,
-                bottom: 0,
-                width: "1px",
-                pointerEvents: "none",
-              }}
-            />
+          <div style={{ marginBottom: "12px" }}>
+            <Header onNavigate={handleNavigate} viewMode={viewMode} onViewModeChange={handleViewModeChange} />
+          </div>
+          <ErrorBoundary>
+            {viewMode === "calendar" ? (
+              <CalendarView
+                startDate={startDate}
+                onNavigate={handleNavigate}
+              />
+            ) : viewMode === "timeline" ? (
+              <TimelineView
+                date={startDate}
+                onNavigate={handleNavigate}
+              />
+            ) : (
+              <TodayView />
+            )}
+          </ErrorBoundary>
+        </div>
 
-            <div className="notebook-main-panel flex h-auto min-h-[90vh] flex-col px-7 py-8 pr-8">
-              <Header onNavigate={handleNavigate} viewMode={viewMode} onViewModeChange={handleViewModeChange} />
+        <div
+          className={cn(notebookDisplay.variable, "lemonade-app-root notebook-panel [&>*]:border-t-0 [&>*]:pt-0")}
+          style={{
+            position: "absolute",
+            top: "7.25%",
+            left: "53.75%",
+            width: "calc(31% + 10px)",
+            height: "83.5%",
+            paddingLeft: "0.45%",
+            paddingRight: "0%",
+            boxSizing: "border-box",
+            overflowY: "auto",
+            zIndex: 1,
+            scrollbarWidth: "none",
+            msOverflowStyle: "none",
+          }}
+        >
+          <ListsSection />
+        </div>
 
-              <div className="notebook-main-panel-content h-auto">
-                <ErrorBoundary>
-                  {viewMode === "calendar" ? (
-                    <CalendarView 
-                      startDate={startDate} 
-                      onNavigate={handleNavigate}
-                    />
-                  ) : viewMode === "timeline" ? (
-                    <TimelineView
-                      date={startDate}
-                      onNavigate={handleNavigate}
-                    />
-                  ) : (
-                    <TodayView />
-                  )}
-                </ErrorBoundary>
-              </div>
-            </div>
-
-            <div
-              className="notebook-lists-panel h-auto min-h-[90vh] border-l px-7 py-8 pl-8 [&>*]:border-t-0 [&>*]:pt-0"
-              style={{ borderLeftColor: "var(--notebook-page-divider)" }}
-            >
-              <ListsSection />
-            </div>
-          </main>
-
+        <div
+          className={cn(notebookDisplay.variable, "lemonade-app-root")}
+          style={{
+            position: "absolute",
+            bottom: "5.15%",
+            left: "15.5%",
+            width: "68%",
+            zIndex: 1,
+          }}
+        >
           <Footer onNavigate={handleNavigate} />
         </div>
       </div>

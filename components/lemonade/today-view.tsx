@@ -13,6 +13,14 @@ const parseTimeToMinutes = (value?: string) => {
   if (normalized === "evening") return 18 * 60
   if (normalized === "tonight") return 21 * 60
 
+  const twentyFourHourMatch = normalized.match(/^(\d{1,2}):(\d{2})$/)
+  if (twentyFourHourMatch) {
+    const hours = Number.parseInt(twentyFourHourMatch[1], 10)
+    const minutes = Number.parseInt(twentyFourHourMatch[2], 10)
+    if (Number.isNaN(hours) || Number.isNaN(minutes) || hours > 23 || minutes > 59) return null
+    return hours * 60 + minutes
+  }
+
   const match = normalized.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/)
   if (!match) return null
 

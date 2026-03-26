@@ -1,99 +1,63 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 
-import { parseNaturalLanguageTaskInput } from "../lib/store"
-
-const referenceDate = new Date("2026-03-24T09:00:00")
+import { localTaskParser, parseNaturalLanguageTaskEntries } from "../lib/store"
 
 const parse = (input: string) =>
-  parseNaturalLanguageTaskInput(input, {
-    labels: [],
-    referenceDate,
+  localTaskParser(input, {
+    labels: [{ id: "label-health", name: "health", color: "#84cc16" }],
+    referenceDate: new Date("2026-03-24T09:00:00"),
   })
 
-test("does not invent a date when no date is found", () => {
-  const result = parse("Plain task with no date")
+test("extracts label and priority tokens while fast-pathing obvious dates", () => {
+  const result = parse("call dentist tomorrow at 3pm #health high priority")
 
-  assert.equal(result.cleanText, "Plain task with no date")
-  assert.equal(result.scheduledDate, undefined)
-})
-
-test("parses relative day phrases", () => {
-  assert.equal(parse("Meeting in 3 days").scheduledDate, "2026-03-27")
-  assert.equal(parse("Call mom day after tomorrow").scheduledDate, "2026-03-26")
-  assert.equal(parse("Task tomorrow").scheduledDate, "2026-03-25")
-})
-
-test("parses next weekday with rollover", () => {
-  const result = parse("Review next Tuesday")
-
-  assert.equal(result.cleanText, "Review")
-  assert.equal(result.scheduledDate, "2026-03-31")
-})
-
-test("parses time-specific phrases", () => {
-  assert.equal(parse("Dinner at 7pm").time, "7pm")
-  assert.equal(parse("Breakfast 8:30am").time, "8:30am")
-  assert.equal(parse("Lunch at noon").time, "12pm")
-  assert.equal(parse("Tonight plan").time, "9pm")
-  assert.equal(parse("Read this evening").time, "6pm")
-})
-
-test("strips joining prepositions around detected date and time phrases", () => {
-  assert.equal(parse("Call John for tomorrow").cleanText, "Call John")
-  assert.equal(parse("Submit report by Friday").cleanText, "Submit report")
-  assert.equal(parse("Meeting at 5pm").cleanText, "Meeting")
-  assert.equal(parse("Plan in 3 days").cleanText, "Plan")
-  assert.equal(parse("Meeting from next Tuesday").cleanText, "Meeting")
-})
-
-test("does not strip bridge words when no date or time token is found", () => {
-  const result = parse("Search for gold")
-
-  assert.equal(result.cleanText, "Search for gold")
-  assert.equal(result.scheduledDate, undefined)
-})
-
-test("preserves numeric nouns that are not time commands", () => {
-  const result = parse("Buy 4 apples")
-
-  assert.equal(result.cleanText, "Buy 4 apples")
+  assert.equal(result.cleanText, "call dentist tomorrow at 3pm")
+  assert.equal(result.priority, "high")
+  assert.deepEqual(result.labelIds, ["label-health"])
+  assert.equal(result.scheduledDate, "2026-03-25")
   assert.equal(result.time, undefined)
+  assert.equal(result.recurrence, undefined)
 })
 
-test("parses recurring shortcuts", () => {
-  const weekday = parse("Exercise every weekday")
-  const mixedDays = parse("Class every Mon/Wed/Fri")
-  const weekly = parse("Rent weekly")
-
-  assert.deepEqual(weekday.recurrence, {
-    isRecurring: true,
-    recurringFrequency: "weekday",
-    label: "Every Weekday",
-  })
-  assert.deepEqual(mixedDays.recurrence, {
-    isRecurring: true,
-    recurringDays: [1, 3, 5],
-    label: "Every Mon/Wed/Fri",
-  })
-  assert.deepEqual(weekly.recurrence, {
-    isRecurring: true,
-    recurringFrequency: "weekly",
-    label: "Weekly",
-  })
+test("supports shorthand priorities like p1 and p2", () => {
+  assert.equal(parse("Ship invoice p1").priority, "high")
+  assert.equal(parse("Review notes p2").priority, "medium")
+  assert.equal(parse("Organize desk p3").priority, "low")
 })
 
-test("cleans title while keeping parsed time and date data together", () => {
-  const result = parse("Review next Tuesday at 5pm")
+test("keeps > subtasks as structural syntax", () => {
+  const result = parse("Plan launch p1 > draft brief > send review")
 
-  assert.equal(result.cleanText, "Review")
-  assert.equal(result.scheduledDate, "2026-03-31")
-  assert.equal(result.time, "5pm")
+  assert.equal(result.cleanText, "Plan launch")
+  assert.deepEqual(result.subtaskTitles, ["draft brief", "send review"])
 })
 
-test("parses > separated subtasks", () => {
-  const result = parse("Call Marco > confirm venue > send invite")
+test("marks new labels distinctly in preview metadata", () => {
+  const result = parse("Email vendor #ops")
 
-  assert.equal(result.cleanText, "Call Marco")
-  assert.deepEqual(result.subtaskTitles, ["confirm venue", "send invite"])
+  assert.deepEqual(result.newLabelNames, ["ops"])
+  assert.equal(result.previewTokens.at(0)?.label, "#ops (new)")
+})
+
+test("keeps noun phrases with and together as a single task", () => {
+  const result = parseNaturalLanguageTaskEntries("buy bread and milk tomorrow", {
+    labels: [],
+    referenceDate: new Date("2026-03-24T09:00:00"),
+  })
+
+  assert.equal(result.length, 1)
+  assert.equal(result[0]?.cleanText, "buy bread and milk tomorrow")
+  assert.equal(result[0]?.scheduledDate, "2026-03-25")
+})
+
+test("splits separate actions joined by and into multiple tasks", () => {
+  const result = parseNaturalLanguageTaskEntries("call sam on wednesday and run to the gym on friday", {
+    labels: [],
+    referenceDate: new Date("2026-03-24T09:00:00"),
+  })
+
+  assert.equal(result.length, 2)
+  assert.equal(result[0]?.scheduledDate, "2026-03-25")
+  assert.equal(result[1]?.scheduledDate, "2026-03-27")
 })

@@ -5,18 +5,29 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { parseNaturalLanguageTaskInput, useLemonadeStore, type Todo } from "@/lib/store"
+import { createOptimisticTodoId, localTaskParser, normalizeCalendarDateKey, parseNaturalLanguageTaskEntries, reconcileOptimisticTaskOrder, useLemonadeStore, type Todo } from "@/lib/store"
 import { cn } from "@/lib/utils"
-import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Flag, Plus, Trash2 } from "lucide-react"
+import { format, isValid, parseISO } from "date-fns"
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Flag, PencilLine, Plus, Sparkles, Trash2 } from "lucide-react"
+import { toast } from "sonner"
 
 interface TimelineViewProps {
   date: Date
   onNavigate: (direction: "prev-day" | "next-day" | "today") => void
 }
 
+const AI_PARSE_TIMEOUT_MS = 15000
+const splitNaturalTitleFallback = (input: string, index: number) =>
+  input
+    .split(/\s*(?:,|and then|after that|also|plus|then)\s*/i)
+    .map((fragment) => fragment.trim())
+    .filter(Boolean)[index] ?? input.trim()
+
 const HOUR_HEIGHT = 64
 const DEFAULT_DURATION_MINUTES = 30
 const MIN_BLOCK_HEIGHT = 46
+const MIN_DURATION_MINUTES = 5
+const MAX_DURATION_MINUTES = 24 * 60
 
 const formatHourLabel = (hour: number) => {
   const normalizedHour = ((hour % 24) + 24) % 24
@@ -33,6 +44,16 @@ const parseTimeToMinutes = (value?: string) => {
   if (normalized === "noon") return 12 * 60
   if (normalized === "evening") return 18 * 60
   if (normalized === "tonight") return 21 * 60
+
+  const twentyFourHourMatch = normalized.match(/^(\d{1,2}):(\d{2})$/)
+  if (twentyFourHourMatch) {
+    const hours = Number.parseInt(twentyFourHourMatch[1], 10)
+    const minutes = Number.parseInt(twentyFourHourMatch[2], 10)
+    if (Number.isNaN(hours) || Number.isNaN(minutes) || hours > 23 || minutes > 59) {
+      return null
+    }
+    return hours * 60 + minutes
+  }
 
   const match = normalized.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/)
   if (!match) {
@@ -92,6 +113,30 @@ const resolveDisplayMinutes = (minutes: number, rangeStart: number, rangeEnd: nu
   return minutes
 }
 
+const resolveTodoDuration = (todo: Todo) => {
+  if (
+    typeof todo.durationMinutes === "number" &&
+    Number.isFinite(todo.durationMinutes) &&
+    todo.durationMinutes > 0
+  ) {
+    return Math.floor(todo.durationMinutes)
+  }
+
+  return DEFAULT_DURATION_MINUTES
+}
+
+const normalizeDurationInput = (value: string) => value.replace(/[^\d]/g, "")
+
+const parseDurationMinutes = (value: string) => {
+  const parsed = Number.parseInt(value.trim(), 10)
+
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_DURATION_MINUTES
+  }
+
+  return Math.min(MAX_DURATION_MINUTES, Math.max(MIN_DURATION_MINUTES, parsed))
+}
+
 export function TimelineView({ date, onNavigate }: TimelineViewProps) {
   const selectedDateKey = useMemo(() => {
     const year = date.getFullYear()
@@ -140,11 +185,12 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
     .map((todo) => ({
       todo,
       startMinutes: parseTimeToMinutes(todo.time),
+      durationMinutes: resolveTodoDuration(todo),
     }))
-    .filter((entry): entry is { todo: Todo; startMinutes: number } => entry.startMinutes !== null)
+    .filter((entry): entry is { todo: Todo; startMinutes: number; durationMinutes: number } => entry.startMinutes !== null)
     .sort((left, right) => left.startMinutes - right.startMinutes)
 
-  const parsedDraft = parseNaturalLanguageTaskInput(draftText, { labels, referenceDate: date })
+  const parsedDraft = localTaskParser(draftText, { labels, referenceDate: date })
 
   const resolvedManualExpansion = manualExpansion.key === expansionResetKey
     ? manualExpansion
@@ -159,9 +205,9 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
     let earliestStart = defaultBounds.start
     let latestEnd = defaultBounds.end
 
-    for (const { startMinutes } of timedTodos) {
+    for (const { startMinutes, durationMinutes } of timedTodos) {
       const absoluteStart = resolveDisplayMinutes(startMinutes, defaultBounds.start, defaultBounds.end)
-      const absoluteEnd = absoluteStart + DEFAULT_DURATION_MINUTES
+      const absoluteEnd = absoluteStart + durationMinutes
 
       if (absoluteStart < earliestStart) {
         earliestStart = Math.floor(absoluteStart / 60) * 60
@@ -200,29 +246,141 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
     })
   }, [prefilledTime])
 
-  const handleCreateTimelineTask = () => {
-    const parsed = parseNaturalLanguageTaskInput(draftText, { labels, referenceDate: date })
-    const labelIds = [...parsed.labelIds, ...ensureLabelIds(parsed.newLabelNames)]
+  const handleCreateTimelineTask = async () => {
+    const rawInputString = draftText
     const fallbackTime = prefilledTime ?? undefined
 
-    if (!parsed.cleanText) {
+    if (!rawInputString.trim()) {
       setDraftText("")
       return
     }
 
-    addCalendarTodo({
-      text: parsed.cleanText,
-      completed: false,
-      date: parsed.scheduledDate ?? selectedDateKey,
-      isHeading: parsed.cleanText === parsed.cleanText.toUpperCase() && parsed.cleanText.length > 2,
-      isRecurring: parsed.recurrence?.isRecurring,
-      recurringFrequency: parsed.recurrence?.recurringFrequency,
-      recurringDays: parsed.recurrence?.recurringDays,
-      priority: parsed.priority,
-      labelIds,
-      subtasks: parsed.subtaskTitles.map((title) => ({ title })),
-      time: parsed.time ?? fallbackTime,
+    const parsedTasks = parseNaturalLanguageTaskEntries(rawInputString, { labels, referenceDate: date })
+    const optimisticTasks = parsedTasks
+      .map((parsedTask, index) => {
+        const title = parsedTask.cleanText.trim() || splitNaturalTitleFallback(rawInputString, index)
+        if (!title) {
+          return null
+        }
+
+        const labelIds = [
+          ...parsedTask.labelIds,
+          ...ensureLabelIds(parsedTask.newLabelNames),
+        ]
+        const tempId = createOptimisticTodoId(`timeline-${selectedDateKey}`)
+        const optimisticDate = parsedTask.scheduledDate ?? selectedDateKey
+
+        addCalendarTodo({
+          id: tempId,
+          text: title,
+          completed: false,
+          date: optimisticDate,
+          isHeading: title === title.toUpperCase() && title.length > 2,
+          priority: parsedTask.priority,
+          labelIds,
+          subtasks: parsedTask.subtaskTitles.map((subtaskTitle) => ({ title: subtaskTitle })),
+          time: fallbackTime,
+          isSyncing: true,
+          syncStatus: undefined,
+        })
+
+        return { tempId, parsedTask, labelIds, optimisticDate }
+      })
+      .filter((task): task is NonNullable<typeof task> => task !== null)
+
+    if (optimisticTasks.length === 0) {
+      setDraftText("")
+      return
+    }
+
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => controller.abort(), AI_PARSE_TIMEOUT_MS)
+
+    void fetch("/api/parse-task", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input: rawInputString }),
+      signal: controller.signal,
     })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Task parse failed")
+        }
+
+        const tasks = await response.json()
+        const aiTasks = Array.isArray(tasks) ? (tasks as Array<Record<string, unknown>>) : []
+        const matchedAiTasks = reconcileOptimisticTaskOrder(
+          optimisticTasks.map(({ parsedTask, optimisticDate }) => ({
+            text: parsedTask.cleanText.trim(),
+            optimisticDate,
+          })),
+          aiTasks
+        )
+
+        optimisticTasks.forEach(({ tempId, parsedTask, labelIds, optimisticDate }, index) => {
+          const primaryTask = matchedAiTasks[index]
+
+          if (!primaryTask) {
+            updateCalendarTodo(tempId, { isSyncing: false, syncStatus: "local" })
+            return
+          }
+
+          const normalizedDate = normalizeCalendarDateKey(
+            typeof primaryTask.date === "string" ? primaryTask.date : undefined
+          )
+          const resolvedDate = parsedTask.scheduledDate ?? normalizedDate ?? optimisticDate
+          const aiTitle =
+            typeof primaryTask.title === "string" && primaryTask.title.trim()
+              ? primaryTask.title.trim()
+              : splitNaturalTitleFallback(rawInputString, index)
+          const aiLabelIds = ensureLabelIds(
+            Array.isArray(primaryTask.labels)
+              ? primaryTask.labels.filter((label): label is string => typeof label === "string")
+              : []
+          )
+          const aiPriority: Todo["priority"] =
+            primaryTask.priority === "high" || primaryTask.priority === "medium" || primaryTask.priority === "low"
+              ? primaryTask.priority
+              : parsedTask.priority
+          const aiRecurringFrequency =
+            primaryTask.recurringFrequency === "daily" ||
+            primaryTask.recurringFrequency === "weekday" ||
+            primaryTask.recurringFrequency === "weekly" ||
+            primaryTask.recurringFrequency === "monthly"
+              ? primaryTask.recurringFrequency
+              : undefined
+
+          updateCalendarTodo(tempId, {
+            text: aiTitle,
+            date: resolvedDate,
+            time: typeof primaryTask.time === "string" && primaryTask.time ? primaryTask.time : fallbackTime,
+            priority: aiPriority,
+            labelIds: aiLabelIds.length > 0 ? aiLabelIds : labelIds,
+            isRecurring: primaryTask.isRecurring === true,
+            recurringFrequency: aiRecurringFrequency,
+            recurringDays: Array.isArray(primaryTask.recurringDays)
+              ? primaryTask.recurringDays.filter((day): day is number => typeof day === "number")
+              : undefined,
+            isHeading: aiTitle === aiTitle.toUpperCase() && aiTitle.length > 2,
+            isSyncing: false,
+            syncStatus: undefined,
+          })
+
+          if (resolvedDate && resolvedDate !== optimisticDate) {
+            const parsedMovedDate = parseISO(resolvedDate)
+            const movedLabel = isValid(parsedMovedDate) ? format(parsedMovedDate, "MMMM d") : resolvedDate
+            toast(`Task moved to ${movedLabel}`, { duration: 3000 })
+          }
+        })
+      })
+      .catch(() => {
+        optimisticTasks.forEach(({ tempId }) => {
+          updateCalendarTodo(tempId, { isSyncing: false, syncStatus: "local" })
+        })
+      })
+      .finally(() => {
+        window.clearTimeout(timeoutId)
+      })
 
     setDraftText("")
     setPrefilledTime(null)
@@ -232,16 +390,19 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
     setEditingTodoId(todo.id)
     setEditingText(todo.text)
     setEditingTime(todo.time ?? "")
-    setEditingDuration("30")
+    setEditingDuration(`${resolveTodoDuration(todo)}`)
   }
 
   const handleSaveEdit = () => {
     if (!editingTodoId) return
     const trimmedText = editingText.trim()
     if (!trimmedText) return
+    const durationMinutes = parseDurationMinutes(editingDuration)
+
     updateCalendarTodo(editingTodoId, {
       text: trimmedText,
       time: editingTime.trim() || undefined,
+      durationMinutes,
     })
     setEditingTodoId(null)
   }
@@ -296,7 +457,7 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
               ref={addInputRef}
               value={draftText}
               onChange={(event) => setDraftText(event.target.value)}
-              onKeyDown={(event) => event.key === "Enter" && handleCreateTimelineTask()}
+              onKeyDown={async (event) => event.key === "Enter" && await handleCreateTimelineTask()}
               placeholder="Add a task or click a time slot to prefill a time"
               className="mb-2"
             />
@@ -310,7 +471,7 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
               </div>
             ) : null}
           </div>
-          <Button onClick={handleCreateTimelineTask}>
+          <Button onClick={() => void handleCreateTimelineTask()}>
             <Plus className="mr-1 size-4" />
             Add
           </Button>
@@ -325,8 +486,16 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
                   key={todo.id}
                   type="button"
                   onClick={() => openEditDialog(todo)}
-                  className="flex w-full items-center gap-3 rounded-xl border border-border/60 px-3 py-2 text-left transition-colors hover:bg-muted/40"
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-xl border border-border/60 px-3 py-2 text-left transition-colors hover:bg-muted/40",
+                    todo.isSyncing && "animate-pulse"
+                  )}
                 >
+                  {todo.isSyncing ? (
+                    <Sparkles className="size-3.5 text-[var(--accent-color)]" />
+                  ) : todo.syncStatus === "local" ? (
+                    <PencilLine className="size-3.5 text-muted-foreground" />
+                  ) : null}
                   <div className={cn("size-2 rounded-full", todo.priority === "high" ? "bg-red-500" : todo.priority === "medium" ? "bg-orange-500" : todo.priority === "low" ? "bg-blue-500" : "bg-muted-foreground/30")} />
                   <span className={cn("flex-1 text-sm", todo.completed && "line-through opacity-50")}>{todo.text}</span>
                   {firstLabel ? (
@@ -400,11 +569,11 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
               </div>
             ) : null}
 
-            {timedTodos.map(({ todo, startMinutes }) => {
+            {timedTodos.map(({ todo, startMinutes, durationMinutes }) => {
               const firstLabel = todo.labelIds.map((labelId) => labels.find((label) => label.id === labelId)).find(Boolean)
               const absoluteStart = resolveDisplayMinutes(startMinutes, visibleBounds.start, visibleBounds.end)
               const top = ((absoluteStart - visibleBounds.start) / 60) * HOUR_HEIGHT
-              const height = Math.max((DEFAULT_DURATION_MINUTES / 60) * HOUR_HEIGHT, MIN_BLOCK_HEIGHT)
+              const height = Math.max((durationMinutes / 60) * HOUR_HEIGHT, MIN_BLOCK_HEIGHT)
               const showPastTimeWarning =
                 currentTimeMinutes !== null &&
                 absoluteStart < currentTimeMinutes &&
@@ -415,7 +584,10 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
                   key={todo.id}
                   type="button"
                   onClick={() => openEditDialog(todo)}
-                  className="absolute left-[96px] right-4 z-10 overflow-hidden rounded-xl border px-3 py-2 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-transform hover:scale-[1.01]"
+                  className={cn(
+                    "absolute left-[96px] right-4 z-10 overflow-hidden rounded-xl border px-3 py-2 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-transform hover:scale-[1.01]",
+                    todo.isSyncing && "animate-pulse"
+                  )}
                   style={{
                     top,
                     height,
@@ -425,6 +597,11 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
                 >
                   <div className="flex min-h-full flex-col justify-between">
                   <div className="flex items-center gap-2">
+                    {todo.isSyncing ? (
+                      <Sparkles className="size-3.5 text-[var(--accent-color)]" />
+                    ) : todo.syncStatus === "local" ? (
+                      <PencilLine className="size-3.5 text-muted-foreground" />
+                    ) : null}
                     {todo.priority ? (
                       <Flag className={cn("size-3.5", todo.priority === "high" ? "text-red-500" : todo.priority === "medium" ? "text-orange-500" : "text-blue-500")} />
                     ) : null}
@@ -482,8 +659,17 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
                     ) : null}
                   </div>
                   <div className="mt-1 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
-                    {todo.time}
+                    {todo.time} • {durationMinutes} min
                   </div>
+                  {todo.isSyncing ? (
+                    <div className="mt-1 text-[9px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                      Syncing...
+                    </div>
+                  ) : todo.syncStatus === "local" ? (
+                    <div className="mt-1 text-[9px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                      Local
+                    </div>
+                  ) : null}
                   </div>
                 </button>
               )
@@ -514,7 +700,12 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
           <div className="space-y-3">
             <Input value={editingText} onChange={(event) => setEditingText(event.target.value)} placeholder="Task title" />
             <Input value={editingTime} onChange={(event) => setEditingTime(event.target.value)} placeholder="Time (e.g. 5pm)" />
-            <Input value={editingDuration} onChange={(event) => setEditingDuration(event.target.value)} placeholder="Duration in minutes" disabled />
+            <Input
+              value={editingDuration}
+              onChange={(event) => setEditingDuration(normalizeDurationInput(event.target.value))}
+              placeholder="Duration in minutes"
+              inputMode="numeric"
+            />
           </div>
           <DialogFooter className="justify-between">
             <Button

@@ -4,26 +4,23 @@ import { useState } from "react"
 import { useLemonadeStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Switch } from "@/components/ui/switch"
-import { ArrowLeft, User, Bell, Shield, Download, Trash2 } from "lucide-react"
+import { ArrowLeft, Download, Moon, Shield, Sun, Trash2, User } from "lucide-react"
 import Link from "next/link"
+import { useTheme } from "next-themes"
+import { cn } from "@/lib/utils"
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog"
 
 export default function SettingsPage() {
-  const { calendarTodos, lists } = useLemonadeStore()
+  const { calendarTodos, lists, preferences, setPreferences } = useLemonadeStore()
+  const { setTheme } = useTheme()
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
-  const [notifications, setNotifications] = useState({
-    email: true,
-    reminders: true,
-    updates: false,
-  })
 
   const totalTodos = calendarTodos.length + lists.reduce((acc, list) => acc + list.todos.length, 0)
 
@@ -33,24 +30,29 @@ export default function SettingsPage() {
       lists,
       exportDate: new Date().toISOString(),
     }
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'lemonade-backup.json'
-    a.click()
+    const link = document.createElement("a")
+    link.href = url
+    link.download = "lemonade-backup.json"
+    link.click()
+    URL.revokeObjectURL(url)
   }
 
   const handleDeleteAccount = () => {
-    // In a real app, this would delete the account
-    localStorage.removeItem('lemonade-storage')
-    window.location.href = '/'
+    localStorage.removeItem("lemonade-storage")
+    window.location.href = "/"
+  }
+
+  const handleThemeChange = (theme: "light" | "dark") => {
+    setPreferences({ theme })
+    setTheme(theme)
   }
 
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border px-6 py-4">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
+        <div className="mx-auto flex max-w-2xl items-center justify-between">
           <Link href="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
             <ArrowLeft className="size-4" />
             <span>Back to app</span>
@@ -62,112 +64,111 @@ export default function SettingsPage() {
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-6 py-8">
-        <h2 className="text-2xl font-bold mb-8">Settings</h2>
+      <main className="mx-auto max-w-2xl px-6 py-8">
+        <h2 className="mb-8 text-2xl font-bold">Settings</h2>
 
-        {/* Account Section */}
         <section className="mb-8">
-          <div className="flex items-center gap-2 mb-4">
+          <div className="mb-4 flex items-center gap-2">
             <User className="size-5 text-muted-foreground" />
-            <h3 className="text-lg font-semibold">Account</h3>
+            <h3 className="text-lg font-semibold">Profile</h3>
           </div>
-          <div className="space-y-4 pl-7">
+          <div className="space-y-4 rounded-2xl border border-border/70 bg-card/60 p-5">
             <div>
-              <label className="text-sm font-medium mb-1 block">Email</label>
-              <Input defaultValue="user@example.com" />
-            </div>
-            <div>
-              <label className="text-sm font-medium mb-1 block">Display name</label>
-              <Input defaultValue="Lemonade User" />
-            </div>
-
-          </div>
-        </section>
-
-        {/* Notifications Section */}
-        <section className="mb-8">
-          <div className="flex items-center gap-2 mb-4">
-            <Bell className="size-5 text-muted-foreground" />
-            <h3 className="text-lg font-semibold">Notifications</h3>
-          </div>
-          <div className="space-y-4 pl-7">
-            <div className="flex items-center justify-between py-2">
-              <div>
-                <p className="font-medium">Email notifications</p>
-                <p className="text-sm text-muted-foreground">Receive daily summary emails</p>
-              </div>
-              <Switch 
-                checked={notifications.email}
-                onCheckedChange={(checked) => setNotifications({ ...notifications, email: checked })}
+              <label className="mb-1 block text-sm font-medium">Display name</label>
+              <Input
+                value={preferences.displayName}
+                onChange={(event) => setPreferences({ displayName: event.target.value })}
+                placeholder="Your name"
               />
-            </div>
-            <div className="flex items-center justify-between py-2">
-              <div>
-                <p className="font-medium">Reminders</p>
-                <p className="text-sm text-muted-foreground">Get reminded about upcoming todos</p>
-              </div>
-              <Switch 
-                checked={notifications.reminders}
-                onCheckedChange={(checked) => setNotifications({ ...notifications, reminders: checked })}
-              />
-            </div>
-            <div className="flex items-center justify-between py-2">
-              <div>
-                <p className="font-medium">Product updates</p>
-                <p className="text-sm text-muted-foreground">Learn about new features</p>
-              </div>
-              <Switch 
-                checked={notifications.updates}
-                onCheckedChange={(checked) => setNotifications({ ...notifications, updates: checked })}
-              />
+              <p className="mt-2 text-xs text-muted-foreground">Saved locally on this device.</p>
             </div>
           </div>
         </section>
 
-        {/* Data Section */}
         <section className="mb-8">
-          <div className="flex items-center gap-2 mb-4">
+          <div className="mb-4 flex items-center gap-2">
+            <Sun className="size-5 text-muted-foreground" />
+            <h3 className="text-lg font-semibold">Appearance</h3>
+          </div>
+          <div className="space-y-4 rounded-2xl border border-border/70 bg-card/60 p-5">
+            <div>
+              <label className="mb-2 block text-sm font-medium">Theme</label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleThemeChange("light")}
+                  className={cn(
+                    "flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition-colors",
+                    preferences.theme === "light"
+                      ? "border-foreground bg-foreground text-background"
+                      : "border-border text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <Sun className="size-4" />
+                  Light
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleThemeChange("dark")}
+                  className={cn(
+                    "flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition-colors",
+                    preferences.theme === "dark"
+                      ? "border-foreground bg-foreground text-background"
+                      : "border-border text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <Moon className="size-4" />
+                  Dark
+                </button>
+              </div>
+            </div>
+            <div className="rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
+              Cloud sync, notifications, and account-level profile settings are coming soon.
+            </div>
+          </div>
+        </section>
+
+        <section className="mb-8">
+          <div className="mb-4 flex items-center gap-2">
             <Shield className="size-5 text-muted-foreground" />
             <h3 className="text-lg font-semibold">Data & Privacy</h3>
           </div>
-          <div className="space-y-4 pl-7">
-            <div className="flex items-center justify-between py-2">
+          <div className="space-y-4 rounded-2xl border border-border/70 bg-card/60 p-5">
+            <div className="flex items-center justify-between gap-4">
               <div>
                 <p className="font-medium">Your data</p>
                 <p className="text-sm text-muted-foreground">{totalTodos} todos across {lists.length} lists</p>
               </div>
               <Button variant="outline" size="sm" onClick={handleExportData}>
-                <Download className="size-4 mr-2" />
+                <Download className="mr-2 size-4" />
                 Export
               </Button>
             </div>
-            <div className="flex items-center justify-between py-2 border-t border-border pt-4">
+            <div className="flex items-center justify-between gap-4 border-t border-border pt-4">
               <div>
-                <p className="font-medium text-destructive">Delete account</p>
-                <p className="text-sm text-muted-foreground">Permanently delete all your data</p>
+                <p className="font-medium text-destructive">Delete local data</p>
+                <p className="text-sm text-muted-foreground">Remove this device&apos;s saved Lemonade data.</p>
               </div>
               <Button variant="destructive" size="sm" onClick={() => setShowDeleteDialog(true)}>
-                <Trash2 className="size-4 mr-2" />
+                <Trash2 className="mr-2 size-4" />
                 Delete
               </Button>
             </div>
           </div>
         </section>
 
-        {/* App Info */}
-        <section className="text-center text-sm text-muted-foreground pt-8 border-t border-border">
+        <section className="border-t border-border pt-8 text-center text-sm text-muted-foreground">
           <p>Lemonade v1.0.0</p>
           <p className="mt-1">Made with care for productive people</p>
         </section>
       </main>
 
-      {/* Delete Confirmation Dialog */}
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete your account?</DialogTitle>
+            <DialogTitle>Delete local data?</DialogTitle>
             <DialogDescription>
-              This action cannot be undone. All your todos, lists, and settings will be permanently deleted.
+              This clears todos, lists, and settings stored in this browser. Cloud sync is not enabled yet.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -175,7 +176,7 @@ export default function SettingsPage() {
               Cancel
             </Button>
             <Button variant="destructive" onClick={handleDeleteAccount}>
-              Delete account
+              Delete data
             </Button>
           </DialogFooter>
         </DialogContent>

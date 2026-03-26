@@ -150,15 +150,37 @@
 @layer base {
   html {
     font-size: 12px;
-    overflow-x: hidden;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
   }
   * {
     @apply border-border outline-ring/50;
   }
   body {
     @apply bg-background text-foreground;
-    overflow-x: hidden;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
   }
+}
+
+.notebook-bg {
+  position: fixed;
+  inset: 0;
+  background-image: url('/notebook-bg.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  z-index: 0;
+}
+
+.notebook-bg ~ div::-webkit-scrollbar {
+  display: none;
 }
 
 /* Custom scrollbar styles */

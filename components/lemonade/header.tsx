@@ -1,6 +1,6 @@
 "use client"
 
-import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Calendar as CalendarIcon, Plus, Rows3, Clock3, SunMedium, X } from "lucide-react"
+import { Search, Calendar as CalendarIcon, Plus, Rows3, Clock3, SunMedium, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Calendar } from "@/components/ui/calendar"
@@ -8,20 +8,29 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { PrintPreviewDialog } from "./print-preview-dialog"
 import { cn } from "@/lib/utils"
 import {
+  createOptimisticTodoId,
   formatLocalDateKey,
+  localTaskParser,
+  normalizeCalendarDateKey,
+  parseNaturalLanguageTaskEntries,
   parseLocalDateKey,
-  parseNaturalLanguageTaskInput,
+  reconcileOptimisticTaskOrder,
   useLemonadeStore,
   type NaturalLanguagePreviewToken,
+  type Todo,
 } from "@/lib/store"
+import { format, isValid, parseISO } from "date-fns"
 import { useEffect, useState } from "react"
 import { getTodayViewBuckets } from "./today-view"
+import { toast } from "sonner"
 
 interface HeaderProps {
   onNavigate: (direction: 'prev-week' | 'next-week' | 'prev-day' | 'next-day' | 'today') => void
   viewMode: "calendar" | "timeline" | "today"
   onViewModeChange: (mode: "calendar" | "timeline" | "today") => void
 }
+
+const AI_PARSE_TIMEOUT_MS = 15000
 
 const addDays = (date: Date, amount: number) => {
   const nextDate = new Date(date)
@@ -32,34 +41,21 @@ const addDays = (date: Date, amount: number) => {
 const getDateArray = (startDate: Date, count: number): Date[] =>
   Array.from({ length: count }, (_, index) => addDays(startDate, index))
 
-const startOfWeek = (date: Date) => {
-  const nextDate = new Date(date)
-  nextDate.setDate(nextDate.getDate() - nextDate.getDay())
-  return nextDate
-}
+const getVisibleDateKeys = (startDate: Date) =>
+  getDateArray(startDate, 7).map((date) => formatLocalDateKey(date))
 
-const getVisibleDateKeys = (startDate: Date, weekCount: number, columnCount: 1 | 3 | 5 | 7) => {
-  const weeks: Date[][] = [getDateArray(startDate, 7)]
-
-  if (weekCount > 1) {
-    const weekTwoStart = startOfWeek(addDays(startDate, 7))
-
-    for (let weekIndex = 1; weekIndex < weekCount; weekIndex++) {
-      const weekStart = addDays(weekTwoStart, (weekIndex - 1) * 7)
-      weeks.push(getDateArray(weekStart, 7))
-    }
-  }
-
-  return weeks
-    .flatMap((week) => week.slice(0, columnCount))
-    .map((date) => formatLocalDateKey(date))
-}
+const splitNaturalTitleFallback = (input: string, index: number) =>
+  input
+    .split(/\s*(?:,|and then|after that|also|plus|then)\s*/i)
+    .map((fragment) => fragment.trim())
+    .filter(Boolean)[index] ?? input.trim()
 
 export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) {
   const {
     searchQuery,
     setSearchQuery,
     addCalendarTodo,
+    updateCalendarTodo,
     ensureLabelIds,
     labels,
     calendarTodos,
@@ -72,7 +68,6 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
     setPreferences,
     selectedCalendarDate,
     setSelectedCalendarDate,
-    weekCount,
   } = useLemonadeStore()
   const [showSearch, setShowSearch] = useState(false)
   const [showQuickAdd, setShowQuickAdd] = useState(false)
@@ -83,7 +78,7 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
   const currentDate = parseLocalDateKey(selectedCalendarDate)
   const [pickerMonth, setPickerMonth] = useState(currentDate)
 
-  const parsedQuickAdd = parseNaturalLanguageTaskInput(quickAddText, { labels })
+  const parsedQuickAdd = localTaskParser(quickAddText, { labels })
   const palette = preferences.colorPalette ?? []
   const todayKey = formatLocalDateKey(new Date())
   const todayFilteredTodos = calendarTodos.filter((todo) => {
@@ -95,7 +90,13 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
   const todayBuckets = getTodayViewBuckets(todayFilteredTodos, preferences.showCompleted, todayKey)
   const todayCount = todayBuckets.overdue.length + todayBuckets.today.length
 
-  const visibleDates = getVisibleDateKeys(currentDate, weekCount, preferences.columns)
+  const visibleDates = getVisibleDateKeys(currentDate)
+  const currentlyVisibleDateKeys =
+    viewMode === "today"
+      ? [todayKey]
+      : viewMode === "timeline"
+        ? [selectedCalendarDate]
+        : visibleDates
 
   const visibleTodos = calendarTodos.filter((todo) => visibleDates.includes(todo.date))
   const colorUsage = visibleTodos.reduce<Record<string, number>>((usage, todo) => {
@@ -142,31 +143,141 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [])
 
-  const handleQuickAddSubmit = () => {
-    const parsed = parseNaturalLanguageTaskInput(quickAddText, { labels })
-    const labelIds = [...parsed.labelIds, ...ensureLabelIds(parsed.newLabelNames)]
+  const handleQuickAddSubmit = async () => {
+    const rawInputString = quickAddText
 
-    if (!parsed.cleanText) {
+    if (!rawInputString.trim()) {
       setQuickAddText("")
       return
     }
 
     const today = formatLocalDateKey(new Date())
-    const isHeading = parsed.cleanText === parsed.cleanText.toUpperCase() && parsed.cleanText.length > 2
+    const parsedTasks = parseNaturalLanguageTaskEntries(rawInputString, { labels })
+    const optimisticTasks = parsedTasks
+      .map((parsedTask, index) => {
+        const title = parsedTask.cleanText.trim() || splitNaturalTitleFallback(rawInputString, index)
+        if (!title) {
+          return null
+        }
 
-    addCalendarTodo({
-      text: parsed.cleanText,
-      completed: false,
-      date: parsed.scheduledDate ?? today,
-      isHeading,
-      isRecurring: parsed.recurrence?.isRecurring,
-      recurringFrequency: parsed.recurrence?.recurringFrequency,
-      recurringDays: parsed.recurrence?.recurringDays,
-      priority: parsed.priority,
-      labelIds,
-      subtasks: parsed.subtaskTitles.map((title) => ({ title })),
-      time: parsed.time,
+        const labelIds = [
+          ...parsedTask.labelIds,
+          ...ensureLabelIds(parsedTask.newLabelNames),
+        ]
+        const tempId = createOptimisticTodoId("header")
+        const optimisticDate = parsedTask.scheduledDate ?? today
+
+        addCalendarTodo({
+          id: tempId,
+          text: title,
+          completed: false,
+          date: optimisticDate,
+          isHeading: title === title.toUpperCase() && title.length > 2,
+          priority: parsedTask.priority,
+          labelIds,
+          subtasks: parsedTask.subtaskTitles.map((subtaskTitle) => ({ title: subtaskTitle })),
+          isSyncing: true,
+          syncStatus: undefined,
+        })
+
+        return { tempId, parsedTask, labelIds, optimisticDate }
+      })
+      .filter((task): task is NonNullable<typeof task> => task !== null)
+
+    if (optimisticTasks.length === 0) {
+      setQuickAddText("")
+      setShowQuickAdd(false)
+      return
+    }
+
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => controller.abort(), AI_PARSE_TIMEOUT_MS)
+
+    void fetch("/api/parse-task", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input: rawInputString }),
+      signal: controller.signal,
     })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Task parse failed")
+        }
+
+        const tasks = await response.json()
+        const aiTasks = Array.isArray(tasks) ? (tasks as Array<Record<string, unknown>>) : []
+        const matchedAiTasks = reconcileOptimisticTaskOrder(
+          optimisticTasks.map(({ parsedTask, optimisticDate }) => ({
+            text: parsedTask.cleanText.trim(),
+            optimisticDate,
+          })),
+          aiTasks
+        )
+
+        optimisticTasks.forEach(({ tempId, parsedTask, labelIds, optimisticDate }, index) => {
+          const primaryTask = matchedAiTasks[index]
+
+          if (!primaryTask) {
+            updateCalendarTodo(tempId, { isSyncing: false, syncStatus: "local" })
+            return
+          }
+
+          const normalizedDate = normalizeCalendarDateKey(
+            typeof primaryTask.date === "string" ? primaryTask.date : undefined
+          )
+          const resolvedDate = parsedTask.scheduledDate ?? normalizedDate ?? optimisticDate
+          const aiTitle =
+            typeof primaryTask.title === "string" && primaryTask.title.trim()
+              ? primaryTask.title.trim()
+              : splitNaturalTitleFallback(rawInputString, index)
+          const aiLabelIds = ensureLabelIds(
+            Array.isArray(primaryTask.labels)
+              ? primaryTask.labels.filter((label): label is string => typeof label === "string")
+              : []
+          )
+          const aiPriority: Todo["priority"] =
+            primaryTask.priority === "high" || primaryTask.priority === "medium" || primaryTask.priority === "low"
+              ? primaryTask.priority
+              : parsedTask.priority
+          const aiRecurringFrequency =
+            primaryTask.recurringFrequency === "daily" ||
+            primaryTask.recurringFrequency === "weekday" ||
+            primaryTask.recurringFrequency === "weekly" ||
+            primaryTask.recurringFrequency === "monthly"
+              ? primaryTask.recurringFrequency
+              : undefined
+
+          updateCalendarTodo(tempId, {
+            text: aiTitle,
+            date: resolvedDate,
+            time: typeof primaryTask.time === "string" && primaryTask.time ? primaryTask.time : undefined,
+            priority: aiPriority,
+            labelIds: aiLabelIds.length > 0 ? aiLabelIds : labelIds,
+            isRecurring: primaryTask.isRecurring === true,
+            recurringFrequency: aiRecurringFrequency,
+            recurringDays: Array.isArray(primaryTask.recurringDays)
+              ? primaryTask.recurringDays.filter((day): day is number => typeof day === "number")
+              : undefined,
+            isHeading: aiTitle === aiTitle.toUpperCase() && aiTitle.length > 2,
+            isSyncing: false,
+            syncStatus: undefined,
+          })
+
+          if (resolvedDate && resolvedDate !== optimisticDate && !currentlyVisibleDateKeys.includes(resolvedDate)) {
+            const parsedMovedDate = parseISO(resolvedDate)
+            const movedLabel = isValid(parsedMovedDate) ? format(parsedMovedDate, "MMMM d") : resolvedDate
+            toast(`Task moved to ${movedLabel}`, { duration: 3000 })
+          }
+        })
+      })
+      .catch(() => {
+        optimisticTasks.forEach(({ tempId }) => {
+          updateCalendarTodo(tempId, { isSyncing: false, syncStatus: "local" })
+        })
+      })
+      .finally(() => {
+        window.clearTimeout(timeoutId)
+      })
 
     setQuickAddText("")
     setShowQuickAdd(false)
@@ -174,12 +285,12 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
 
   return (
     <header
-      className="lemonade-header flex items-center justify-between border-t-2 bg-background px-4 py-3 dark:bg-[#131313]"
+      className="lemonade-header flex items-center justify-between rounded-2xl border border-border/45 border-t-2 bg-background/55 px-4 py-3 backdrop-blur-[10px] dark:bg-[rgba(19,19,19,0.42)]"
       style={{ borderTopColor: "var(--accent-color)" }}
     >
       <div className="flex flex-1 items-center gap-2">
         {showQuickAdd ? (
-          <div className="flex w-full flex-col bg-[#f7f8fa] px-4 py-2 text-muted-foreground dark:bg-[#131313]">
+          <div className="flex w-full flex-col rounded-xl border border-border/35 bg-[rgba(255,255,255,0.34)] px-4 py-2 text-muted-foreground backdrop-blur-[12px] dark:bg-[rgba(19,19,19,0.36)]">
             <div className="flex h-10 items-center gap-3">
               <Plus className="size-[15px] shrink-0" />
               <Input
@@ -211,7 +322,7 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
             <TokenPreviewBar tokens={parsedQuickAdd.previewTokens} />
           </div>
         ) : showSearch ? (
-          <div className="flex h-10 w-full items-center gap-3 bg-[#f7f8fa] px-4 text-muted-foreground">
+          <div className="flex h-10 w-full items-center gap-3 rounded-xl border border-border/35 bg-[rgba(255,255,255,0.34)] px-4 text-muted-foreground backdrop-blur-[12px] dark:bg-[rgba(19,19,19,0.36)]">
             <Search className="size-[15px] shrink-0" />
             <Input
               placeholder="Search for a to-do"
@@ -257,7 +368,7 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
                 variant="outline"
                 size="sm"
                 onClick={() => onNavigate('today')}
-                className="ml-[4px] mr-3 h-6 shrink-0 self-center rounded-md border-transparent px-2 text-[9px] font-semibold tracking-[0.05em] bg-[#f5f5f5] text-black transition-colors hover:bg-black hover:text-white dark:bg-white dark:text-black dark:hover:bg-black dark:hover:text-white"
+                className="ml-[4px] mr-3 h-6 shrink-0 self-center rounded-md border border-border/35 bg-[rgba(255,255,255,0.4)] px-2 text-[9px] font-semibold tracking-[0.05em] text-black backdrop-blur-[10px] transition-colors hover:bg-black hover:text-white dark:bg-[rgba(255,255,255,0.7)] dark:text-black dark:hover:bg-black dark:hover:text-white"
               >
                 TODAY
               </Button>
@@ -272,11 +383,11 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
             fontFamily: '"Alternate Gothic No2 D", "Arial Narrow", "Roboto Condensed", sans-serif',
             fontStyle: 'normal',
             fontWeight: 400,
-            fontSize: '16px',
-            lineHeight: '16px',
+            fontSize: '14px',
+            lineHeight: '14px',
             color: 'var(--accent-color)'
           }}
-          className="font-logo uppercase"
+          className="font-logo rounded-full border border-border/35 bg-[rgba(255,255,255,0.3)] px-3 py-1.5 uppercase backdrop-blur-[12px] dark:bg-[rgba(19,19,19,0.3)]"
         >
           LEMONADE<span style={{ color: 'var(--accent-color)' }}>*</span>
         </div>
@@ -462,42 +573,6 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
               </div>
             </PopoverContent>
           </Popover>
-          {viewMode !== "today" ? (
-            <>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => onNavigate('prev-week')}
-                className="size-8 text-muted-foreground hover:text-foreground"
-              >
-                <ChevronsLeft className="size-4" strokeWidth={2.75} />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => onNavigate('prev-day')}
-                className="size-8 text-muted-foreground hover:text-foreground"
-              >
-                <ChevronLeft className="size-4" strokeWidth={2.75} />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => onNavigate('next-day')}
-                className="size-8 text-muted-foreground hover:text-foreground"
-              >
-                <ChevronRight className="size-4" strokeWidth={2.75} />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => onNavigate('next-week')}
-                className="size-8 text-muted-foreground hover:text-foreground"
-              >
-                <ChevronsRight className="size-4" strokeWidth={2.75} />
-              </Button>
-            </>
-          ) : null}
           <PrintPreviewDialog selectedDate={selectedCalendarDate} />
           <div className="ml-2 flex items-center rounded-full border border-border/70 bg-background/80 p-0.5">
             <Button

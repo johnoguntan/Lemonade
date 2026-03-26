@@ -165,8 +165,8 @@ export function ListsSection() {
     >
       {/* Tabs */}
       <div className={cn(
-        "flex min-h-10 items-center gap-2 overflow-hidden px-2 py-1 bg-background/90 dark:bg-[rgba(19,19,19,0.9)]",
-        !isListsCollapsed && "border-b border-border"
+        "flex min-h-10 items-center gap-2 overflow-hidden rounded-xl border border-border/35 bg-background/45 px-3 py-1 backdrop-blur-[12px] dark:bg-[rgba(19,19,19,0.34)]",
+        !isListsCollapsed && "border-b border-border/45"
       )}
       style={bottomDotGridStyle}>
         <DropdownMenu open={manageTabMenuOpen} onOpenChange={setManageTabMenuOpen}>
@@ -235,26 +235,26 @@ export function ListsSection() {
         </Dialog>
 
         <div className="min-w-0 flex-1 overflow-x-auto">
-          <div className="flex min-w-max items-center">
+          <div className="flex min-w-max items-stretch">
             {listTabs.map((tab, index) => (
               <div
                 key={tab.id}
                 className={cn(
-                  "flex items-center border-r border-[#edf0f4]",
+                  "flex items-stretch border-r border-[#edf0f4]",
                   index === 0 && "border-l border-[#edf0f4]"
                 )}
               >
                 <button
                   onClick={() => setActiveTabId(tab.id)}
                   className={cn(
-                    "lemonade-tab-label relative mx-1 my-0.5 flex items-center gap-2 whitespace-nowrap px-3 py-1.5 font-meta text-[10px] leading-[10px] uppercase tracking-[0.08em] transition-colors",
+                    "lemonade-tab-label relative mx-1 my-0.5 inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-0 font-meta text-[10px] leading-none uppercase tracking-[0.08em] transition-colors",
                     activeTabId === tab.id
                       ? "text-foreground dark:bg-[#131313] dark:text-foreground"
                       : "text-[#a7a9ac] hover:rounded-2xl hover:bg-[#F2F3F5] hover:text-[#a7a9ac] dark:hover:bg-[#131315] dark:hover:text-foreground"
                   )}
                 >
                   <span>{tab.name}</span>
-                  <span className="text-inherit/90">{getTabCount(tab.id)}</span>
+                  <span className="inline-flex min-w-4 items-center justify-center text-inherit/90">{getTabCount(tab.id)}</span>
                   {activeTabId === tab.id ? (
                     <span
                       className="absolute inset-x-1 bottom-[1px] h-[2px] rounded-full bg-[var(--accent-color)]"
@@ -481,12 +481,12 @@ function ShoppingReturnsSection({
         </div>
 
         <div className="rounded-2xl border border-border/70 bg-background/95 shadow-sm">
-          <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_150px_minmax(0,1.4fr)_70px] gap-3 border-b border-border/70 px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-            <span>Item</span>
-            <span>Store</span>
-            <span>Deadline</span>
-            <span>Notes</span>
-            <span className="text-right">Returned</span>
+          <div className="grid grid-cols-[minmax(82px,1.2fr)_minmax(78px,0.85fr)_minmax(96px,112px)_minmax(82px,1fr)_72px] gap-2 border-b border-border/70 px-4 py-3 text-[8.5px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+            <span className="min-w-0 truncate">Item</span>
+            <span className="min-w-0 truncate">Store</span>
+            <span className="min-w-0 truncate">Deadline</span>
+            <span className="min-w-0 truncate">Notes</span>
+            <span className="min-w-0 truncate text-right">Returned</span>
           </div>
 
           <div className="divide-y divide-border/60">
@@ -495,7 +495,7 @@ function ShoppingReturnsSection({
                 const isOverdue = !!todo.returnDeadline && !todo.completed && todo.returnDeadline < todayKey
 
                 return (
-                  <div key={todo.id} className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_150px_minmax(0,1.4fr)_70px] gap-3 px-5 py-4">
+                  <div key={todo.id} className="grid grid-cols-[minmax(82px,1.2fr)_minmax(78px,0.85fr)_minmax(96px,112px)_minmax(82px,1fr)_72px] gap-2 px-4 py-4">
                     <Input
                       value={todo.text}
                       onChange={(event) => onUpdateItem(todo.id, { text: event.target.value })}

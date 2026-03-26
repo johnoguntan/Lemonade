@@ -1,14 +1,22 @@
 "use client"
 
 import { useState, useSyncExternalStore } from "react"
-import { formatLocalDateKey, useLemonadeStore } from "@/lib/store"
+import { createOptimisticTodoId, formatLocalDateKey, normalizeCalendarDateKey, parseNaturalLanguageTaskEntries, reconcileOptimisticTaskOrder, useLemonadeStore, type Todo } from "@/lib/store"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { format, isValid, parseISO } from "date-fns"
 import { ArrowRight, Trash2, MoveRight, CheckCircle2 } from "lucide-react"
 import { toast } from "sonner"
 
+const AI_PARSE_TIMEOUT_MS = 15000
+const splitNaturalTitleFallback = (input: string, index: number) =>
+  input
+    .split(/\s*(?:,|and then|after that|also|plus|then)\s*/i)
+    .map((fragment) => fragment.trim())
+    .filter(Boolean)[index] ?? input.trim()
+
 export function DailyPlannerModal() {
-  const { calendarTodos, moveTodoToDate, deleteCalendarTodo, addCalendarTodo, restoreLastDeletedTodo, clearLastDeleted } = useLemonadeStore()
+  const { calendarTodos, moveTodoToDate, deleteCalendarTodo, addCalendarTodo, updateCalendarTodo, ensureLabelIds, labels, restoreLastDeletedTodo, clearLastDeleted } = useLemonadeStore()
   const [priorities, setPriorities] = useState(["", "", ""])
   const [keptTodoIds, setKeptTodoIds] = useState<string[]>([])
   const [dismissedDate, setDismissedDate] = useState<string | null>(null)
@@ -47,17 +55,138 @@ export function DailyPlannerModal() {
     return "Good Evening 🌙"
   })()
 
-  const handleStartDay = () => {
-    priorities.forEach(text => {
-      if (text.trim()) {
-        addCalendarTodo({
-          text: text.trim(),
-          completed: false,
-          date: todayStr,
-          priority: 'high'
-        })
+  const handleStartDay = async () => {
+    for (const text of priorities) {
+      const rawInputString = text
+
+      if (!rawInputString.trim()) {
+        continue
       }
-    })
+
+      const parsedTasks = parseNaturalLanguageTaskEntries(rawInputString, { labels })
+      const optimisticTasks = parsedTasks
+        .map((parsedTask, index) => {
+          const title = parsedTask.cleanText.trim() || splitNaturalTitleFallback(rawInputString, index)
+          if (!title) {
+            return null
+          }
+
+          const labelIds = [
+            ...parsedTask.labelIds,
+            ...ensureLabelIds(parsedTask.newLabelNames),
+          ]
+          const tempId = createOptimisticTodoId(`planner-${todayStr}`)
+          const optimisticDate = parsedTask.scheduledDate ?? todayStr
+
+          addCalendarTodo({
+            id: tempId,
+            text: title,
+            completed: false,
+            date: optimisticDate,
+            priority: parsedTask.priority ?? "high",
+            labelIds,
+            subtasks: parsedTask.subtaskTitles.map((subtaskTitle) => ({ title: subtaskTitle })),
+            isSyncing: true,
+            syncStatus: undefined,
+          })
+
+          return { tempId, parsedTask, labelIds, optimisticDate }
+        })
+        .filter((task): task is NonNullable<typeof task> => task !== null)
+
+      if (optimisticTasks.length === 0) {
+        continue
+      }
+
+      const controller = new AbortController()
+      const timeoutId = window.setTimeout(() => controller.abort(), AI_PARSE_TIMEOUT_MS)
+
+      void fetch("/api/parse-task", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: rawInputString }),
+        signal: controller.signal,
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error("Task parse failed")
+          }
+
+          const tasks = await response.json()
+          const aiTasks = Array.isArray(tasks) ? (tasks as Array<Record<string, unknown>>) : []
+          const matchedAiTasks = reconcileOptimisticTaskOrder(
+            optimisticTasks.map(({ parsedTask, optimisticDate }) => ({
+              text: parsedTask.cleanText.trim(),
+              optimisticDate,
+            })),
+            aiTasks
+          )
+
+          optimisticTasks.forEach(({ tempId, parsedTask, labelIds, optimisticDate }, index) => {
+            const primaryTask = matchedAiTasks[index]
+
+            if (!primaryTask) {
+              updateCalendarTodo(tempId, { isSyncing: false, syncStatus: "local" })
+              return
+            }
+
+            const normalizedDate = normalizeCalendarDateKey(
+              typeof primaryTask.date === "string" ? primaryTask.date : undefined
+            )
+            const resolvedDate = parsedTask.scheduledDate ?? normalizedDate ?? optimisticDate
+            const aiTitle =
+              typeof primaryTask.title === "string" && primaryTask.title.trim()
+                ? primaryTask.title.trim()
+                : splitNaturalTitleFallback(rawInputString, index)
+            const aiLabelIds = ensureLabelIds(
+              Array.isArray(primaryTask.labels)
+                ? primaryTask.labels.filter((label): label is string => typeof label === "string")
+                : []
+            )
+            const aiPriority: Todo["priority"] =
+              primaryTask.priority === "high" || primaryTask.priority === "medium" || primaryTask.priority === "low"
+                ? primaryTask.priority
+                : parsedTask.priority ?? "high"
+            const aiRecurringFrequency =
+              primaryTask.recurringFrequency === "daily" ||
+              primaryTask.recurringFrequency === "weekday" ||
+              primaryTask.recurringFrequency === "weekly" ||
+              primaryTask.recurringFrequency === "monthly"
+                ? primaryTask.recurringFrequency
+                : undefined
+
+            updateCalendarTodo(tempId, {
+              text: aiTitle,
+              date: resolvedDate,
+              time: typeof primaryTask.time === "string" && primaryTask.time ? primaryTask.time : undefined,
+              priority: aiPriority,
+              labelIds: aiLabelIds.length > 0 ? aiLabelIds : labelIds,
+              isRecurring: primaryTask.isRecurring === true,
+              recurringFrequency: aiRecurringFrequency,
+              recurringDays: Array.isArray(primaryTask.recurringDays)
+                ? primaryTask.recurringDays.filter((day): day is number => typeof day === "number")
+                : undefined,
+              isHeading: aiTitle === aiTitle.toUpperCase() && aiTitle.length > 2,
+              isSyncing: false,
+              syncStatus: undefined,
+            })
+
+            if (resolvedDate && resolvedDate !== optimisticDate) {
+              const parsedMovedDate = parseISO(resolvedDate)
+              const movedLabel = isValid(parsedMovedDate) ? format(parsedMovedDate, "MMMM d") : resolvedDate
+              toast(`Task moved to ${movedLabel}`, { duration: 3000 })
+            }
+          })
+        })
+        .catch(() => {
+          optimisticTasks.forEach(({ tempId }) => {
+            updateCalendarTodo(tempId, { isSyncing: false, syncStatus: "local" })
+          })
+        })
+        .finally(() => {
+          window.clearTimeout(timeoutId)
+        })
+    }
     
     localStorage.setItem('lemonade-last-planner', todayStr)
     setDismissedDate(todayStr)

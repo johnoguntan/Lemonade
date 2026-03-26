@@ -26,15 +26,9 @@ export function Footer({ onNavigate }: FooterProps) {
     selectedCalendarDate,
     setSelectedCalendarDate,
   } = useLemonadeStore()
-  const { setTheme } = useTheme()
+  useTheme()
   const [showHelp, setShowHelp] = useState(false)
   const currentStartDate = parseLocalDateKey(selectedCalendarDate)
-
-  const handleThemeToggle = () => {
-    const newTheme = preferences.theme === 'light' ? 'dark' : 'light'
-    setPreferences({ theme: newTheme })
-    setTheme(newTheme)
-  }
 
   const handleNavigate = (direction: 'prev-week' | 'next-week' | 'prev-day' | 'next-day' | 'today') => {
     if (onNavigate) {
@@ -67,7 +61,7 @@ export function Footer({ onNavigate }: FooterProps) {
   }
 
   return (
-    <footer className="lemonade-footer sticky bottom-0 z-30 mt-auto flex h-12 items-center border-t border-border bg-background/95 px-4 backdrop-blur-sm transition-all duration-300">
+    <footer className="lemonade-footer sticky bottom-0 z-30 mt-auto flex h-11 items-center rounded-xl border border-border/35 bg-background/45 px-4 backdrop-blur-[14px] transition-all duration-300 dark:bg-[rgba(19,19,19,0.34)]">
       <div className="flex min-w-0 flex-1 items-center justify-start gap-1">
         <Button
           variant="ghost"
@@ -128,9 +122,9 @@ export function Footer({ onNavigate }: FooterProps) {
         <Button
           variant="ghost"
           size="icon"
-          onClick={handleThemeToggle}
-          className="size-8 text-muted-foreground hover:text-foreground"
-          title="Toggle dark mode"
+          disabled
+          className="size-8 text-muted-foreground/40 hover:text-muted-foreground/40"
+          title="Dark mode coming soon"
         >
           {preferences.theme === 'light' ? <Moon className="size-4" /> : <Sun className="size-4" />}
         </Button>

@@ -2,15 +2,20 @@
 
 import { useState, useRef, useEffect, useMemo, type DragEvent } from "react"
 import {
+  createOptimisticTodoId,
   formatLocalDateKey,
+  localTaskParser,
+  normalizeCalendarDateKey,
+  parseNaturalLanguageTaskEntries,
+  reconcileOptimisticTaskOrder,
   useLemonadeStore,
   holidays,
-  parseNaturalLanguageTaskInput,
   type NaturalLanguagePreviewToken,
   type Todo,
 } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { TodoItem } from "./todo-item"
+import { format, isValid, parseISO } from "date-fns"
 import { Check } from "lucide-react"
 import { toast } from "sonner"
 
@@ -18,6 +23,8 @@ interface DayColumnProps {
   date: Date
   isToday: boolean
 }
+
+const AI_PARSE_TIMEOUT_MS = 15000
 
 const formatDate = (date: Date) => {
   const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
@@ -33,6 +40,12 @@ const formatDate = (date: Date) => {
 const getDateString = (date: Date) => {
   return formatLocalDateKey(date)
 }
+
+const splitNaturalTitleFallback = (input: string, index: number) =>
+  input
+    .split(/\s*(?:,|and then|after that|also|plus|then)\s*/i)
+    .map((fragment) => fragment.trim())
+    .filter(Boolean)[index] ?? input.trim()
 
 const sortEndOfDayTodos = (todos: Todo[]) => {
   const getBucket = (todo: Todo) => {
@@ -63,6 +76,7 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
   const calendarTodos = useLemonadeStore((state) => state.calendarTodos)
   const lastCreatedTodoId = useLemonadeStore((state) => state.lastCreatedTodoId)
   const addCalendarTodo = useLemonadeStore((state) => state.addCalendarTodo)
+  const updateCalendarTodo = useLemonadeStore((state) => state.updateCalendarTodo)
   const clearLastCreatedTodoId = useLemonadeStore((state) => state.clearLastCreatedTodoId)
   const ensureLabelIds = useLemonadeStore((state) => state.ensureLabelIds)
   const moveTodoToDate = useLemonadeStore((state) => state.moveTodoToDate)
@@ -120,7 +134,7 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
   const { date: dateFontSize } = getResponsiveFontSizes()
   const visibleLineCount = isCalendarExpanded ? 18 : 9
   const fillerRowCount = Math.max(visibleLineCount - todosForDay.length - 1, 0)
-  const parsedInput = parseNaturalLanguageTaskInput(newTodoText, { labels })
+  const parsedInput = localTaskParser(newTodoText, { labels })
 
   const handleTodoDragStart = (event: DragEvent<HTMLDivElement>, todoId: string) => {
     event.dataTransfer.setData("text/plain", todoId)
@@ -147,32 +161,139 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
     setDraggedTodoId(null)
   }
 
-  const handleCreateNaturalLanguageTodo = () => {
-    const parsed = parseNaturalLanguageTaskInput(newTodoText, { labels })
-    const labelIds = [...parsed.labelIds, ...ensureLabelIds(parsed.newLabelNames)]
+  const handleCreateNaturalLanguageTodo = async () => {
+    const rawInputString = newTodoText
 
-    if (!parsed.cleanText) {
+    if (!rawInputString.trim()) {
       setNewTodoText("")
       return false
     }
 
-    const isHeading = parsed.cleanText === parsed.cleanText.toUpperCase() && parsed.cleanText.length > 2
+    const parsedTasks = parseNaturalLanguageTaskEntries(rawInputString, { labels })
+    const optimisticTasks = parsedTasks
+      .map((parsedTask, index) => {
+        const title = parsedTask.cleanText.trim() || splitNaturalTitleFallback(rawInputString, index)
+        if (!title) {
+          return null
+        }
 
-    const targetDate = parsed.scheduledDate ?? dateStr
+        const labelIds = [
+          ...parsedTask.labelIds,
+          ...ensureLabelIds(parsedTask.newLabelNames),
+        ]
+        const tempId = createOptimisticTodoId(`day-${dateStr}`)
+        const optimisticDate = parsedTask.scheduledDate ?? dateStr
 
-    addCalendarTodo({
-      text: parsed.cleanText,
-      completed: false,
-      date: targetDate,
-      isHeading,
-      isRecurring: parsed.recurrence?.isRecurring,
-      recurringFrequency: parsed.recurrence?.recurringFrequency,
-      recurringDays: parsed.recurrence?.recurringDays,
-      priority: parsed.priority,
-      labelIds,
-      subtasks: parsed.subtaskTitles.map((title) => ({ title })),
-      time: parsed.time,
+        addCalendarTodo({
+          id: tempId,
+          text: title,
+          completed: false,
+          date: optimisticDate,
+          isHeading: title === title.toUpperCase() && title.length > 2,
+          priority: parsedTask.priority,
+          labelIds,
+          subtasks: parsedTask.subtaskTitles.map((subtaskTitle) => ({ title: subtaskTitle })),
+          isSyncing: true,
+          syncStatus: undefined,
+        })
+
+        return { tempId, parsedTask, labelIds, optimisticDate }
+      })
+      .filter((task): task is NonNullable<typeof task> => task !== null)
+
+    if (optimisticTasks.length === 0) {
+      setNewTodoText("")
+      return false
+    }
+
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => controller.abort(), AI_PARSE_TIMEOUT_MS)
+
+    void fetch("/api/parse-task", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input: rawInputString }),
+      signal: controller.signal,
     })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Task parse failed")
+        }
+
+        const tasks = await response.json()
+        const aiTasks = Array.isArray(tasks) ? (tasks as Array<Record<string, unknown>>) : []
+        const matchedAiTasks = reconcileOptimisticTaskOrder(
+          optimisticTasks.map(({ parsedTask, optimisticDate }) => ({
+            text: parsedTask.cleanText.trim(),
+            optimisticDate,
+          })),
+          aiTasks
+        )
+
+        optimisticTasks.forEach(({ tempId, parsedTask, labelIds, optimisticDate }, index) => {
+          const primaryTask = matchedAiTasks[index]
+
+          if (!primaryTask) {
+            updateCalendarTodo(tempId, { isSyncing: false, syncStatus: "local" })
+            return
+          }
+
+          const normalizedDate = normalizeCalendarDateKey(
+            typeof primaryTask.date === "string" ? primaryTask.date : undefined
+          )
+          const resolvedDate = parsedTask.scheduledDate ?? normalizedDate ?? optimisticDate
+          const aiTitle =
+            typeof primaryTask.title === "string" && primaryTask.title.trim()
+              ? primaryTask.title.trim()
+              : splitNaturalTitleFallback(rawInputString, index)
+          const aiLabelIds = ensureLabelIds(
+            Array.isArray(primaryTask.labels)
+              ? primaryTask.labels.filter((label): label is string => typeof label === "string")
+              : []
+          )
+          const aiPriority: Todo["priority"] =
+            primaryTask.priority === "high" || primaryTask.priority === "medium" || primaryTask.priority === "low"
+              ? primaryTask.priority
+              : parsedTask.priority
+          const aiRecurringFrequency =
+            primaryTask.recurringFrequency === "daily" ||
+            primaryTask.recurringFrequency === "weekday" ||
+            primaryTask.recurringFrequency === "weekly" ||
+            primaryTask.recurringFrequency === "monthly"
+              ? primaryTask.recurringFrequency
+              : undefined
+
+          updateCalendarTodo(tempId, {
+            text: aiTitle,
+            date: resolvedDate,
+            time: typeof primaryTask.time === "string" && primaryTask.time ? primaryTask.time : undefined,
+            priority: aiPriority,
+            labelIds: aiLabelIds.length > 0 ? aiLabelIds : labelIds,
+            isRecurring: primaryTask.isRecurring === true,
+            recurringFrequency: aiRecurringFrequency,
+            recurringDays: Array.isArray(primaryTask.recurringDays)
+              ? primaryTask.recurringDays.filter((day): day is number => typeof day === "number")
+              : undefined,
+            isHeading: aiTitle === aiTitle.toUpperCase() && aiTitle.length > 2,
+            isSyncing: false,
+            syncStatus: undefined,
+          })
+
+          if (resolvedDate && resolvedDate !== optimisticDate) {
+            const parsedMovedDate = parseISO(resolvedDate)
+            const movedLabel = isValid(parsedMovedDate) ? format(parsedMovedDate, "MMMM d") : resolvedDate
+            toast(`Task moved to ${movedLabel}`, { duration: 3000 })
+          }
+        })
+      })
+      .catch(() => {
+        optimisticTasks.forEach(({ tempId }) => {
+          updateCalendarTodo(tempId, { isSyncing: false, syncStatus: "local" })
+        })
+      })
+      .finally(() => {
+        window.clearTimeout(timeoutId)
+      })
 
     setNewTodoText("")
     clearLastCreatedTodoId()
@@ -241,10 +362,10 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
                       type="text"
                       value={newTodoText}
                       onChange={(e) => setNewTodoText(e.target.value)}
-                      onKeyDown={(e) => {
+                      onKeyDown={async (e) => {
                         if (e.key === "Enter") {
                           e.preventDefault()
-                          const created = handleCreateNaturalLanguageTodo()
+                          const created = await handleCreateNaturalLanguageTodo()
                           if (created) {
                             requestAnimationFrame(() => {
                               inputRef.current?.focus()
@@ -255,8 +376,8 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
                           setNewTodoText("")
                         }
                       }}
-                      onBlur={() => {
-                        handleCreateNaturalLanguageTodo()
+                      onBlur={async () => {
+                        await handleCreateNaturalLanguageTodo()
                         setIsAdding(false)
                       }}
                       className={cn(
@@ -269,8 +390,8 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
                       <button
                         type="button"
                         onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => {
-                          const created = handleCreateNaturalLanguageTodo()
+                        onClick={async () => {
+                          const created = await handleCreateNaturalLanguageTodo()
                           if (created) {
                             requestAnimationFrame(() => {
                               inputRef.current?.focus()

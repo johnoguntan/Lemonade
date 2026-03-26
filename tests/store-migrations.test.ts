@@ -69,12 +69,12 @@ test("legacy list todos are normalized during migration", () => {
   ])
 })
 
-test("weekCount is clamped into the supported range", () => {
+test("weekCount is locked to the one-week layout", () => {
   const lowWeekCount = migratePersistedLemonadeState({ weekCount: 0 })
   const highWeekCount = migratePersistedLemonadeState({ weekCount: 99 })
 
   assert.equal(lowWeekCount.weekCount, 1)
-  assert.equal(highWeekCount.weekCount, 4)
+  assert.equal(highWeekCount.weekCount, 1)
 })
 
 test("invalid persisted arrays fall back safely", () => {

@@ -1,6 +1,6 @@
 "use client"
 
-import { addDays, addMonths } from 'date-fns'
+import { addDays, addMonths, format, isValid, parseISO } from 'date-fns'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
@@ -30,7 +30,10 @@ export interface Todo {
   date: string // ISO date string
   createdAt: number
   endOfDay: boolean
+  isSyncing?: boolean
+  syncStatus?: 'local'
   time?: string
+  durationMinutes?: number
   color?: string
   isHeading?: boolean
   subtasks: SubTask[]
@@ -75,6 +78,7 @@ export interface UserPreferences {
   colorPalette: string[]
   showDotGridBackground: boolean
   defaultLabelId: string | null
+  displayName: string
 }
 
 export interface NaturalLanguagePreviewToken {
@@ -99,12 +103,20 @@ export interface ParsedNaturalLanguageTask {
   previewTokens: NaturalLanguagePreviewToken[]
 }
 
+type OptimisticTaskCandidate = {
+  text: string
+  optimisticDate: string
+}
+
+const WEEKDAY_PATTERN = "\\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\\b"
+
 interface DeletedTodoBuffer {
   items: Todo[]
   token: string
 }
 
 type CalendarTodoInput = Omit<Todo, 'id' | 'subtasks' | 'endOfDay' | 'createdAt' | 'labelIds'> & {
+  id?: string
   endOfDay?: boolean
   createdAt?: number
   labelIds?: string[]
@@ -218,6 +230,8 @@ type PersistedLemonadeStore = Partial<
 
 const generateId = () => Math.random().toString(36).substring(2, 15)
 
+export const createOptimisticTodoId = (scope = "task") => `optimistic-${scope}-${generateId()}`
+
 const normalizeSubtask = (
   subtask: Partial<SubTask> & { id?: string; title?: string; text?: string; completed?: boolean; parentId?: string },
   fallbackParentId: string
@@ -255,6 +269,12 @@ const normalizeTodo = (todo: Todo, fallbackCreatedAt: number): Todo => {
     ...todo,
     createdAt: typeof todo.createdAt === "number" ? todo.createdAt : fallbackCreatedAt,
     endOfDay: typeof todo.endOfDay === "boolean" ? todo.endOfDay : false,
+    isSyncing: typeof todo.isSyncing === "boolean" ? todo.isSyncing : false,
+    syncStatus: todo.syncStatus === "local" ? "local" : undefined,
+    durationMinutes:
+      typeof todo.durationMinutes === "number" && Number.isFinite(todo.durationMinutes) && todo.durationMinutes > 0
+        ? Math.floor(todo.durationMinutes)
+        : undefined,
     subtasks: Array.isArray(todo.subtasks) ? todo.subtasks.map((subtask) => normalizeSubtask(subtask, todo.id)) : [],
     labelIds: fallbackLabelIds,
     storeName: typeof todo.storeName === "string" ? todo.storeName : undefined,
@@ -274,6 +294,13 @@ const normalizePersistedPreferences = (
 ): UserPreferences => ({
   ...fallbackPreferences,
   ...preferences,
+  columns:
+    preferences?.columns === 1 ||
+    preferences?.columns === 3 ||
+    preferences?.columns === 5 ||
+    preferences?.columns === 7
+      ? preferences.columns
+      : fallbackPreferences.columns,
   textSize: normalizeTextSizePreference(preferences?.textSize),
   spacing: normalizeSpacingPreference(preferences?.spacing),
   timelineStartHour: normalizeTimelineHourPreference(preferences?.timelineStartHour, fallbackPreferences.timelineStartHour),
@@ -283,10 +310,13 @@ const normalizePersistedPreferences = (
   showDotGridBackground: preferences?.showDotGridBackground ?? fallbackPreferences.showDotGridBackground,
   defaultLabelId:
     typeof preferences?.defaultLabelId === "string" ? preferences.defaultLabelId : null,
+  displayName:
+    typeof preferences?.displayName === "string" && preferences.displayName.trim().length > 0
+      ? preferences.displayName
+      : fallbackPreferences.displayName,
 })
 
-const clampWeekCount = (value: unknown, fallback: number) =>
-  typeof value === "number" ? Math.min(4, Math.max(1, value)) : fallback
+const clampWeekCount = () => 1
 
 const FIXED_LIST_TABS: ListTab[] = [
   { id: 'planning-tab', name: 'PLANNING' },
@@ -343,6 +373,21 @@ const ensureFixedLists = (lists: List[]): List[] => {
   )
 }
 
+const ensureUniqueTodoIds = (todos: Todo[]) => {
+  const seenIds = new Set<string>()
+
+  return todos.map((todo) => {
+    if (!seenIds.has(todo.id)) {
+      seenIds.add(todo.id)
+      return todo
+    }
+
+    const nextId = generateId()
+    seenIds.add(nextId)
+    return { ...todo, id: nextId }
+  })
+}
+
 export const migratePersistedLemonadeState = (
   persistedState: unknown,
   fallbackState?: LemonadeStore
@@ -352,7 +397,7 @@ export const migratePersistedLemonadeState = (
     : {}) as PersistedLemonadeStore
 
   const fallbackPreferences = fallbackState?.preferences ?? {
-    columns: 5,
+    columns: 7,
     textSize: "md",
     spacing: "normal",
     timelineStartHour: 6,
@@ -367,6 +412,7 @@ export const migratePersistedLemonadeState = (
     colorPalette: DEFAULT_COLOR_PALETTE,
     showDotGridBackground: true,
     defaultLabelId: null,
+    displayName: "Lemonade User",
   }
 
   const isLegacyVersion = typeof fallbackState === "undefined"
@@ -375,8 +421,10 @@ export const migratePersistedLemonadeState = (
     ...persisted,
     preferences: normalizePersistedPreferences(persisted.preferences, fallbackPreferences),
     calendarTodos: Array.isArray(persisted.calendarTodos)
-      ? persisted.calendarTodos.map((todo, index) =>
-          isLegacyVersion ? normalizeLegacyTodo(todo, index) : normalizeTodo(todo, index)
+      ? ensureUniqueTodoIds(
+          persisted.calendarTodos.map((todo, index) =>
+            isLegacyVersion ? normalizeLegacyTodo(todo, index) : normalizeTodo(todo, index)
+          )
         )
       : [],
     listTabs: ensureFixedTabs(Array.isArray(persisted.listTabs) ? persisted.listTabs : []),
@@ -385,10 +433,12 @@ export const migratePersistedLemonadeState = (
       ? persisted.lists.map((list, listIndex) => ({
           ...list,
           todos: Array.isArray(list.todos)
-            ? list.todos.map((todo, todoIndex) =>
-                isLegacyVersion
-                  ? normalizeLegacyTodo(todo, listIndex * 1000 + todoIndex)
-                  : normalizeTodo(todo, listIndex * 1000 + todoIndex)
+            ? ensureUniqueTodoIds(
+                list.todos.map((todo, todoIndex) =>
+                  isLegacyVersion
+                    ? normalizeLegacyTodo(todo, listIndex * 1000 + todoIndex)
+                    : normalizeTodo(todo, listIndex * 1000 + todoIndex)
+                )
               )
             : [],
         }))
@@ -406,7 +456,7 @@ export const migratePersistedLemonadeState = (
         ? [(persisted as { tagFilterId: string }).tagFilterId]
         : [],
     sidebarOpen: typeof persisted.sidebarOpen === "boolean" ? persisted.sidebarOpen : false,
-    weekCount: clampWeekCount(persisted.weekCount, fallbackState?.weekCount ?? 2),
+    weekCount: clampWeekCount(),
     lastSessionDate:
       typeof (persisted as { lastSessionDate?: string }).lastSessionDate === "string"
         ? (persisted as { lastSessionDate: string }).lastSessionDate
@@ -425,53 +475,6 @@ const DEFAULT_COLOR_PALETTE = [
   '#fbcfe8',
   '#fed7aa',
 ]
-
-const monthLookup: Record<string, number> = {
-  january: 0,
-  jan: 0,
-  february: 1,
-  feb: 1,
-  march: 2,
-  mar: 2,
-  april: 3,
-  apr: 3,
-  may: 4,
-  june: 5,
-  jun: 5,
-  july: 6,
-  jul: 6,
-  august: 7,
-  aug: 7,
-  september: 8,
-  sep: 8,
-  sept: 8,
-  october: 9,
-  oct: 9,
-  november: 10,
-  nov: 10,
-  december: 11,
-  dec: 11,
-}
-
-const weekdayLookup: Record<string, number> = {
-  sunday: 0,
-  sun: 0,
-  monday: 1,
-  mon: 1,
-  tuesday: 2,
-  tue: 2,
-  tues: 2,
-  wednesday: 3,
-  wed: 3,
-  thursday: 4,
-  thu: 4,
-  thur: 4,
-  thurs: 4,
-  friday: 5,
-  fri: 5,
-  saturday: 6,
-  sat: 6,
-}
 
 type TokenRange = {
   start: number
@@ -500,14 +503,34 @@ export const parseLocalDateKey = (value: string) => {
   return new Date(year, (month ?? 1) - 1, day ?? 1)
 }
 
+export const normalizeCalendarDateKey = (value: string | null | undefined) => {
+  if (typeof value !== "string") {
+    return undefined
+  }
+
+  const trimmed = value.trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return undefined
+  }
+
+  const parsed = parseISO(trimmed)
+  if (!isValid(parsed)) {
+    return undefined
+  }
+
+  return format(parsed, "yyyy-MM-dd")
+}
+
 const toIsoDate = (date: Date) => formatLocalDateKey(date)
 
 const normalizeTodoDate = (value: string | null | undefined) => {
-  if (typeof value !== "string" || value.trim().length === 0) {
+  const normalized = normalizeCalendarDateKey(value)
+
+  if (!normalized) {
     return toIsoDate(new Date())
   }
 
-  return value
+  return normalized
 }
 
 const getInitialCalendarDate = (startOnYesterday: boolean) => {
@@ -554,9 +577,6 @@ const titleCase = (value: string) =>
 
 const normalizeTagName = (value: string) => value.trim().toLowerCase()
 
-const normalizeTimeValue = (raw: string) =>
-  raw.replace(/\s+/g, '').toLowerCase()
-
 const DATE_TIME_STOP_WORDS = new Set([
   "at",
   "on",
@@ -568,28 +588,148 @@ const DATE_TIME_STOP_WORDS = new Set([
   "until",
 ])
 
-const buildUpcomingWeekday = (weekday: number, referenceDate: Date) => {
-  const reference = startOfDay(referenceDate)
-  const next = new Date(reference)
-  let delta = (weekday - reference.getDay() + 7) % 7
-  if (delta === 0) {
-    delta = 7
-  }
-  next.setDate(reference.getDate() + delta)
-  return next
+const STRONG_TASK_SEPARATOR = /\s*(?:,|and then|after that|also|plus|then)\s*/i
+const ACTION_START_PATTERN =
+  /^(?:call|run|send|email|text|buy|book|schedule|plan|review|write|read|clean|organize|pick|drop|submit|prepare|get|make|go|meet|pay|finish|start|stop|take|bring|file|draft|return|visit|exercise|work|check|update|follow|talk|message|shop)\b/i
+
+const splitNaturalLanguageTaskFragments = (input: string) => {
+  const strongFragments = input
+    .split(STRONG_TASK_SEPARATOR)
+    .map((fragment) => fragment.trim())
+    .filter(Boolean)
+
+  return strongFragments.flatMap((fragment) => {
+    const andMatches = [...fragment.matchAll(/\s+and\s+/gi)]
+
+    if (andMatches.length === 0) {
+      return [fragment]
+    }
+
+    const parts: string[] = []
+    let cursor = 0
+
+    for (const match of andMatches) {
+      const matchIndex = match.index ?? -1
+      const nextStart = matchIndex + match[0].length
+      const nextFragment = fragment.slice(nextStart).trim()
+
+      if (!ACTION_START_PATTERN.test(nextFragment)) {
+        continue
+      }
+
+      const current = fragment.slice(cursor, matchIndex).trim()
+      if (current) {
+        parts.push(current)
+      }
+      cursor = nextStart
+    }
+
+    const tail = fragment.slice(cursor).trim()
+    if (tail) {
+      parts.push(tail)
+    }
+
+    return parts.length > 0 ? parts : [fragment]
+  })
 }
 
-const resolveMonthDayDate = (month: number, day: number, referenceDate: Date) => {
-  const reference = startOfDay(referenceDate)
-  const candidate = new Date(reference.getFullYear(), month, day)
-  if (candidate < reference) {
-    candidate.setFullYear(candidate.getFullYear() + 1)
+const detectSharedNaturalLanguageDate = (input: string, today: Date) => {
+  const firstFragment = splitNaturalLanguageTaskFragments(input)[0]?.toLowerCase() ?? ""
+
+  if (/\b(?:tomorrow|tmr)\b/.test(firstFragment)) {
+    return toIsoDate(addDays(today, 1))
   }
-  return candidate
+
+  if (/\btoday\b/.test(firstFragment)) {
+    return toIsoDate(today)
+  }
+
+  if (/\bnext week\b/.test(firstFragment)) {
+    const nextMonday = new Date(today)
+    const day = nextMonday.getDay()
+    const daysUntilNextMonday = ((8 - day) % 7) || 7
+    nextMonday.setDate(nextMonday.getDate() + daysUntilNextMonday)
+    return toIsoDate(nextMonday)
+  }
+
+  return null
+}
+
+const hasExplicitDateOverride = (fragment: string) => {
+  const normalized = fragment.toLowerCase()
+
+  return (
+    /\b(?:today|tomorrow|tmr|next week)\b/.test(normalized) ||
+    new RegExp(`\\b(?:on|by|this|next)\\s+${WEEKDAY_PATTERN.slice(2, -2)}\\b`, "i").test(normalized) ||
+    new RegExp(`${WEEKDAY_PATTERN}\\s+at\\b`, "i").test(normalized) ||
+    /\b\d{4}-\d{2}-\d{2}\b/.test(normalized) ||
+    /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/.test(normalized)
+  )
 }
 
 const hasOverlap = (ranges: TokenRange[], start: number, end: number) =>
   ranges.some((range) => start < range.end && end > range.start)
+
+const WEEKDAY_INDEX_BY_NAME: Record<string, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  tuesay: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+}
+
+const getNextWeekdayDate = (referenceDate: Date, weekday: number, includeNextWeek = false) => {
+  const base = startOfDay(referenceDate)
+  const currentWeekday = base.getDay()
+  let daysUntil = (weekday - currentWeekday + 7) % 7
+
+  if (daysUntil === 0) {
+    daysUntil = 7
+  }
+
+  if (includeNextWeek) {
+    daysUntil += 7
+  }
+
+  return addDays(base, daysUntil)
+}
+
+const detectFastPathScheduledDate = (input: string, referenceDate: Date) => {
+  const normalized = input.toLowerCase()
+
+  const explicitNextWeekdayMatch = normalized.match(/\bnext\s+(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/)
+  if (explicitNextWeekdayMatch) {
+    return toIsoDate(
+      getNextWeekdayDate(referenceDate, WEEKDAY_INDEX_BY_NAME[explicitNextWeekdayMatch[1]], true)
+    )
+  }
+
+  if (/\b(?:tomorrow|tmr)\b/.test(normalized)) {
+    return toIsoDate(addDays(referenceDate, 1))
+  }
+
+  if (/\btoday\b/.test(normalized)) {
+    return toIsoDate(referenceDate)
+  }
+
+  if (/\bnext week\b/.test(normalized)) {
+    const nextMonday = new Date(referenceDate)
+    const day = nextMonday.getDay()
+    const daysUntilNextMonday = ((8 - day) % 7) || 7
+    nextMonday.setDate(nextMonday.getDate() + daysUntilNextMonday)
+    return toIsoDate(nextMonday)
+  }
+
+  const weekdayMatch = normalized.match(/\b(?:on\s+)?(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/)
+  if (weekdayMatch) {
+    return toIsoDate(getNextWeekdayDate(referenceDate, WEEKDAY_INDEX_BY_NAME[weekdayMatch[1]]))
+  }
+
+  return undefined
+}
 
 const stripTokenRanges = (input: string, ranges: TokenRange[]) => {
   const expandedRanges = ranges.map((range) => {
@@ -658,24 +798,15 @@ export function parseNaturalLanguageTaskInput(
   input: string,
   options: { labels: Label[]; referenceDate?: Date }
 ): ParsedNaturalLanguageTask {
+  const referenceDate = options.referenceDate ?? new Date()
   const [taskInput = "", ...subtaskParts] = input
     .split(/\s*>\s*/)
     .map((segment) => segment.trim())
     .filter(Boolean)
-  const referenceDate = options.referenceDate ?? new Date()
   const ranges: TokenRange[] = []
-  let selectedDateValue: string | undefined
-  let selectedDatePreview: NaturalLanguagePreviewToken | undefined
-  let selectedDateIndex = -1
-  let recurrenceSelection: ParsedNaturalLanguageTask["recurrence"] | null = null
-  let recurrencePreview: NaturalLanguagePreviewToken | null = null
-  let recurrenceIndex = -1
   let prioritySelection: Todo["priority"] | undefined
   let priorityPreview: NaturalLanguagePreviewToken | null = null
   let priorityIndex = -1
-  let timeSelection: string | undefined
-  let timePreview: NaturalLanguagePreviewToken | null = null
-  let timeIndex = -1
   const labelIds: string[] = []
   const newLabelNames: string[] = []
   const labelPreviews: NaturalLanguagePreviewToken[] = []
@@ -688,173 +819,16 @@ export function parseNaturalLanguageTaskInput(
     return false
   }
 
-  const registerDate = (match: RegExpExecArray, date: Date, label: string) => {
-    const value = toIsoDate(date)
-    const preview = { key: `date-${match.index}`, label: `📅 ${label}` }
-    if (pushRange({ start: match.index, end: match.index + match[0].length, type: "date", preview, payload: value })) {
-      if (match.index >= selectedDateIndex) {
-        selectedDateValue = value
-        selectedDatePreview = preview
-        selectedDateIndex = match.index
-      }
-    }
-  }
-
-  const registerTime = (match: RegExpExecArray, value: string, label: string) => {
-    const preview = { key: `time-${match.index}`, label: `🕒 ${label}` }
-    if (pushRange({ start: match.index!, end: match.index! + match[0].length, type: "time", preview, payload: value })) {
-      if (match.index! >= timeIndex) {
-        timeSelection = value
-        timePreview = preview
-        timeIndex = match.index!
-      }
-    }
-  }
-
-  const setTimeFromOverlappingToken = (match: RegExpExecArray, value: string, label: string) => {
-    if (match.index! >= timeIndex) {
-      timeSelection = value
-      timePreview = { key: `time-${match.index}`, label: `🕒 ${label}` }
-      timeIndex = match.index!
-    }
-  }
-
-  const formatRecurringDaysLabel = (days: number[]) =>
-    days
-      .map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day])
-      .join("/")
-
-  for (const match of taskInput.matchAll(/\bday after tomorrow\b/gi)) {
-    registerDate(match as RegExpExecArray, addDays(referenceDate, 2), "Day After Tomorrow")
-  }
-
-  for (const match of taskInput.matchAll(/\btonight\b/gi)) {
-    registerDate(match as RegExpExecArray, referenceDate, "Tonight")
-    setTimeFromOverlappingToken(match as RegExpExecArray, "9pm", "Tonight")
-  }
-
-  for (const match of taskInput.matchAll(/\bin\s+(\d+)\s+days?\b/gi)) {
-    const dayCount = Number.parseInt(match[1], 10)
-    if (Number.isNaN(dayCount)) {
-      continue
-    }
-    registerDate(match as RegExpExecArray, addDays(referenceDate, dayCount), `In ${dayCount} Day${dayCount === 1 ? "" : "s"}`)
-  }
-
-  for (const match of taskInput.matchAll(/\b(today|tomorrow)\b/gi)) {
-    const keyword = match[0].toLowerCase()
-    const resolved = keyword === "tomorrow" ? addDays(referenceDate, 1) : referenceDate
-    registerDate(match as RegExpExecArray, resolved, titleCase(keyword))
-  }
-
-  for (const match of taskInput.matchAll(/\bnext\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi)) {
-    const weekday = weekdayLookup[match[1].toLowerCase()]
-    registerDate(match as RegExpExecArray, buildUpcomingWeekday(weekday, referenceDate), `Next ${titleCase(match[1])}`)
-  }
-
-  for (const match of taskInput.matchAll(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi)) {
-    const matchIndex = match.index ?? 0
-    const before = taskInput.slice(Math.max(0, matchIndex - 6), matchIndex).toLowerCase()
-    if (/\b(next|every)\s*$/.test(before)) {
-      continue
-    }
-    const weekday = weekdayLookup[match[1].toLowerCase()]
-    registerDate(match as RegExpExecArray, buildUpcomingWeekday(weekday, referenceDate), titleCase(match[1]))
-  }
-
-  for (const match of taskInput.matchAll(/\b(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|sept|october|oct|november|nov|december|dec)\s+(\d{1,2})(?:st|nd|rd|th)?\b/gi)) {
-    const month = monthLookup[match[1].toLowerCase()]
-    const day = Number.parseInt(match[2], 10)
-    if (Number.isNaN(day)) {
-      continue
-    }
-    registerDate(match as RegExpExecArray, resolveMonthDayDate(month, day, referenceDate), `${titleCase(match[1])} ${day}`)
-  }
-
-  for (const match of taskInput.matchAll(/\bevery\s+(day|weekday|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi)) {
-    const value = match[1].toLowerCase()
-    const preview = {
-      key: `recurrence-${match.index}`,
-      label: `🔁 Every ${value === "day" ? "Day" : titleCase(value)}`,
-    }
-
-    let recurrence: ParsedNaturalLanguageTask["recurrence"]
-
-    if (value === "day") {
-      recurrence = { isRecurring: true, recurringFrequency: "daily", label: "Every Day" }
-    } else if (value === "weekday") {
-      recurrence = { isRecurring: true, recurringFrequency: "weekday", label: "Every Weekday" }
-    } else {
-      recurrence = {
-        isRecurring: true,
-        recurringDays: [weekdayLookup[value]],
-        label: `Every ${titleCase(value)}`,
-      }
-    }
-
-    if (pushRange({ start: match.index!, end: match.index! + match[0].length, type: "recurrence", preview, payload: recurrence })) {
-      if (match.index! >= recurrenceIndex) {
-        recurrenceSelection = recurrence
-        recurrencePreview = preview
-        recurrenceIndex = match.index!
-      }
-    }
-  }
-
-  for (const match of taskInput.matchAll(/\bevery\s+((?:sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat)(?:\s*\/\s*(?:sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat))*)\b/gi)) {
-    const aliases = match[1]
-      .split("/")
-      .map((value) => normalizeTagName(value))
-      .map((value) => weekdayLookup[value])
-      .filter((value): value is number => typeof value === "number")
-
-    const uniqueDays = [...new Set(aliases)]
-    if (uniqueDays.length === 0) {
-      continue
-    }
-
-    const recurrence: ParsedNaturalLanguageTask["recurrence"] = {
-      isRecurring: true,
-      recurringDays: uniqueDays,
-      label: `Every ${formatRecurringDaysLabel(uniqueDays)}`,
-    }
-    const preview = {
-      key: `recurrence-${match.index}`,
-      label: `🔁 Every ${formatRecurringDaysLabel(uniqueDays)}`,
-    }
-
-    if (pushRange({ start: match.index!, end: match.index! + match[0].length, type: "recurrence", preview, payload: recurrence })) {
-      if (match.index! >= recurrenceIndex) {
-        recurrenceSelection = recurrence
-        recurrencePreview = preview
-        recurrenceIndex = match.index!
-      }
-    }
-  }
-
-  for (const match of taskInput.matchAll(/\bweekly\b/gi)) {
-    const recurrence: ParsedNaturalLanguageTask["recurrence"] = {
-      isRecurring: true,
-      recurringFrequency: "weekly",
-      label: "Weekly",
-    }
-    const preview = {
-      key: `recurrence-${match.index}`,
-      label: "🔁 Weekly",
-    }
-
-    if (pushRange({ start: match.index!, end: match.index! + match[0].length, type: "recurrence", preview, payload: recurrence })) {
-      if (match.index! >= recurrenceIndex) {
-        recurrenceSelection = recurrence
-        recurrencePreview = preview
-        recurrenceIndex = match.index!
-      }
-    }
-  }
-
-  for (const match of taskInput.matchAll(/!(high|medium|low)\b/gi)) {
-    const value = match[1].toLowerCase() as NonNullable<Todo["priority"]>
+  for (const match of taskInput.matchAll(/\b(p1|p2|p3|high priority|medium priority|low priority|urgent|asap|important|normal priority|normal|whenever)\b/gi)) {
+    const normalized = match[0].toLowerCase()
+    const value =
+      normalized === "p1" || normalized === "urgent" || normalized === "asap" || normalized === "important" || normalized === "high priority"
+        ? "high"
+        : normalized === "p2" || normalized === "medium priority" || normalized === "normal priority" || normalized === "normal"
+          ? "medium"
+          : "low"
     const preview = { key: `priority-${match.index}`, label: `❗ ${titleCase(value)}` }
+
     if (pushRange({ start: match.index!, end: match.index! + match[0].length, type: "priority", preview, payload: value })) {
       if (match.index! >= priorityIndex) {
         prioritySelection = value
@@ -892,41 +866,12 @@ export function parseNaturalLanguageTaskInput(
     })
   }
 
-  for (const match of taskInput.matchAll(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/gi)) {
-    const normalized = normalizeTimeValue(match[0])
-    registerTime(match as RegExpExecArray, normalized.replace(/^at/, ""), normalized)
-  }
-
-  for (const match of taskInput.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/gi)) {
-    const normalized = normalizeTimeValue(match[0])
-    registerTime(match as RegExpExecArray, normalized, normalized)
-  }
-
-  for (const match of taskInput.matchAll(/\b(?:at\s+)?noon\b/gi)) {
-    registerTime(match as RegExpExecArray, "12pm", "Noon")
-  }
-
-  for (const match of taskInput.matchAll(/\b(?:this\s+)?(morning|evening)\b/gi)) {
-    const normalized = match[1].toLowerCase()
-    const value = normalized === "evening" ? "6pm" : normalized
-    registerTime(match as RegExpExecArray, value, titleCase(normalized))
-  }
-
   const previewTokens: NaturalLanguagePreviewToken[] = []
 
-  if (selectedDatePreview) {
-    previewTokens.push(selectedDatePreview)
-  }
-  if (recurrenceSelection && recurrencePreview && recurrenceIndex >= 0) {
-    previewTokens.push(recurrencePreview)
-  }
   if (prioritySelection && priorityPreview && priorityIndex >= 0) {
     previewTokens.push(priorityPreview)
   }
   previewTokens.push(...labelPreviews)
-  if (timeSelection && timePreview && timeIndex >= 0) {
-    previewTokens.push(timePreview)
-  }
 
   previewTokens.sort((left, right) => {
     const leftIndex = Number.parseInt(left.key.split("-").at(-1) || "0", 10)
@@ -934,19 +879,113 @@ export function parseNaturalLanguageTaskInput(
     return leftIndex - rightIndex
   })
 
-  const scheduledDate = selectedDateValue
-
   return {
     cleanText: stripTokenRanges(taskInput, ranges),
-    scheduledDate,
+    scheduledDate: detectFastPathScheduledDate(taskInput, referenceDate),
     subtaskTitles: subtaskParts,
-    recurrence: recurrenceSelection ?? undefined,
+    recurrence: undefined,
     priority: prioritySelection,
     labelIds,
     newLabelNames,
-    time: timeSelection,
+    time: undefined,
     previewTokens,
   }
+}
+
+export const localTaskParser = parseNaturalLanguageTaskInput
+
+export function parseNaturalLanguageTaskEntries(
+  input: string,
+  options: { labels: Label[]; referenceDate?: Date }
+): ParsedNaturalLanguageTask[] {
+  const referenceDate = options.referenceDate ?? new Date()
+  const fragments = splitNaturalLanguageTaskFragments(input)
+
+  if (fragments.length === 0) {
+    return []
+  }
+
+  const sharedDate = detectSharedNaturalLanguageDate(input, referenceDate)
+
+  return fragments.map((fragment) => {
+    const parsed = parseNaturalLanguageTaskInput(fragment, {
+      labels: options.labels,
+      referenceDate,
+    })
+
+    if (sharedDate && !hasExplicitDateOverride(fragment)) {
+      return {
+        ...parsed,
+        scheduledDate: sharedDate,
+      }
+    }
+
+    return parsed
+  })
+}
+
+const tokenizeTaskText = (value: string) =>
+  value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .filter(Boolean)
+
+const scoreOptimisticTaskMatch = (
+  candidate: OptimisticTaskCandidate,
+  aiTask: Record<string, unknown>
+) => {
+  const aiTitle = typeof aiTask.title === "string" ? aiTask.title.trim() : ""
+  const aiDate = normalizeCalendarDateKey(typeof aiTask.date === "string" ? aiTask.date : undefined)
+  const optimisticTokens = new Set(tokenizeTaskText(candidate.text))
+  const aiTokens = new Set(tokenizeTaskText(aiTitle))
+  let sharedTokens = 0
+
+  optimisticTokens.forEach((token) => {
+    if (aiTokens.has(token)) {
+      sharedTokens += 1
+    }
+  })
+
+  let score = sharedTokens * 4
+
+  if (aiTitle && aiTitle.toLowerCase() === candidate.text.toLowerCase()) {
+    score += 12
+  }
+
+  if (aiDate && aiDate === candidate.optimisticDate) {
+    score += 6
+  } else if (aiDate) {
+    score += 1
+  }
+
+  return score
+}
+
+export const reconcileOptimisticTaskOrder = (
+  optimisticTasks: OptimisticTaskCandidate[],
+  aiTasks: Array<Record<string, unknown>>
+) => {
+  const remaining = aiTasks.map((task, index) => ({ task, index }))
+
+  return optimisticTasks.map((candidate) => {
+    let bestIndex = -1
+    let bestScore = Number.NEGATIVE_INFINITY
+
+    remaining.forEach((entry, index) => {
+      const score = scoreOptimisticTaskMatch(candidate, entry.task)
+      if (score > bestScore) {
+        bestScore = score
+        bestIndex = index
+      }
+    })
+
+    if (bestIndex === -1) {
+      return undefined
+    }
+
+    const [matched] = remaining.splice(bestIndex, 1)
+    return matched?.task
+  })
 }
 
 const removeRecurringChildren = (todos: Todo[], parentId: string) =>
@@ -1001,7 +1040,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
     (set, get) => ({
       // Default preferences
       preferences: {
-        columns: 5,
+        columns: 7,
         textSize: 'md',
         spacing: 'normal',
         timelineStartHour: 6,
@@ -1016,6 +1055,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
         colorPalette: DEFAULT_COLOR_PALETTE,
         showDotGridBackground: true,
         defaultLabelId: null,
+        displayName: "Lemonade User",
       },
       
       setPreferences: (prefs) => set((state) => ({
@@ -1029,7 +1069,9 @@ export const useLemonadeStore = create<LemonadeStore>()(
       lastAutoMovedCount: 0,
       
       addCalendarTodo: (todo) => {
-        const id = generateId()
+        const existingIds = new Set(get().calendarTodos.map((item) => item.id))
+        const requestedId = todo.id
+        const id = requestedId && !existingIds.has(requestedId) ? requestedId : generateId()
         const resolvedDate = normalizeTodoDate(todo.date)
         const defaultLabelId = get().preferences.defaultLabelId
         const resolvedLabelIds =
@@ -1051,6 +1093,8 @@ export const useLemonadeStore = create<LemonadeStore>()(
             labelIds: resolvedLabelIds,
             createdAt: todo.createdAt ?? Date.now(),
             endOfDay: todo.endOfDay ?? false,
+            isSyncing: todo.isSyncing ?? false,
+            syncStatus: todo.syncStatus === "local" ? "local" : undefined,
             subtasks: resolvedSubtasks,
           }],
           lastCreatedTodoId: id,
@@ -1100,7 +1144,17 @@ export const useLemonadeStore = create<LemonadeStore>()(
             return state
           }
 
-          const updatedTodo = { ...targetTodo, ...updates }
+          const updatedTodo = {
+            ...targetTodo,
+            ...updates,
+            date: "date" in updates ? normalizeTodoDate(updates.date) : targetTodo.date,
+            syncStatus:
+              updates.syncStatus === "local"
+                ? "local"
+                : "syncStatus" in updates
+                  ? undefined
+                  : targetTodo.syncStatus,
+          }
           const shouldResetChildren =
             !updatedTodo.parentId &&
             (
@@ -1550,10 +1604,10 @@ export const useLemonadeStore = create<LemonadeStore>()(
       // Calendar selection
       selectedCalendarDate: getInitialCalendarDate(false),
       setSelectedCalendarDate: (date) => set({ selectedCalendarDate: date }),
-      weekCount: 2,
+      weekCount: 1,
       lastSessionDate: null,
-      incrementWeekCount: () => set((state) => ({ weekCount: Math.min(4, state.weekCount + 1) })),
-      decrementWeekCount: () => set((state) => ({ weekCount: Math.max(1, state.weekCount - 1) })),
+      incrementWeekCount: () => set({ weekCount: 1 }),
+      decrementWeekCount: () => set({ weekCount: 1 }),
 
       // Calendar expansion
       isCalendarExpanded: false,
@@ -1754,7 +1808,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
         searchQuery: state.searchQuery,
         labelFilterIds: state.labelFilterIds,
         sidebarOpen: state.sidebarOpen,
-        weekCount: state.weekCount,
+        weekCount: 1,
         lastSessionDate: state.lastSessionDate,
         isCalendarExpanded: state.isCalendarExpanded,
       }),
@@ -1781,7 +1835,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
           lists: persisted.lists ?? currentState.lists,
           preferences: persisted.preferences ?? currentState.preferences,
           selectedCalendarDate: getInitialCalendarDate((persisted.preferences ?? currentState.preferences).startOnYesterday),
-          weekCount: persisted.weekCount ?? currentState.weekCount,
+          weekCount: 1,
           lastSessionDate: persisted.lastSessionDate ?? currentState.lastSessionDate,
         }
       },
