@@ -246,6 +246,10 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
             primaryTask.recurringFrequency === "monthly"
               ? primaryTask.recurringFrequency
               : undefined
+          const aiRecurringInterval =
+            typeof primaryTask.recurringInterval === "number" && Number.isFinite(primaryTask.recurringInterval) && primaryTask.recurringInterval > 1
+              ? Math.floor(primaryTask.recurringInterval)
+              : undefined
 
           updateCalendarTodo(tempId, {
             text: aiTitle,
@@ -258,6 +262,11 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
             recurringDays: Array.isArray(primaryTask.recurringDays)
               ? primaryTask.recurringDays.filter((day): day is number => typeof day === "number")
               : undefined,
+            recurringInterval: aiRecurringInterval,
+            recurringCustomText:
+              typeof primaryTask.recurringCustomText === "string" && primaryTask.recurringCustomText.trim()
+                ? primaryTask.recurringCustomText.trim()
+                : undefined,
             isHeading: aiTitle === aiTitle.toUpperCase() && aiTitle.length > 2,
             isSyncing: false,
             syncStatus: undefined,
@@ -368,7 +377,7 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
                 variant="outline"
                 size="sm"
                 onClick={() => onNavigate('today')}
-                className="ml-[4px] mr-3 h-6 shrink-0 self-center rounded-md border border-border/35 bg-[rgba(255,255,255,0.4)] px-2 text-[9px] font-semibold tracking-[0.05em] text-black backdrop-blur-[10px] transition-colors hover:bg-black hover:text-white dark:bg-[rgba(255,255,255,0.7)] dark:text-black dark:hover:bg-black dark:hover:text-white"
+                className="ml-[4px] mr-3 h-6 shrink-0 self-center rounded-md border border-border/35 bg-background/45 px-2 text-[9px] font-semibold tracking-[0.05em] text-foreground backdrop-blur-[10px] transition-colors hover:bg-black hover:text-white dark:bg-[rgba(29,35,48,0.55)] dark:text-foreground dark:hover:bg-black dark:hover:text-white"
               >
                 TODAY
               </Button>
@@ -655,7 +664,7 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
                       setShowDatePopover(false)
                     }
                   }}
-                  className="rounded-2xl border-b-[4px] border-b-[var(--accent-color)] bg-white p-4"
+                  className="rounded-2xl border border-border/35 border-b-[4px] border-b-[var(--accent-color)] bg-popover/85 p-4 backdrop-blur-[16px]"
                   classNames={{
                     month_caption: "relative flex h-10 w-full items-center justify-center px-10",
                     caption_label: "text-center text-[14px] leading-none font-semibold uppercase tracking-[0.14em]",

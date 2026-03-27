@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { useLemonadeStore, type Todo } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { RotateCcw, Plus, Minus, X, Moon, Sparkles, PencilLine } from "lucide-react"
+import { RotateCcw, Plus, Minus, X, Moon, Sparkles, PencilLine, ArrowUp, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import {
   DropdownMenu,
@@ -59,6 +59,7 @@ export function TodoItem({
     updateCalendarTodoInstance,
     deleteCalendarTodo,
     restoreLastDeletedTodo,
+    addCalendarTodo,
     addSubtask,
     editSubtask,
     toggleSubtask,
@@ -76,9 +77,14 @@ export function TodoItem({
   const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null)
   const [editingSubtaskText, setEditingSubtaskText] = useState("")
   const [pendingRecurringUpdate, setPendingRecurringUpdate] = useState<Partial<Todo> | null>(null)
+  const [customRecurrenceText, setCustomRecurrenceText] = useState(todo.recurringCustomText ?? "")
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const recurringValue = todo.isRecurring ? (todo.recurringFrequency || "daily") : "off"
+  const recurringValue = todo.isRecurring
+    ? todo.recurringCustomText
+      ? "custom"
+      : (todo.recurringFrequency || "daily")
+    : "off"
 
   const bulletIcon = {
     none: null,
@@ -113,6 +119,12 @@ export function TodoItem({
     }
   }
 
+  const hideEmptySubtaskComposer = () => {
+    if (todo.subtasks.length === 0 && newSubtaskText.trim().length === 0 && editingSubtaskId === null) {
+      setShowSubtasks(false)
+    }
+  }
+
   const handleStartEditingSubtask = (subtaskId: string, title: string) => {
     setEditingSubtaskId(subtaskId)
     setEditingSubtaskText(title)
@@ -124,6 +136,7 @@ export function TodoItem({
     }
 
     const trimmedTitle = editingSubtaskText.trim()
+    const shouldHideComposer = todo.subtasks.length <= 1 && !trimmedTitle
 
     if (!trimmedTitle) {
       deleteSubtask(todo.id, editingSubtaskId)
@@ -133,6 +146,10 @@ export function TodoItem({
 
     setEditingSubtaskId(null)
     setEditingSubtaskText("")
+
+    if (shouldHideComposer) {
+      setShowSubtasks(false)
+    }
   }
 
   const toggleLabel = (labelId: string) => {
@@ -152,6 +169,67 @@ export function TodoItem({
     }
 
     setPendingRecurringUpdate(updates)
+  }
+
+  const handleApplyCustomRecurrence = () => {
+    const trimmed = customRecurrenceText.trim()
+
+    if (!trimmed) {
+      handleRecurringChange({
+        isRecurring: false,
+        recurringFrequency: undefined,
+        recurringDays: undefined,
+        recurringInterval: undefined,
+        recurringCustomText: undefined,
+      })
+      return
+    }
+
+    const normalized = trimmed.toLowerCase()
+    const dayMatches = [...normalized.matchAll(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/g)]
+    const recurringDays = dayMatches
+      .map((match) => ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"].indexOf(match[1]))
+      .filter((day) => day >= 0)
+    const intervalMatch = normalized.match(/\bevery\s+(\d+)\s+(day|days|week|weeks|month|months)\b/)
+    const recurringInterval = intervalMatch ? Math.max(1, Number.parseInt(intervalMatch[1], 10) || 1) : 1
+
+    let recurringFrequency: Todo["recurringFrequency"] | undefined = "weekly"
+    if (/\bweekday\b/.test(normalized)) {
+      recurringFrequency = "weekday"
+    } else if (/\bmonth|months|monthly\b/.test(normalized)) {
+      recurringFrequency = "monthly"
+    } else if (/\bday|days|daily\b/.test(normalized) && recurringDays.length === 0) {
+      recurringFrequency = "daily"
+    }
+
+    handleRecurringChange({
+      isRecurring: true,
+      recurringFrequency,
+      recurringDays: recurringDays.length > 0 ? recurringDays : undefined,
+      recurringInterval: recurringInterval > 1 ? recurringInterval : undefined,
+      recurringCustomText: trimmed,
+    })
+  }
+
+  const handlePromoteSubtask = (subtaskId: string, title: string) => {
+    const trimmed = title.trim()
+    if (!trimmed) {
+      return
+    }
+
+    addCalendarTodo({
+      text: trimmed,
+      completed: false,
+      date: todo.date,
+      priority: todo.priority,
+      labelIds: todo.labelIds,
+    })
+    const shouldHideComposer = todo.subtasks.length <= 1 && newSubtaskText.trim().length === 0
+    deleteSubtask(todo.id, subtaskId)
+    if (shouldHideComposer) {
+      setShowSubtasks(false)
+    }
+    toast("Subtask promoted", { duration: 2000 })
   }
 
   const handleDelete = () => {
@@ -379,6 +457,8 @@ export function TodoItem({
                         isRecurring: false,
                         recurringFrequency: undefined,
                         recurringDays: undefined,
+                        recurringInterval: undefined,
+                        recurringCustomText: undefined,
                       })}
                     >
                       Off
@@ -389,6 +469,8 @@ export function TodoItem({
                         isRecurring: true,
                         recurringFrequency: "daily",
                         recurringDays: undefined,
+                        recurringInterval: undefined,
+                        recurringCustomText: undefined,
                       })}
                     >
                       Daily
@@ -399,6 +481,8 @@ export function TodoItem({
                         isRecurring: true,
                         recurringFrequency: "weekday",
                         recurringDays: undefined,
+                        recurringInterval: undefined,
+                        recurringCustomText: undefined,
                       })}
                     >
                       Weekdays
@@ -409,6 +493,8 @@ export function TodoItem({
                         isRecurring: true,
                         recurringFrequency: "weekly",
                         recurringDays: undefined,
+                        recurringInterval: undefined,
+                        recurringCustomText: undefined,
                       })}
                     >
                       Weekly
@@ -419,11 +505,29 @@ export function TodoItem({
                         isRecurring: true,
                         recurringFrequency: "monthly",
                         recurringDays: undefined,
+                        recurringInterval: undefined,
+                        recurringCustomText: undefined,
                       })}
                     >
                       Monthly
                     </DropdownMenuRadioItem>
                   </DropdownMenuRadioGroup>
+                  <DropdownMenuSeparator />
+                  <div className="space-y-2 px-2 pb-2 pt-1">
+                    <div className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                      Custom
+                    </div>
+                    <input
+                      type="text"
+                      value={customRecurrenceText}
+                      onChange={(event) => setCustomRecurrenceText(event.target.value)}
+                      placeholder="Every Tuesday and Thursday"
+                      className="h-8 w-full rounded-md border border-border bg-transparent px-2 text-[11px] outline-none"
+                    />
+                    <Button type="button" size="sm" className="h-7 w-full text-[11px]" onClick={handleApplyCustomRecurrence}>
+                      Apply custom repeat
+                    </Button>
+                  </div>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
               <DropdownMenuSeparator />
@@ -513,7 +617,7 @@ export function TodoItem({
 
       {/* Subtasks */}
       {showSubtasks && (
-        <div className="ml-0">
+        <div className="ml-0" onMouseLeave={hideEmptySubtaskComposer}>
           {todo.subtasks.map((subtask) => (
             <div key={subtask.id} className="lemonade-subtask-row h-[48px] flex items-center gap-2 px-0 pl-7 group/subtask transition-colors">
               <button
@@ -559,11 +663,26 @@ export function TodoItem({
                 </button>
               )}
               <button
-                onClick={() => deleteSubtask(todo.id, subtask.id)}
-                className="opacity-0 group-hover/subtask:opacity-100 text-muted-foreground hover:text-destructive group/sub-delete"
+                type="button"
+                onClick={() => handlePromoteSubtask(subtask.id, subtask.title)}
+                className="opacity-0 group-hover/subtask:opacity-100 text-muted-foreground hover:text-foreground"
+                title="Promote to task"
               >
-                <Minus className="size-3 group-hover/sub-delete:hidden" />
-                <X className="size-3 hidden group-hover/sub-delete:block" />
+                <ArrowUp className="size-3" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const shouldHideComposer = todo.subtasks.length <= 1 && newSubtaskText.trim().length === 0
+                  deleteSubtask(todo.id, subtask.id)
+                  if (shouldHideComposer) {
+                    setShowSubtasks(false)
+                  }
+                }}
+                className="opacity-0 group-hover/subtask:opacity-100 text-muted-foreground hover:text-destructive"
+                title="Delete subtask"
+              >
+                <Trash2 className="size-3" />
               </button>
             </div>
           ))}
@@ -573,6 +692,7 @@ export function TodoItem({
               type="text"
               value={newSubtaskText}
               onChange={(e) => setNewSubtaskText(e.target.value)}
+              onBlur={hideEmptySubtaskComposer}
               onKeyDown={(e) => e.key === 'Enter' && handleAddSubtask()}
               placeholder="Add subtask..."
               className="lemonade-task-text bg-transparent outline-none flex-1 font-task font-normal text-[14px] leading-[1.15] text-[#000000] dark:text-foreground"

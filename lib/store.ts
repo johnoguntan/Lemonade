@@ -40,6 +40,8 @@ export interface Todo {
   isRecurring?: boolean
   recurringFrequency?: 'daily' | 'weekday' | 'weekly' | 'monthly'
   recurringDays?: number[] // 0-6 for Sunday-Saturday
+  recurringInterval?: number
+  recurringCustomText?: string
   parentId?: string | null // For recurring instances
   priority?: 'high' | 'medium' | 'low' | 'none'
   labelIds: string[]
@@ -94,6 +96,8 @@ export interface ParsedNaturalLanguageTask {
     isRecurring: boolean
     recurringFrequency?: 'daily' | 'weekday' | 'weekly' | 'monthly'
     recurringDays?: number[]
+    recurringInterval?: number
+    customText?: string
     label: string
   }
   priority?: Todo['priority']
@@ -274,6 +278,14 @@ const normalizeTodo = (todo: Todo, fallbackCreatedAt: number): Todo => {
     durationMinutes:
       typeof todo.durationMinutes === "number" && Number.isFinite(todo.durationMinutes) && todo.durationMinutes > 0
         ? Math.floor(todo.durationMinutes)
+        : undefined,
+    recurringInterval:
+      typeof todo.recurringInterval === "number" && Number.isFinite(todo.recurringInterval) && todo.recurringInterval > 1
+        ? Math.floor(todo.recurringInterval)
+        : undefined,
+    recurringCustomText:
+      typeof todo.recurringCustomText === "string" && todo.recurringCustomText.trim().length > 0
+        ? todo.recurringCustomText.trim()
         : undefined,
     subtasks: Array.isArray(todo.subtasks) ? todo.subtasks.map((subtask) => normalizeSubtask(subtask, todo.id)) : [],
     labelIds: fallbackLabelIds,
@@ -1002,6 +1014,16 @@ const cloneRecurringSubtasks = (subtasks: SubTask[], parentId: string) =>
     completed: false,
   }))
 
+const getRecurringInterval = (todo: Todo) =>
+  typeof todo.recurringInterval === "number" && Number.isFinite(todo.recurringInterval) && todo.recurringInterval > 1
+    ? Math.floor(todo.recurringInterval)
+    : 1
+
+const differenceInWholeWeeks = (left: Date, right: Date) => {
+  const MS_PER_DAY = 24 * 60 * 60 * 1000
+  return Math.floor((startOfDay(left).getTime() - startOfDay(right).getTime()) / (7 * MS_PER_DAY))
+}
+
 const mapTodosInStore = (
   state: Pick<LemonadeStore, "calendarTodos" | "lists">,
   todoId: string,
@@ -1144,7 +1166,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
             return state
           }
 
-          const updatedTodo = {
+        const updatedTodo = {
             ...targetTodo,
             ...updates,
             date: "date" in updates ? normalizeTodoDate(updates.date) : targetTodo.date,
@@ -1174,7 +1196,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
             )
           }
         })
-        if ("isRecurring" in updates || "recurringFrequency" in updates || "recurringDays" in updates || "date" in updates) {
+        if ("isRecurring" in updates || "recurringFrequency" in updates || "recurringDays" in updates || "recurringInterval" in updates || "date" in updates) {
           get().generateRecurringInstances()
         }
       },
@@ -1189,6 +1211,8 @@ export const useLemonadeStore = create<LemonadeStore>()(
                 isRecurring: false,
                 recurringFrequency: undefined,
                 recurringDays: undefined,
+                recurringInterval: undefined,
+                recurringCustomText: undefined,
               }
             : todo
         )
@@ -1640,9 +1664,10 @@ export const useLemonadeStore = create<LemonadeStore>()(
           const parentStartDate = parseLocalDateKey(parent.date)
           const nextInstances: Todo[] = []
           const createdAtBase = Date.now()
+          const recurringInterval = getRecurringInterval(parent)
 
           if (parent.recurringFrequency === 'daily') {
-            for (let offset = 1; offset <= RECURRING_GENERATION_DAYS; offset += 1) {
+            for (let offset = recurringInterval; offset <= RECURRING_GENERATION_DAYS; offset += recurringInterval) {
               const candidate = addDays(parentStartDate, offset)
               if (candidate > generationEnd) break
               if (candidate < generationStart) continue
@@ -1671,6 +1696,10 @@ export const useLemonadeStore = create<LemonadeStore>()(
               if (candidate > generationEnd) break
               if (candidate < generationStart) continue
               if (candidate.getDay() === 0 || candidate.getDay() === 6) continue
+              if (recurringInterval > 1) {
+                const weekdayBlock = Math.floor(offset / 7)
+                if (weekdayBlock % recurringInterval !== 0) continue
+              }
 
               const candidateDate = formatLocalDateKey(candidate)
               if (existingChildDates.has(candidateDate)) continue
@@ -1700,6 +1729,10 @@ export const useLemonadeStore = create<LemonadeStore>()(
               if (candidate > generationEnd) break
               if (candidate < generationStart) continue
               if (!recurringDays.has(candidate.getDay())) continue
+              if (recurringInterval > 1) {
+                const weeksSinceParent = differenceInWholeWeeks(candidate, parentStartDate)
+                if (weeksSinceParent % recurringInterval !== 0) continue
+              }
 
               const candidateDate = formatLocalDateKey(candidate)
               if (existingChildDates.has(candidateDate)) continue
@@ -1720,7 +1753,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
               existingChildDates.add(candidateDate)
             }
           } else if (parent.recurringFrequency === 'monthly') {
-            for (let monthOffset = 1; monthOffset <= 36; monthOffset += 1) {
+            for (let monthOffset = recurringInterval; monthOffset <= 36; monthOffset += recurringInterval) {
               const candidate = addMonths(parentStartDate, monthOffset)
               if (candidate > generationEnd) break
               if (candidate < generationStart) continue

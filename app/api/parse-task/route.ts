@@ -100,7 +100,9 @@ Each task must follow this exact schema:
   "priority": "low" | "medium" | "high" | null,
   "isRecurring": boolean | null,
   "recurringFrequency": "daily" | "weekday" | "weekly" | "monthly" | null,
-  "recurringDays": number[] | null
+  "recurringDays": number[] | null,
+  "recurringInterval": number | null,
+  "recurringCustomText": string | null
 }
 
 RULES:
@@ -168,14 +170,18 @@ RULES:
   - weekly → { isRecurring: true, recurringFrequency: "weekly", recurringDays: null }
   - monthly → { isRecurring: true, recurringFrequency: "monthly", recurringDays: null }
   - every monday / every tue-thu style weekday list → { isRecurring: true, recurringFrequency: "weekly", recurringDays: [0-6...] }
-- If not recurring → isRecurring: null, recurringFrequency: null, recurringDays: null
+  - every Tuesday and Thursday → { isRecurring: true, recurringFrequency: "weekly", recurringDays: [2,4], recurringInterval: 1 }
+  - every 3 weeks → { isRecurring: true, recurringFrequency: "weekly", recurringDays: null, recurringInterval: 3 }
+  - every 2 months → { isRecurring: true, recurringFrequency: "monthly", recurringDays: null, recurringInterval: 2 }
+- Preserve the original custom recurrence phrase in recurringCustomText when recurrence is detected
+- If not recurring → isRecurring: null, recurringFrequency: null, recurringDays: null, recurringInterval: null, recurringCustomText: null
 
 8. MESSY INPUT HANDLING
 - Ignore filler words: "we are going to", "I need to", "don't forget to", "make sure to"
 - Handle run-on sentences with no punctuation
 - Handle ALL CAPS, no caps, mixed caps
 - Handle repeated words or half-finished sentences — use best judgment
-- If completely unintelligible → return { "title": "Unclear task", "date": null, "time": null, "labels": [], "priority": null, "isRecurring": null, "recurringFrequency": null, "recurringDays": null }
+- If completely unintelligible → return { "title": "Unclear task", "date": null, "time": null, "labels": [], "priority": null, "isRecurring": null, "recurringFrequency": null, "recurringDays": null, "recurringInterval": null, "recurringCustomText": null }
 
 9. OUTPUT FORMAT
 - Return ONLY valid JSON array
@@ -238,6 +244,14 @@ RULES:
       recurringDays: Array.isArray(task?.recurringDays)
         ? task.recurringDays.filter((day): day is number => typeof day === "number")
         : null,
+      recurringInterval:
+        typeof task?.recurringInterval === "number" && Number.isFinite(task.recurringInterval) && task.recurringInterval > 1
+          ? Math.floor(task.recurringInterval)
+          : null,
+      recurringCustomText:
+        typeof task?.recurringCustomText === "string" && task.recurringCustomText.trim()
+          ? task.recurringCustomText.trim()
+          : null,
     }));
 
     return NextResponse.json(sanitized);

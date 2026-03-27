@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -26,8 +26,38 @@ const splitNaturalTitleFallback = (input: string, index: number) =>
 const HOUR_HEIGHT = 64
 const DEFAULT_DURATION_MINUTES = 30
 const MIN_BLOCK_HEIGHT = 46
-const MIN_DURATION_MINUTES = 5
+const MIN_DURATION_MINUTES = 15
 const MAX_DURATION_MINUTES = 24 * 60
+const SNAP_INTERVAL_MINUTES = 15
+const TIMELINE_LEFT_GUTTER = 96
+const TIMELINE_RIGHT_GUTTER = 16
+const OVERLAP_GAP_PX = 8
+
+type DragInteraction =
+  | {
+      mode: "move"
+      todoId: string
+      startClientY: number
+      originStartMinutes: number
+      originDurationMinutes: number
+    }
+  | {
+      mode: "resize"
+      todoId: string
+      startClientY: number
+      originStartMinutes: number
+      originDurationMinutes: number
+    }
+
+type TimedTodoLayoutEntry = {
+  todo: Todo
+  startMinutes: number
+  durationMinutes: number
+  absoluteStart: number
+  absoluteEnd: number
+  column: number
+  maxColumns: number
+}
 
 const formatHourLabel = (hour: number) => {
   const normalizedHour = ((hour % 24) + 24) % 24
@@ -134,7 +164,73 @@ const parseDurationMinutes = (value: string) => {
     return DEFAULT_DURATION_MINUTES
   }
 
-  return Math.min(MAX_DURATION_MINUTES, Math.max(MIN_DURATION_MINUTES, parsed))
+  const clamped = Math.min(MAX_DURATION_MINUTES, Math.max(MIN_DURATION_MINUTES, parsed))
+  return Math.max(MIN_DURATION_MINUTES, Math.round(clamped / SNAP_INTERVAL_MINUTES) * SNAP_INTERVAL_MINUTES)
+}
+
+const snapMinutesToGrid = (minutes: number) =>
+  Math.round(minutes / SNAP_INTERVAL_MINUTES) * SNAP_INTERVAL_MINUTES
+
+const clampStartMinutes = (minutes: number, durationMinutes: number) =>
+  Math.max(0, Math.min(24 * 60 - durationMinutes, snapMinutesToGrid(minutes)))
+
+const clampDurationMinutes = (durationMinutes: number, startMinutes: number) =>
+  Math.max(
+    MIN_DURATION_MINUTES,
+    Math.min(MAX_DURATION_MINUTES - startMinutes, snapMinutesToGrid(durationMinutes))
+  )
+
+const buildTimedTodoLayout = (
+  timedTodos: Array<{ todo: Todo; startMinutes: number; durationMinutes: number }>,
+  visibleBounds: { start: number; end: number }
+): TimedTodoLayoutEntry[] => {
+  const entries = timedTodos.map((entry) => {
+    const absoluteStart = resolveDisplayMinutes(entry.startMinutes, visibleBounds.start, visibleBounds.end)
+
+    return {
+      ...entry,
+      absoluteStart,
+      absoluteEnd: absoluteStart + entry.durationMinutes,
+      column: 0,
+      maxColumns: 1,
+    }
+  })
+
+  const active: TimedTodoLayoutEntry[] = []
+  let groupEntries: TimedTodoLayoutEntry[] = []
+  const finalizeGroup = () => {
+    if (groupEntries.length === 0) return
+    const maxColumns = Math.max(...groupEntries.map((entry) => entry.column)) + 1
+    groupEntries.forEach((entry) => {
+      entry.maxColumns = maxColumns
+    })
+    groupEntries = []
+  }
+
+  for (const entry of entries) {
+    for (let index = active.length - 1; index >= 0; index -= 1) {
+      if (active[index].absoluteEnd <= entry.absoluteStart) {
+        active.splice(index, 1)
+      }
+    }
+
+    if (active.length === 0) {
+      finalizeGroup()
+    }
+
+    const usedColumns = new Set(active.map((item) => item.column))
+    let nextColumn = 0
+    while (usedColumns.has(nextColumn)) {
+      nextColumn += 1
+    }
+
+    entry.column = nextColumn
+    active.push(entry)
+    groupEntries.push(entry)
+  }
+
+  finalizeGroup()
+  return entries
 }
 
 export function TimelineView({ date, onNavigate }: TimelineViewProps) {
@@ -163,9 +259,14 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
   const [editingTime, setEditingTime] = useState("")
   const [editingDuration, setEditingDuration] = useState("30")
   const [pastTimePopoverId, setPastTimePopoverId] = useState<string | null>(null)
+  const [dragInteraction, setDragInteraction] = useState<DragInteraction | null>(null)
+  const [isTimelineDropActive, setIsTimelineDropActive] = useState(false)
   const expansionResetKey = `${selectedDateKey}-${preferences.timelineStartHour}-${preferences.timelineEndHour}`
   const [manualExpansion, setManualExpansion] = useState({ key: expansionResetKey, earlier: 0, later: 0 })
   const addInputRef = useRef<HTMLInputElement>(null)
+  const timelineTrackRef = useRef<HTMLDivElement>(null)
+  const dragInteractionRef = useRef<DragInteraction | null>(null)
+  const suppressClickTodoIdRef = useRef<string | null>(null)
 
   const dayTodos = useMemo(
     () =>
@@ -189,7 +290,6 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
     }))
     .filter((entry): entry is { todo: Todo; startMinutes: number; durationMinutes: number } => entry.startMinutes !== null)
     .sort((left, right) => left.startMinutes - right.startMinutes)
-
   const parsedDraft = localTaskParser(draftText, { labels, referenceDate: date })
 
   const resolvedManualExpansion = manualExpansion.key === expansionResetKey
@@ -235,6 +335,10 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
   const timelineHourCount = Math.max(1, Math.ceil((visibleBounds.end - visibleBounds.start) / 60) + 1)
   const timelineHeight = timelineHourCount * HOUR_HEIGHT
   const hours = Array.from({ length: timelineHourCount }, (_, index) => Math.floor(visibleBounds.start / 60) + index)
+  const positionedTimedTodos = useMemo(
+    () => buildTimedTodoLayout(timedTodos, visibleBounds),
+    [timedTodos, visibleBounds]
+  )
 
   useEffect(() => {
     if (!prefilledTime) {
@@ -245,6 +349,155 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
       addInputRef.current?.focus()
     })
   }, [prefilledTime])
+
+  useEffect(() => {
+    dragInteractionRef.current = dragInteraction
+  }, [dragInteraction])
+
+  useEffect(() => {
+    if (!dragInteraction) {
+      return
+    }
+
+    const pxPerMinute = HOUR_HEIGHT / 60
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const current = dragInteractionRef.current
+      if (!current) {
+        return
+      }
+
+      const deltaMinutes = snapMinutesToGrid((event.clientY - current.startClientY) / pxPerMinute)
+
+      if (current.mode === "move") {
+        const nextStartMinutes = clampStartMinutes(
+          current.originStartMinutes + deltaMinutes,
+          current.originDurationMinutes
+        )
+
+        updateCalendarTodo(current.todoId, { time: formatTimeToken(nextStartMinutes) })
+        return
+      }
+
+      const nextDurationMinutes = clampDurationMinutes(
+        current.originDurationMinutes + deltaMinutes,
+        current.originStartMinutes
+      )
+
+      updateCalendarTodo(current.todoId, { durationMinutes: nextDurationMinutes })
+      if (editingTodoId === current.todoId) {
+        setEditingDuration(`${nextDurationMinutes}`)
+      }
+    }
+
+    const handlePointerUp = () => {
+      const current = dragInteractionRef.current
+      if (current) {
+        suppressClickTodoIdRef.current = current.todoId
+      }
+      setDragInteraction(null)
+      window.setTimeout(() => {
+        if (suppressClickTodoIdRef.current === current?.todoId) {
+          suppressClickTodoIdRef.current = null
+        }
+      }, 0)
+    }
+
+    window.addEventListener("pointermove", handlePointerMove)
+    window.addEventListener("pointerup", handlePointerUp)
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove)
+      window.removeEventListener("pointerup", handlePointerUp)
+    }
+  }, [dragInteraction, editingTodoId, updateCalendarTodo])
+
+  const resolveDroppedMinutes = (clientY: number) => {
+    const timelineRect = timelineTrackRef.current?.getBoundingClientRect()
+    if (!timelineRect) {
+      return null
+    }
+
+    const relativeY = Math.max(0, Math.min(clientY - timelineRect.top, timelineRect.height))
+    const rawMinutes = visibleBounds.start + (relativeY / HOUR_HEIGHT) * 60
+    return clampStartMinutes(rawMinutes, DEFAULT_DURATION_MINUTES)
+  }
+
+  const startMoveInteraction = (
+    event: ReactPointerEvent<HTMLDivElement>,
+    todoId: string,
+    startMinutes: number,
+    durationMinutes: number
+  ) => {
+    if (event.button !== 0) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+    setDragInteraction({
+      mode: "move",
+      todoId,
+      startClientY: event.clientY,
+      originStartMinutes: startMinutes,
+      originDurationMinutes: durationMinutes,
+    })
+  }
+
+  const startResizeInteraction = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    todoId: string,
+    startMinutes: number,
+    durationMinutes: number
+  ) => {
+    if (event.button !== 0) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+    setDragInteraction({
+      mode: "resize",
+      todoId,
+      startClientY: event.clientY,
+      originStartMinutes: startMinutes,
+      originDurationMinutes: durationMinutes,
+    })
+  }
+
+  const handleUnscheduledDragStart = (event: ReactDragEvent<HTMLButtonElement>, todoId: string) => {
+    event.dataTransfer.setData("text/plain", todoId)
+    event.dataTransfer.effectAllowed = "move"
+  }
+
+  const handleTimelineDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    setIsTimelineDropActive(false)
+
+    const todoId = event.dataTransfer.getData("text/plain")
+    if (!todoId) {
+      return
+    }
+
+    const targetTodo = dayTodos.find((todo) => todo.id === todoId)
+    if (!targetTodo) {
+      return
+    }
+
+    const droppedMinutes = resolveDroppedMinutes(event.clientY)
+    if (droppedMinutes === null) {
+      return
+    }
+
+    const durationMinutes = clampDurationMinutes(resolveTodoDuration(targetTodo), droppedMinutes)
+
+    updateCalendarTodo(todoId, {
+      time: formatTimeToken(droppedMinutes),
+      durationMinutes,
+    })
+
+    toast(`Scheduled for ${formatTimeToken(droppedMinutes)}`, { duration: 2500 })
+  }
 
   const handleCreateTimelineTask = async () => {
     const rawInputString = draftText
@@ -349,6 +602,10 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
             primaryTask.recurringFrequency === "monthly"
               ? primaryTask.recurringFrequency
               : undefined
+          const aiRecurringInterval =
+            typeof primaryTask.recurringInterval === "number" && Number.isFinite(primaryTask.recurringInterval) && primaryTask.recurringInterval > 1
+              ? Math.floor(primaryTask.recurringInterval)
+              : undefined
 
           updateCalendarTodo(tempId, {
             text: aiTitle,
@@ -361,6 +618,11 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
             recurringDays: Array.isArray(primaryTask.recurringDays)
               ? primaryTask.recurringDays.filter((day): day is number => typeof day === "number")
               : undefined,
+            recurringInterval: aiRecurringInterval,
+            recurringCustomText:
+              typeof primaryTask.recurringCustomText === "string" && primaryTask.recurringCustomText.trim()
+                ? primaryTask.recurringCustomText.trim()
+                : undefined,
             isHeading: aiTitle === aiTitle.toUpperCase() && aiTitle.length > 2,
             isSyncing: false,
             syncStatus: undefined,
@@ -486,6 +748,8 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
                   key={todo.id}
                   type="button"
                   onClick={() => openEditDialog(todo)}
+                  draggable
+                  onDragStart={(event) => handleUnscheduledDragStart(event, todo.id)}
                   className={cn(
                     "flex w-full items-center gap-3 rounded-xl border border-border/60 px-3 py-2 text-left transition-colors hover:bg-muted/40",
                     todo.isSyncing && "animate-pulse"
@@ -529,7 +793,17 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
           <ChevronUp className="size-3.5" />
           Show earlier
         </button>
-        <div className="relative overflow-y-auto" style={{ maxHeight: "70vh" }}>
+        <div
+          ref={timelineTrackRef}
+          className={cn("relative overflow-y-auto", isTimelineDropActive && "bg-[color-mix(in_srgb,var(--accent-color)_6%,transparent)]")}
+          style={{ maxHeight: "70vh" }}
+          onDragOver={(event) => {
+            event.preventDefault()
+            setIsTimelineDropActive(true)
+          }}
+          onDragLeave={() => setIsTimelineDropActive(false)}
+          onDrop={handleTimelineDrop}
+        >
           <div className="relative" style={{ height: timelineHeight }}>
             {hours.map((hour, index) => (
               <button
@@ -569,33 +843,45 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
               </div>
             ) : null}
 
-            {timedTodos.map(({ todo, startMinutes, durationMinutes }) => {
+            <div className="absolute inset-y-0 z-10" style={{ left: TIMELINE_LEFT_GUTTER, right: TIMELINE_RIGHT_GUTTER }}>
+            {positionedTimedTodos.map(({ todo, startMinutes, durationMinutes, absoluteStart, column, maxColumns }) => {
               const firstLabel = todo.labelIds.map((labelId) => labels.find((label) => label.id === labelId)).find(Boolean)
-              const absoluteStart = resolveDisplayMinutes(startMinutes, visibleBounds.start, visibleBounds.end)
               const top = ((absoluteStart - visibleBounds.start) / 60) * HOUR_HEIGHT
               const height = Math.max((durationMinutes / 60) * HOUR_HEIGHT, MIN_BLOCK_HEIGHT)
               const showPastTimeWarning =
                 currentTimeMinutes !== null &&
                 absoluteStart < currentTimeMinutes &&
                 !todo.completed
+              const widthPercent = 100 / maxColumns
+              const widthAdjustment = ((maxColumns - 1) * OVERLAP_GAP_PX) / maxColumns
+              const left = `calc(${column * widthPercent}% + ${column * OVERLAP_GAP_PX}px)`
+              const width = `calc(${widthPercent}% - ${widthAdjustment}px)`
 
               return (
-                <button
+                <div
                   key={todo.id}
-                  type="button"
-                  onClick={() => openEditDialog(todo)}
+                  onPointerDown={(event) => startMoveInteraction(event, todo.id, startMinutes, durationMinutes)}
+                  onClick={() => {
+                    if (suppressClickTodoIdRef.current === todo.id) {
+                      suppressClickTodoIdRef.current = null
+                      return
+                    }
+                    openEditDialog(todo)
+                  }}
                   className={cn(
-                    "absolute left-[96px] right-4 z-10 overflow-hidden rounded-xl border px-3 py-2 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-transform hover:scale-[1.01]",
+                    "absolute z-10 overflow-hidden rounded-xl border px-3 py-2 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-transform hover:scale-[1.01]",
                     todo.isSyncing && "animate-pulse"
                   )}
                   style={{
                     top,
                     height,
+                    left,
+                    width,
                     backgroundColor: todo.color ?? "color-mix(in srgb, var(--accent-color) 12%, transparent)",
                     borderColor: "color-mix(in srgb, var(--accent-color) 35%, var(--border))",
                   }}
                 >
-                  <div className="flex min-h-full flex-col justify-between">
+                  <div className="flex min-h-full cursor-grab flex-col justify-between active:cursor-grabbing">
                   <div className="flex items-center gap-2">
                     {todo.isSyncing ? (
                       <Sparkles className="size-3.5 text-[var(--accent-color)]" />
@@ -671,9 +957,16 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
                     </div>
                   ) : null}
                   </div>
-                </button>
+                  <button
+                    type="button"
+                    onPointerDown={(event) => startResizeInteraction(event, todo.id, startMinutes, durationMinutes)}
+                    className="absolute inset-x-2 bottom-1 h-2 cursor-ns-resize rounded-full bg-foreground/10 hover:bg-foreground/20"
+                    aria-label={`Resize ${todo.text}`}
+                  />
+                </div>
               )
             })}
+            </div>
           </div>
         </div>
         <button
@@ -702,7 +995,14 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
             <Input value={editingTime} onChange={(event) => setEditingTime(event.target.value)} placeholder="Time (e.g. 5pm)" />
             <Input
               value={editingDuration}
-              onChange={(event) => setEditingDuration(normalizeDurationInput(event.target.value))}
+              onChange={(event) => {
+                const nextValue = normalizeDurationInput(event.target.value)
+                setEditingDuration(nextValue)
+
+                if (editingTodoId && nextValue.trim()) {
+                  updateCalendarTodo(editingTodoId, { durationMinutes: parseDurationMinutes(nextValue) })
+                }
+              }}
               placeholder="Duration in minutes"
               inputMode="numeric"
             />

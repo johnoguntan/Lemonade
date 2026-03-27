@@ -252,7 +252,7 @@ export default function Home() {
         </div>
 
         <div
-          className={cn(notebookDisplay.variable, "lemonade-app-root notebook-panel [&>*]:border-t-0 [&>*]:pt-0")}
+          className={cn(notebookDisplay.variable, "lemonade-app-root notebook-panel notebook-panel-right [&>*]:border-t-0 [&>*]:pt-0")}
           style={{
             position: "absolute",
             top: "7.25%",

@@ -436,10 +436,10 @@ function ShoppingReturnsSection({
   return (
     <div className="h-auto bg-transparent px-0 py-2">
       <div className="mx-auto flex max-w-5xl flex-col gap-6">
-        <div className="rounded-2xl border border-border/70 bg-background/95 p-5 shadow-sm">
-          <div className="mb-4 flex items-center justify-between gap-4">
-            <div>
-              <h3 className="font-heading text-[20px] leading-[20px] uppercase">Shopping Returns</h3>
+        <div className="p-5">
+          <div className="mb-4 flex items-start justify-between gap-4">
+            <div className="flex-1 text-right">
+              <h3 className="lemonade-right-panel-heading font-heading text-[20px] leading-[20px] uppercase">Shopping Returns</h3>
               <p className="mt-1 text-xs text-muted-foreground">
                 Track what needs to go back, where, and by when.
               </p>
@@ -480,7 +480,7 @@ function ShoppingReturnsSection({
           />
         </div>
 
-        <div className="rounded-2xl border border-border/70 bg-background/95 shadow-sm">
+        <div>
           <div className="grid grid-cols-[minmax(82px,1.2fr)_minmax(78px,0.85fr)_minmax(96px,112px)_minmax(82px,1fr)_72px] gap-2 border-b border-border/70 px-4 py-3 text-[8.5px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
             <span className="min-w-0 truncate">Item</span>
             <span className="min-w-0 truncate">Store</span>
@@ -719,7 +719,7 @@ function ListCard({
           </DropdownMenuContent>
           </DropdownMenu>
 
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1 text-right">
             {isEditingName ? (
               <input
                 type="text"
@@ -727,7 +727,7 @@ function ListCard({
                 onChange={(e) => setEditName(e.target.value)}
                 onBlur={handleSaveName}
                 onKeyDown={(e) => e.key === 'Enter' && handleSaveName()}
-                className="lemonade-list-title font-heading text-[20px] leading-[20px] bg-transparent outline-none border-b border-foreground uppercase"
+                className="lemonade-list-title w-full font-heading text-[20px] leading-[20px] bg-transparent outline-none border-b border-foreground uppercase"
                 autoFocus
               />
             ) : (

@@ -262,6 +262,10 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
             primaryTask.recurringFrequency === "monthly"
               ? primaryTask.recurringFrequency
               : undefined
+          const aiRecurringInterval =
+            typeof primaryTask.recurringInterval === "number" && Number.isFinite(primaryTask.recurringInterval) && primaryTask.recurringInterval > 1
+              ? Math.floor(primaryTask.recurringInterval)
+              : undefined
 
           updateCalendarTodo(tempId, {
             text: aiTitle,
@@ -274,6 +278,11 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
             recurringDays: Array.isArray(primaryTask.recurringDays)
               ? primaryTask.recurringDays.filter((day): day is number => typeof day === "number")
               : undefined,
+            recurringInterval: aiRecurringInterval,
+            recurringCustomText:
+              typeof primaryTask.recurringCustomText === "string" && primaryTask.recurringCustomText.trim()
+                ? primaryTask.recurringCustomText.trim()
+                : undefined,
             isHeading: aiTitle === aiTitle.toUpperCase() && aiTitle.length > 2,
             isSyncing: false,
             syncStatus: undefined,
