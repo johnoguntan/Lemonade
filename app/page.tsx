@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState, useSyncExternalStore, type CSSProperties } from "react"
-import { Oswald } from "next/font/google"
 import { parseLocalDateKey, formatLocalDateKey, useLemonadeStore } from "@/lib/store"
 import { Header } from "@/components/lemonade/header"
 import { PreferencesPanel } from "@/components/lemonade/preferences-panel"
@@ -14,12 +13,6 @@ import { DailyPlannerModal } from "@/components/lemonade/daily-planner-modal"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
-
-const notebookDisplay = Oswald({
-  subsets: ["latin"],
-  variable: "--font-notebook-display",
-  weight: ["500", "700"],
-})
 
 const textSizeVars = {
   sm: {
@@ -218,7 +211,7 @@ export default function Home() {
         />
 
         <div
-          className={cn(notebookDisplay.variable, "lemonade-app-root notebook-panel")}
+          className="lemonade-app-root notebook-panel"
           style={{
             position: "absolute",
             top: "7.25%",
@@ -252,7 +245,7 @@ export default function Home() {
         </div>
 
         <div
-          className={cn(notebookDisplay.variable, "lemonade-app-root notebook-panel notebook-panel-right [&>*]:border-t-0 [&>*]:pt-0")}
+          className="lemonade-app-root notebook-panel notebook-panel-right [&>*]:border-t-0 [&>*]:pt-0"
           style={{
             position: "absolute",
             top: "7.25%",
@@ -272,7 +265,7 @@ export default function Home() {
         </div>
 
         <div
-          className={cn(notebookDisplay.variable, "lemonade-app-root")}
+          className="lemonade-app-root"
           style={{
             position: "absolute",
             bottom: "5.15%",
