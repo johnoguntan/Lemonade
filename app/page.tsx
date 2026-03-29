@@ -206,7 +206,9 @@ export default function Home() {
           style={{
             position: "absolute",
             inset: 0,
-            backgroundSize: "contain",
+            backgroundSize: "101.35% 100.2%",
+            backgroundPosition: "50.65% center",
+            backgroundRepeat: "no-repeat",
           }}
         />
 

@@ -69,14 +69,6 @@ export function ListsSection() {
   )
   const getTabCount = (tabId: string) => lists.filter((list) => getListTabId(list) === tabId).length
   const activeTab = listTabs.find((tab) => tab.id === activeTabId) ?? null
-  const bottomDotGridStyle = preferences.showDotGridBackground
-    ? {
-        backgroundImage: "var(--dot-grid)",
-        backgroundSize: "24px 24px",
-        backgroundRepeat: "repeat",
-      }
-    : undefined
-
   const handleCreateTab = () => {
     const normalizedName = newTabName.trim().toUpperCase()
 
@@ -161,14 +153,13 @@ export function ListsSection() {
   return (
     <div
       className="relative z-20 mt-2 h-auto border-t-0 bg-transparent transition-all duration-300"
-      style={bottomDotGridStyle}
     >
       {/* Tabs */}
       <div className={cn(
         "flex min-h-10 items-center gap-2 overflow-hidden rounded-xl border border-border/35 bg-background/45 px-3 py-1 backdrop-blur-[12px] dark:bg-[rgba(19,19,19,0.34)]",
         !isListsCollapsed && "border-b border-border/45"
       )}
-      style={bottomDotGridStyle}>
+      >
         <DropdownMenu open={manageTabMenuOpen} onOpenChange={setManageTabMenuOpen}>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="size-6">
