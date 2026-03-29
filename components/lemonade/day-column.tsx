@@ -311,7 +311,7 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
 
   return (
     <div className="w-full">
-      <div className="w-full px-4">
+      <div className="w-full px-2">
         <div className="lemonade-day-header pb-3 pt-3">
           <div
             className={cn("lemonade-day-date font-semibold tracking-[0.08em]", dateFontSize)}

@@ -151,6 +151,9 @@ interface LemonadeStore {
   editSubtask: (todoId: string, subtaskId: string, title: string) => void
   toggleSubtask: (todoId: string, subtaskId: string) => void
   deleteSubtask: (todoId: string, subtaskId: string) => void
+  collapsedSubtasks: Record<string, boolean>
+  setSubtasksCollapsed: (todoId: string, collapsed: boolean) => void
+  toggleSubtasksCollapsed: (todoId: string) => void
   moveTodoToDate: (todoId: string, newDate: string) => void
   
   // Lists
@@ -225,6 +228,7 @@ type PersistedLemonadeStore = Partial<
     | 'labels'
     | 'searchQuery'
     | 'labelFilterIds'
+    | 'collapsedSubtasks'
     | 'sidebarOpen'
     | 'weekCount'
     | 'isCalendarExpanded'
@@ -467,6 +471,14 @@ export const migratePersistedLemonadeState = (
       : typeof (persisted as { tagFilterId?: string }).tagFilterId === "string"
         ? [(persisted as { tagFilterId: string }).tagFilterId]
         : [],
+    collapsedSubtasks:
+      persisted && typeof persisted === "object" && (persisted as { collapsedSubtasks?: unknown }).collapsedSubtasks && typeof (persisted as { collapsedSubtasks?: unknown }).collapsedSubtasks === "object"
+        ? (Object.fromEntries(
+            Object.entries((persisted as { collapsedSubtasks: Record<string, unknown> }).collapsedSubtasks).filter(
+              ([, value]) => typeof value === "boolean"
+            )
+          ) as Record<string, boolean>)
+        : {},
     sidebarOpen: typeof persisted.sidebarOpen === "boolean" ? persisted.sidebarOpen : false,
     weekCount: clampWeekCount(),
     lastSessionDate:
@@ -1086,6 +1098,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
       
       // Calendar todos
       calendarTodos: [],
+      collapsedSubtasks: {},
       lastCreatedTodoId: null,
       lastDeleted: null,
       lastAutoMovedCount: 0,
@@ -1291,6 +1304,22 @@ export const useLemonadeStore = create<LemonadeStore>()(
           subtasks: todo.subtasks.filter((subtask) => subtask.id !== subtaskId),
         }))
       ),
+
+      setSubtasksCollapsed: (todoId, collapsed) =>
+        set((state) => ({
+          collapsedSubtasks: {
+            ...state.collapsedSubtasks,
+            [todoId]: collapsed,
+          },
+        })),
+
+      toggleSubtasksCollapsed: (todoId) =>
+        set((state) => ({
+          collapsedSubtasks: {
+            ...state.collapsedSubtasks,
+            [todoId]: !(state.collapsedSubtasks[todoId] ?? true),
+          },
+        })),
       
       moveTodoToDate: (todoId, newDate) => set((state) => ({
         calendarTodos: state.calendarTodos.map((todo) =>
@@ -1835,6 +1864,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
       partialize: (state) => ({
         preferences: state.preferences,
         calendarTodos: state.calendarTodos,
+        collapsedSubtasks: state.collapsedSubtasks,
         listTabs: state.listTabs,
         lists: state.lists,
         labels: state.labels,

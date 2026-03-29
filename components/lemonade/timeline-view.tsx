@@ -684,7 +684,7 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
   }, [date, visibleBounds.end, visibleBounds.start])
 
   return (
-    <div className="flex flex-1 flex-col px-10 pt-6">
+    <div className="flex flex-1 flex-col px-4 pt-6">
       <div className="mb-5 flex items-center justify-between rounded-2xl border border-border/70 bg-background/90 px-4 py-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:bg-[rgba(19,19,19,0.9)]">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => onNavigate("prev-day")} className="size-8">

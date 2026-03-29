@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { useLemonadeStore, type Todo } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { RotateCcw, Plus, Minus, X, Moon, Sparkles, PencilLine, ArrowUp, Trash2 } from "lucide-react"
+import { RotateCcw, Plus, Minus, X, Moon, Sparkles, PencilLine, ArrowUp, Trash2, ChevronRight, ChevronDown, NotebookPen } from "lucide-react"
 import { toast } from "sonner"
 import {
   DropdownMenu,
@@ -64,6 +64,9 @@ export function TodoItem({
     editSubtask,
     toggleSubtask,
     deleteSubtask,
+    collapsedSubtasks,
+    setSubtasksCollapsed,
+    toggleSubtasksCollapsed,
     labels,
     addLabelToTask,
     removeLabelFromTask,
@@ -72,10 +75,12 @@ export function TodoItem({
   
   const [isEditing, setIsEditing] = useState(autoFocus)
   const [editText, setEditText] = useState(todo.text)
-  const [showSubtasks, setShowSubtasks] = useState(false)
+  const [isAddingSubtask, setIsAddingSubtask] = useState(false)
   const [newSubtaskText, setNewSubtaskText] = useState("")
   const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null)
   const [editingSubtaskText, setEditingSubtaskText] = useState("")
+  const [isNotesOpen, setIsNotesOpen] = useState(false)
+  const [noteText, setNoteText] = useState(todo.notes ?? "")
   const [pendingRecurringUpdate, setPendingRecurringUpdate] = useState<Partial<Todo> | null>(null)
   const [customRecurrenceText, setCustomRecurrenceText] = useState(todo.recurringCustomText ?? "")
   const inputRef = useRef<HTMLInputElement>(null)
@@ -85,13 +90,6 @@ export function TodoItem({
       ? "custom"
       : (todo.recurringFrequency || "daily")
     : "off"
-
-  const bulletIcon = {
-    none: null,
-    dot: <span className="mr-2">•</span>,
-    dash: <span className="mr-2">-</span>,
-    arrow: <span className="mr-2">→</span>,
-  }[preferences.bulletStyle]
 
   const priorityIndicator = {
     high: <span className="size-2 rounded-full bg-red-500 mr-2 flex-shrink-0" />,
@@ -112,17 +110,29 @@ export function TodoItem({
     setIsEditing(false)
   }
 
-  const handleAddSubtask = () => {
-    if (newSubtaskText.trim()) {
-      addSubtask(todo.id, newSubtaskText.trim())
-      setNewSubtaskText("")
-    }
+  const openSubtaskComposer = () => {
+    setIsAddingSubtask(true)
+    setSubtasksCollapsed(todo.id, false)
   }
 
-  const hideEmptySubtaskComposer = () => {
-    if (todo.subtasks.length === 0 && newSubtaskText.trim().length === 0 && editingSubtaskId === null) {
-      setShowSubtasks(false)
+  const handleAddSubtask = () => {
+    const trimmed = newSubtaskText.trim()
+
+    if (!trimmed) {
+      setNewSubtaskText("")
+      setIsAddingSubtask(false)
+      return
     }
+
+    addSubtask(todo.id, trimmed)
+    setNewSubtaskText("")
+    setIsAddingSubtask(false)
+    setSubtasksCollapsed(todo.id, false)
+  }
+
+  const closeSubtaskComposer = () => {
+    setNewSubtaskText("")
+    setIsAddingSubtask(false)
   }
 
   const handleStartEditingSubtask = (subtaskId: string, title: string) => {
@@ -148,7 +158,7 @@ export function TodoItem({
     setEditingSubtaskText("")
 
     if (shouldHideComposer) {
-      setShowSubtasks(false)
+      setSubtasksCollapsed(todo.id, true)
     }
   }
 
@@ -227,7 +237,7 @@ export function TodoItem({
     const shouldHideComposer = todo.subtasks.length <= 1 && newSubtaskText.trim().length === 0
     deleteSubtask(todo.id, subtaskId)
     if (shouldHideComposer) {
-      setShowSubtasks(false)
+      setSubtasksCollapsed(todo.id, true)
     }
     toast("Subtask promoted", { duration: 2000 })
   }
@@ -262,8 +272,23 @@ export function TodoItem({
     })
   }, [autoFocus, clearLastCreatedTodoId])
 
+  const openNotes = () => {
+    setNoteText(todo.notes ?? "")
+    setIsNotesOpen(true)
+  }
+
+  const handleSaveNotes = () => {
+    const trimmed = noteText.trim()
+    updateCalendarTodo(todo.id, { notes: trimmed.length > 0 ? trimmed : undefined })
+    setIsNotesOpen(false)
+  }
+
   const completedSubtaskCount = todo.subtasks.filter((subtask) => subtask.completed).length
   const hasCustomColor = Boolean(todo.color)
+  const hasSubtasks = todo.subtasks.length > 0
+  const areSubtasksCollapsed = collapsedSubtasks[todo.id] ?? true
+  const showSubtasks = !areSubtasksCollapsed || isAddingSubtask || editingSubtaskId !== null
+  const hasNote = (todo.notes ?? "").trim().length > 0
 
   if (todo.isHeading) {
     return (
@@ -365,20 +390,29 @@ export function TodoItem({
                   todo.completed && "line-through opacity-40"
                 )}
               >
-                {bulletIcon}
                 {todo.text}
-                {todo.isRecurring && (
-                  <RotateCcw className="inline size-3 ml-1 text-muted-foreground" />
-                )}
               </span>
             )}
-            {todo.subtasks.length > 0 && (
+            {hasSubtasks && (
               <button
                 type="button"
-                onClick={() => setShowSubtasks((value) => !value)}
-                className="ml-2 text-[10px] font-medium text-muted-foreground hover:text-foreground"
+                onClick={() => toggleSubtasksCollapsed(todo.id)}
+                className="ml-2 inline-flex items-center gap-1 rounded-full text-[10px] font-medium text-muted-foreground hover:text-foreground"
+                aria-label={areSubtasksCollapsed ? "Expand subtasks" : "Collapse subtasks"}
               >
-                {completedSubtaskCount}/{todo.subtasks.length}
+                {areSubtasksCollapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
+                <span>{areSubtasksCollapsed ? `${todo.subtasks.length} subtasks` : `${completedSubtaskCount}/${todo.subtasks.length}`}</span>
+              </button>
+            )}
+            {hasNote && (
+              <button
+                type="button"
+                onClick={() => (isNotesOpen ? setIsNotesOpen(false) : openNotes())}
+                className="ml-2 inline-flex items-center gap-1 rounded-full text-[10px] font-medium text-muted-foreground hover:text-foreground"
+                aria-label={isNotesOpen ? "Hide note" : "Show note"}
+              >
+                <NotebookPen className="size-3" />
+                <span>Note</span>
               </button>
             )}
           </div>
@@ -415,6 +449,18 @@ export function TodoItem({
           <Button
             variant="ghost"
             size="icon"
+            onClick={() => (isNotesOpen ? setIsNotesOpen(false) : openNotes())}
+            className={cn(
+              "size-7 hover:bg-transparent",
+              hasNote ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+            )}
+            aria-label={isNotesOpen ? "Hide notes" : hasNote ? "Show notes" : "Add note"}
+          >
+            <NotebookPen className="size-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => toggleEndOfDay(todo.id)}
             className={cn(
               "size-7 hover:bg-transparent",
@@ -439,7 +485,7 @@ export function TodoItem({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setShowSubtasks(true)}>
+              <DropdownMenuItem onClick={openSubtaskComposer}>
                 <Plus className="size-4 mr-2" />
                 Add subtask
               </DropdownMenuItem>
@@ -615,9 +661,34 @@ export function TodoItem({
         </div>
       </div>
 
+      {isNotesOpen ? (
+        <div className="ml-7 mt-2">
+          <textarea
+            value={noteText}
+            onChange={(event) => setNoteText(event.target.value)}
+            onBlur={handleSaveNotes}
+            placeholder="Write a note..."
+            className="w-full resize-none rounded-md border border-border/60 bg-transparent px-3 py-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground"
+            rows={3}
+            autoFocus={!hasNote}
+          />
+        </div>
+      ) : !hasNote ? (
+        <div className="ml-7 mt-1">
+          <button
+            type="button"
+            onClick={openNotes}
+            className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground"
+          >
+            <NotebookPen className="size-3" />
+            <span>Add note</span>
+          </button>
+        </div>
+      ) : null}
+
       {/* Subtasks */}
       {showSubtasks && (
-        <div className="ml-0" onMouseLeave={hideEmptySubtaskComposer}>
+        <div className="ml-0">
           {todo.subtasks.map((subtask) => (
             <div key={subtask.id} className="lemonade-subtask-row h-[48px] flex items-center gap-2 px-0 pl-7 group/subtask transition-colors">
               <button
@@ -676,7 +747,7 @@ export function TodoItem({
                   const shouldHideComposer = todo.subtasks.length <= 1 && newSubtaskText.trim().length === 0
                   deleteSubtask(todo.id, subtask.id)
                   if (shouldHideComposer) {
-                    setShowSubtasks(false)
+                    setSubtasksCollapsed(todo.id, true)
                   }
                 }}
                 className="opacity-0 group-hover/subtask:opacity-100 text-muted-foreground hover:text-destructive"
@@ -686,18 +757,28 @@ export function TodoItem({
               </button>
             </div>
           ))}
-          <div className="lemonade-subtask-row h-[48px] flex items-center gap-2 px-0 pl-7">
-            <Plus className="size-3 text-muted-foreground" />
-            <input
-              type="text"
-              value={newSubtaskText}
-              onChange={(e) => setNewSubtaskText(e.target.value)}
-              onBlur={hideEmptySubtaskComposer}
-              onKeyDown={(e) => e.key === 'Enter' && handleAddSubtask()}
-              placeholder="Add subtask..."
-              className="lemonade-task-text bg-transparent outline-none flex-1 font-task font-normal text-[14px] leading-[1.15] text-[#000000] dark:text-foreground"
-            />
-          </div>
+          {isAddingSubtask && (
+            <div className="lemonade-subtask-row h-[48px] flex items-center gap-2 px-0 pl-7">
+              <Plus className="size-3 text-muted-foreground" />
+              <input
+                type="text"
+                value={newSubtaskText}
+                onChange={(e) => setNewSubtaskText(e.target.value)}
+                onBlur={closeSubtaskComposer}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    handleAddSubtask()
+                  } else if (e.key === "Escape") {
+                    closeSubtaskComposer()
+                  }
+                }}
+                placeholder="Add subtask..."
+                className="lemonade-task-text bg-transparent outline-none flex-1 font-task font-normal text-[14px] leading-[1.15] text-[#000000] dark:text-foreground"
+                autoFocus
+              />
+            </div>
+          )}
         </div>
       )}
 

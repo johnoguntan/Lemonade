@@ -1,9 +1,15 @@
 import type { Metadata, Viewport } from 'next'
+import { Inter } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { ThemeProvider } from '@/components/theme-provider'
 import { AccentColorSync } from '@/components/accent-color-sync'
 import { Toaster } from '@/components/ui/sonner'
 import './globals.css'
+
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter',
+})
 
 export const metadata: Metadata = {
   title: 'Lemonade - Simple Todo App',
@@ -45,7 +51,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="font-sans antialiased">
+      <body className={`${inter.variable} font-sans antialiased`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="light"

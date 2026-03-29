@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState, useSyncExternalStore, type CSSProperties } from "react"
+import { Oswald } from "next/font/google"
 import { parseLocalDateKey, formatLocalDateKey, useLemonadeStore } from "@/lib/store"
 import { Header } from "@/components/lemonade/header"
 import { PreferencesPanel } from "@/components/lemonade/preferences-panel"
@@ -14,38 +15,44 @@ import { ErrorBoundary } from "@/components/error-boundary"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
+const notebookDisplay = Oswald({
+  subsets: ["latin"],
+  variable: "--font-oswald",
+  weight: ["500", "700"],
+})
+
 const textSizeVars = {
   sm: {
-    "--app-text-size": "12px",
-    "--app-ui-text-size": "11px",
-    "--app-heading-size": "17px",
-    "--app-heading-line-height": "17px",
-    "--app-date-size": "9px",
-    "--app-tab-size": "9px",
-  },
-  md: {
-    "--app-text-size": "14px",
+    "--app-text-size": "13px",
     "--app-ui-text-size": "12px",
-    "--app-heading-size": "20px",
-    "--app-heading-line-height": "20px",
+    "--app-heading-size": "19px",
+    "--app-heading-line-height": "19px",
     "--app-date-size": "10px",
     "--app-tab-size": "10px",
   },
-  lg: {
-    "--app-text-size": "18px",
+  md: {
+    "--app-text-size": "17px",
     "--app-ui-text-size": "14px",
-    "--app-heading-size": "24px",
-    "--app-heading-line-height": "24px",
+    "--app-heading-size": "26px",
+    "--app-heading-line-height": "26px",
     "--app-date-size": "12px",
     "--app-tab-size": "12px",
+  },
+  lg: {
+    "--app-text-size": "21px",
+    "--app-ui-text-size": "16px",
+    "--app-heading-size": "30px",
+    "--app-heading-line-height": "30px",
+    "--app-date-size": "14px",
+    "--app-tab-size": "14px",
   },
 } as const
 
 const spacingVars = {
   compact: {
-    "--app-task-row-height": "36px",
-    "--app-heading-row-height": "36px",
-    "--app-subtask-row-height": "40px",
+    "--app-task-row-height": "40px",
+    "--app-heading-row-height": "40px",
+    "--app-subtask-row-height": "44px",
     "--app-control-gap": "0.375rem",
     "--app-card-padding-y": "1rem",
     "--app-card-padding-x": "2rem",
@@ -55,9 +62,9 @@ const spacingVars = {
     "--app-footer-height": "44px",
   },
   normal: {
-    "--app-task-row-height": "42px",
-    "--app-heading-row-height": "40px",
-    "--app-subtask-row-height": "48px",
+    "--app-task-row-height": "50px",
+    "--app-heading-row-height": "48px",
+    "--app-subtask-row-height": "56px",
     "--app-control-gap": "0.5rem",
     "--app-card-padding-y": "1.25rem",
     "--app-card-padding-x": "2.5rem",
@@ -67,9 +74,9 @@ const spacingVars = {
     "--app-footer-height": "48px",
   },
   comfortable: {
-    "--app-task-row-height": "48px",
-    "--app-heading-row-height": "44px",
-    "--app-subtask-row-height": "56px",
+    "--app-task-row-height": "58px",
+    "--app-heading-row-height": "54px",
+    "--app-subtask-row-height": "64px",
     "--app-control-gap": "0.625rem",
     "--app-card-padding-y": "1.5rem",
     "--app-card-padding-x": "3rem",
@@ -211,7 +218,7 @@ export default function Home() {
         />
 
         <div
-          className="lemonade-app-root notebook-panel"
+          className={`${notebookDisplay.variable} lemonade-app-root notebook-panel`}
           style={{
             position: "absolute",
             top: "7.25%",
@@ -245,14 +252,14 @@ export default function Home() {
         </div>
 
         <div
-          className="lemonade-app-root notebook-panel notebook-panel-right [&>*]:border-t-0 [&>*]:pt-0"
+          className={`${notebookDisplay.variable} lemonade-app-root notebook-panel notebook-panel-right [&>*]:border-t-0 [&>*]:pt-0`}
           style={{
             position: "absolute",
             top: "7.25%",
-            left: "53.75%",
-            width: "calc(31% + 10px)",
+            left: "53.2%",
+            width: "calc(32.2% + 18px)",
             height: "83.5%",
-            paddingLeft: "0.45%",
+            paddingLeft: "0.2%",
             paddingRight: "0%",
             boxSizing: "border-box",
             overflowY: "auto",
@@ -265,7 +272,7 @@ export default function Home() {
         </div>
 
         <div
-          className="lemonade-app-root"
+          className={`${notebookDisplay.variable} lemonade-app-root`}
           style={{
             position: "absolute",
             bottom: "5.15%",

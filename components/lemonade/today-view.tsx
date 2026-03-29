@@ -86,10 +86,10 @@ export function TodayView() {
   const hasTasks = overdue.length > 0 || today.length > 0
 
   return (
-    <div className="flex flex-1 flex-col px-10 pt-6">
+    <div className="flex flex-1 flex-col px-4 pt-6">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-5">
         {overdue.length > 0 ? (
-          <section className="px-5 py-4">
+          <section className="px-2 py-4">
             <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
               Carried over
             </div>
@@ -102,7 +102,7 @@ export function TodayView() {
         ) : null}
 
         {today.length > 0 ? (
-          <section className="px-5 py-4">
+          <section className="px-2 py-4">
             <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
               Today
             </div>
