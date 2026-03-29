@@ -328,13 +328,13 @@ export function TodoItem({
     >
         <div 
         className={cn(
-          "lemonade-task-row flex items-center h-[42px] px-0 transition-colors",
+          "lemonade-task-row flex items-start px-0 py-2 transition-colors",
           todo.completed && "bg-transparent",
           todo.isSyncing && "animate-pulse"
         )}
         style={{ backgroundColor: todo.color }}
       >
-        <div className="flex items-center justify-center w-5 mr-2">
+        <div className="flex min-h-[52px] items-center justify-center w-5 mr-2">
           <button
             onClick={() => toggleCalendarTodo(todo.id)}
             className={cn(
@@ -353,8 +353,8 @@ export function TodoItem({
           </button>
         </div>
 
-        <div className="flex-1 min-w-0 flex flex-col justify-center">
-          <div className="flex items-center">
+        <div className="flex-1 min-w-0 flex flex-col justify-center gap-1">
+          <div className="flex min-w-0 items-center">
             {priorityIndicator}
             {todo.isSyncing ? (
               <Sparkles className="mr-2 size-3.5 text-[var(--accent-color)]" />
@@ -418,7 +418,7 @@ export function TodoItem({
           </div>
           {/* Tag Pills */}
           {todo.labelIds.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-0.5">
+            <div className="flex flex-wrap items-center gap-1">
               {todo.labelIds.map((labelId) => {
                 const label = labels.find((item) => item.id === labelId)
                 if (!label) return null
@@ -435,17 +435,17 @@ export function TodoItem({
             </div>
           )}
           {todo.isSyncing ? (
-            <div className="mt-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="text-[9px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
               Syncing...
             </div>
           ) : isLocalOnly ? (
-            <div className="mt-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="text-[9px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
               Local
             </div>
           ) : null}
         </div>
 
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex min-h-[52px] items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
           <Button
             variant="ghost"
             size="icon"
@@ -662,7 +662,7 @@ export function TodoItem({
       </div>
 
       {isNotesOpen ? (
-        <div className="ml-7 mt-2">
+        <div className="ml-7 mt-1">
           <textarea
             value={noteText}
             onChange={(event) => setNoteText(event.target.value)}
@@ -674,7 +674,7 @@ export function TodoItem({
           />
         </div>
       ) : !hasNote ? (
-        <div className="ml-7 mt-1">
+        <div className="ml-7 mt-0.5">
           <button
             type="button"
             onClick={openNotes}

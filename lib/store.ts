@@ -322,6 +322,12 @@ const normalizePersistedPreferences = (
   timelineStartHour: normalizeTimelineHourPreference(preferences?.timelineStartHour, fallbackPreferences.timelineStartHour),
   timelineEndHour: normalizeTimelineHourPreference(preferences?.timelineEndHour, fallbackPreferences.timelineEndHour),
   autoMoveUndoneToToday: preferences?.autoMoveUndoneToToday ?? fallbackPreferences.autoMoveUndoneToToday,
+  accentColor:
+    typeof preferences?.accentColor === "string"
+      ? preferences.accentColor === "#852CE6"
+        ? "#2563EB"
+        : preferences.accentColor
+      : fallbackPreferences.accentColor,
   colorPalette: preferences?.colorPalette ?? fallbackPreferences.colorPalette,
   showDotGridBackground: preferences?.showDotGridBackground ?? fallbackPreferences.showDotGridBackground,
   defaultLabelId:
@@ -423,7 +429,7 @@ export const migratePersistedLemonadeState = (
     startOnYesterday: false,
     autoMoveUndoneToToday: true,
     theme: "light",
-    accentColor: "#852CE6",
+    accentColor: "#2563EB",
     showCelebrations: false,
     colorPalette: DEFAULT_COLOR_PALETTE,
     showDotGridBackground: true,
@@ -1084,7 +1090,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
         startOnYesterday: false,
         autoMoveUndoneToToday: true,
         theme: 'light',
-        accentColor: '#852CE6',
+        accentColor: '#2563EB',
         showCelebrations: false,
         colorPalette: DEFAULT_COLOR_PALETTE,
         showDotGridBackground: true,
