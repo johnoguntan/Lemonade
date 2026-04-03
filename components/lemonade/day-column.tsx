@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect, useMemo, type DragEvent } from "react"
+import { useState, useRef, useEffect, useMemo, type DragEvent, type ReactNode } from "react"
 import {
   createOptimisticTodoId,
   formatLocalDateKey,
@@ -22,6 +22,7 @@ import { toast } from "sonner"
 interface DayColumnProps {
   date: Date
   isToday: boolean
+  afterTodosContent?: ReactNode
 }
 
 const AI_PARSE_TIMEOUT_MS = 15000
@@ -71,7 +72,7 @@ const sortEndOfDayTodos = (todos: Todo[]) => {
     .map(({ todo }) => todo)
 }
 
-export function DayColumn({ date, isToday }: DayColumnProps) {
+export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) {
   const preferences = useLemonadeStore((state) => state.preferences)
   const calendarTodos = useLemonadeStore((state) => state.calendarTodos)
   const lastCreatedTodoId = useLemonadeStore((state) => state.lastCreatedTodoId)
@@ -358,6 +359,19 @@ export function DayColumn({ date, isToday }: DayColumnProps) {
                 }}
               />
             ))}
+
+            {afterTodosContent ? (
+              <div
+                className={cn(
+                  "calendar-focus-shortcuts-slot",
+                  todosForDay.length === 0 && !isAdding
+                    ? "calendar-focus-shortcuts-slot-empty"
+                    : "calendar-focus-shortcuts-slot-filled"
+                )}
+              >
+                {afterTodosContent}
+              </div>
+            ) : null}
 
             <div
               className="lemonade-task-row flex h-[42px] items-center px-0 transition-colors cursor-text hover:bg-accent/20"

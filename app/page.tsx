@@ -276,7 +276,11 @@ export default function Home() {
             zIndex: 1,
           }}
         >
-          <Footer onNavigate={handleNavigate} />
+          <Footer
+            onNavigate={handleNavigate}
+            viewMode={viewMode}
+            onViewModeChange={handleViewModeChange}
+          />
         </div>
       </div>
     </div>

@@ -1,9 +1,8 @@
 "use client"
 
-import { Search, Calendar as CalendarIcon, Plus, Rows3, Clock3, SunMedium, X } from "lucide-react"
+import { Search, Plus, Rows3, Clock3, SunMedium, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { PrintPreviewDialog } from "./print-preview-dialog"
 import { cn } from "@/lib/utils"
@@ -73,10 +72,8 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
   const [showQuickAdd, setShowQuickAdd] = useState(false)
   const [quickAddText, setQuickAddText] = useState("")
   const [showColorPopover, setShowColorPopover] = useState(false)
-  const [showDatePopover, setShowDatePopover] = useState(false)
   const [newPaletteColor, setNewPaletteColor] = useState("#fef08a")
   const currentDate = parseLocalDateKey(selectedCalendarDate)
-  const [pickerMonth, setPickerMonth] = useState(currentDate)
 
   const parsedQuickAdd = localTaskParser(quickAddText, { labels })
   const palette = preferences.colorPalette ?? []
@@ -627,63 +624,6 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
               <Clock3 className="size-4" />
             </Button>
           </div>
-          {viewMode !== "today" ? (
-            <Popover
-              open={showDatePopover}
-              onOpenChange={(open) => {
-                setShowDatePopover(open)
-                if (open) {
-                  setPickerMonth(currentDate)
-                }
-              }}
-            >
-              <PopoverTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="ml-2 size-8 text-muted-foreground hover:text-foreground"
-                >
-                  <CalendarIcon className="size-4" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent
-                align="end"
-                side="bottom"
-                sideOffset={8}
-                collisionPadding={12}
-                className="z-50 w-auto max-w-[calc(100vw-24px)] rounded-2xl border-0 p-0 shadow-[0_10px_30px_rgba(0,0,0,0.12)]"
-              >
-                <Calendar
-                  mode="single"
-                  selected={currentDate}
-                  month={pickerMonth}
-                  onMonthChange={setPickerMonth}
-                  onSelect={(date) => {
-                    if (date) {
-                      setSelectedCalendarDate(formatLocalDateKey(date))
-                      setShowDatePopover(false)
-                    }
-                  }}
-                  className="rounded-2xl border border-border/35 border-b-[4px] border-b-[var(--accent-color)] bg-popover/85 p-4 backdrop-blur-[16px]"
-                  classNames={{
-                    month_caption: "relative flex h-10 w-full items-center justify-center px-10",
-                    caption_label: "text-center text-[14px] leading-none font-semibold uppercase tracking-[0.14em]",
-                    nav: "absolute inset-x-0 top-4 z-10 flex items-center justify-between px-3",
-                    button_previous: "flex h-8 w-8 items-center justify-center rounded-full text-foreground hover:bg-muted [&_svg]:size-4 [&_svg]:text-foreground",
-                    button_next: "flex h-8 w-8 items-center justify-center rounded-full text-foreground hover:bg-muted [&_svg]:size-4 [&_svg]:text-foreground",
-                    weekdays: "mb-2 mt-3 grid grid-cols-7",
-                    weekday: "text-center text-[12px] font-semibold uppercase text-foreground",
-                    week: "mt-0 grid grid-cols-7",
-                    day: "aspect-square p-0",
-                    day_button: "h-12 w-12 rounded-none text-base font-semibold text-foreground hover:bg-muted/50",
-                    today: "bg-transparent text-foreground",
-                    selected: "bg-[var(--accent-color)] text-white hover:bg-[var(--accent-color)]",
-                    outside: "text-muted-foreground/40",
-                  }}
-                />
-              </PopoverContent>
-            </Popover>
-          ) : null}
         </div>
       ) : null}
     </header>

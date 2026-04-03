@@ -379,6 +379,110 @@
   color: var(--notebook-title-color) !important;
 }
 
+.calendar-focus-mode {
+  min-height: 100%;
+}
+
+.calendar-focus-overlay {
+  position: absolute;
+  left: 0.35rem;
+  top: calc(33% + 40px);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.05rem;
+  transform: translateY(-50%);
+  width: fit-content;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  transition: transform 180ms ease, opacity 180ms ease;
+  opacity: 0.72;
+}
+
+.calendar-focus-shortcut {
+  color: #5a5a5a;
+  font-family: "Jore", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  transition: color 180ms ease;
+}
+
+.calendar-focus-overlay:hover {
+  opacity: 1;
+}
+
+.calendar-focus-overlay:hover .calendar-focus-shortcut {
+  color: var(--accent-color);
+}
+
+.calendar-focus-overlay:hover {
+  transform: translateY(-50%) translateX(1px);
+}
+
+.calendar-focus-collapse {
+  position: absolute;
+  right: 1.2rem;
+  top: 1rem;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.62);
+  color: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(6px);
+  transition:
+    color 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease,
+    transform 180ms ease;
+}
+
+.calendar-focus-collapse:hover {
+  color: var(--accent-color);
+  border-color: color-mix(in srgb, var(--accent-color) 18%, rgba(0, 0, 0, 0.06));
+  background: rgba(255, 255, 255, 0.82);
+  transform: translateY(-1px);
+}
+
+.dark .calendar-focus-collapse {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(10, 10, 10, 0.48);
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.calendar-focus-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.calendar-focus-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.calendar-focus-day {
+  overflow: hidden;
+  transition: opacity 240ms ease, transform 240ms ease;
+}
+
+.calendar-focus-day.is-collapsed {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.calendar-focus-day.is-expanded {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .notebook-panel-right .lemonade-list-title,
 .notebook-panel-right .lemonade-right-panel-heading {
   text-align: right !important;

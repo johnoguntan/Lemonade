@@ -1,9 +1,10 @@
 "use client"
 
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useLemonadeStore } from "@/lib/store"
 import { DayColumn } from "./day-column"
-import { Button } from "@/components/ui/button"
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { ChevronUp } from "lucide-react"
 
 interface CalendarViewProps {
   startDate: Date
@@ -16,6 +17,8 @@ const addDays = (date: Date, amount: number) => {
   return nextDate
 }
 
+const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate())
+
 const getDateArray = (startDate: Date, count: number): Date[] =>
   Array.from({ length: count }, (_, index) => addDays(startDate, index))
 
@@ -27,59 +30,84 @@ const isSameDay = (date1: Date, date2: Date): boolean => {
   )
 }
 
-export function CalendarView({ startDate, onNavigate }: CalendarViewProps) {
+export function CalendarView({ startDate, onNavigate: _onNavigate }: CalendarViewProps) {
   const { preferences } = useLemonadeStore()
-  const today = new Date()
-  const days = getDateArray(startDate, 7).slice(0, preferences.columns)
+  const [isExpanded, setIsExpanded] = useState(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const today = useMemo(() => startOfDay(new Date()), [])
+  const visibleStartDate = useMemo(() => startOfDay(startDate), [startDate])
+  const expandedDays = useMemo(
+    () => getDateArray(visibleStartDate, Math.max(preferences.columns * 10, 35)),
+    [preferences.columns, visibleStartDate]
+  )
+  const futureDays = isExpanded ? expandedDays.slice(1) : []
+
+  useEffect(() => {
+    const scrollContainer = scrollRef.current
+    if (!scrollContainer) {
+      return
+    }
+
+    if (!isExpanded) {
+      scrollContainer.scrollTo({ top: 0, behavior: "smooth" })
+    }
+  }, [isExpanded])
 
   return (
-    <div className="group/calendar-nav relative flex flex-1 px-4 pt-6">
-      <div className="pointer-events-none absolute left-0 top-24 z-10 flex flex-col overflow-hidden rounded-r-md border border-border/40 bg-background/45 opacity-0 backdrop-blur-[12px] transition-opacity duration-200 group-hover/calendar-nav:opacity-100 dark:bg-[rgba(29,35,48,0.46)]">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => onNavigate('prev-day')}
-          className="pointer-events-auto size-8 rounded-none text-muted-foreground hover:text-foreground"
+    <div className="calendar-focus-mode relative flex flex-1 px-4 pt-6">
+      {!isExpanded ? (
+        <button
+          type="button"
+          className="calendar-focus-overlay"
+          aria-label="Show the rest of the calendar"
+          onClick={() => setIsExpanded(true)}
         >
-          <ChevronLeft className="size-[15px]" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => onNavigate('prev-week')}
-          className="pointer-events-auto size-8 rounded-none text-muted-foreground hover:text-foreground"
-        >
-          <ChevronsLeft className="size-[15px]" />
-        </Button>
-      </div>
+          <span className="calendar-focus-shortcut">W</span>
+          <span className="calendar-focus-shortcut">T</span>
+          <span className="calendar-focus-shortcut">F</span>
+        </button>
+      ) : null}
 
-      <div className="min-w-0 flex flex-1 flex-col">
-        {days.map((date) => (
-          <DayColumn
-            key={`${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`}
-            date={date}
-            isToday={isSameDay(date, today)}
-          />
-        ))}
-      </div>
+      {isExpanded ? (
+        <button
+          type="button"
+          className="calendar-focus-collapse"
+          aria-label="Return to focus mode"
+          onClick={() => setIsExpanded(false)}
+        >
+          <ChevronUp className="size-[13px]" strokeWidth={2.1} />
+        </button>
+      ) : null}
 
-      <div className="pointer-events-none absolute right-0 top-24 z-10 flex flex-col overflow-hidden rounded-l-md border border-border/40 bg-background/45 opacity-0 backdrop-blur-[12px] transition-opacity duration-200 group-hover/calendar-nav:opacity-100 dark:bg-[rgba(29,35,48,0.46)]">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => onNavigate('next-day')}
-          className="pointer-events-auto size-8 rounded-none text-muted-foreground hover:text-foreground"
+      <div ref={scrollRef} className="calendar-focus-scroll min-w-0 flex flex-1 flex-col">
+
+        <div
+          ref={(node) => {
+            sectionRefs.current[`${visibleStartDate.getFullYear()}-${visibleStartDate.getMonth()}-${visibleStartDate.getDate()}`] = node
+          }}
+          className="calendar-focus-day is-collapsed"
         >
-          <ChevronRight className="size-[15px]" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => onNavigate('next-week')}
-          className="pointer-events-auto size-8 rounded-none text-muted-foreground hover:text-foreground"
-        >
-          <ChevronsRight className="size-[15px]" />
-        </Button>
+          <DayColumn date={visibleStartDate} isToday={isSameDay(visibleStartDate, today)} />
+        </div>
+
+        {futureDays.map((date) => {
+          const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+          return (
+            <div
+              key={key}
+              ref={(node) => {
+                sectionRefs.current[key] = node
+              }}
+              className={cn("calendar-focus-day", isExpanded ? "is-expanded" : "is-collapsed")}
+            >
+              <DayColumn
+                date={date}
+                isToday={isSameDay(date, today)}
+              />
+            </div>
+          )
+        })}
       </div>
     </div>
   )

@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { formatLocalDateKey, parseLocalDateKey, useLemonadeStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
-import { CircleHelp, Moon, RefreshCw, SlidersHorizontal, Sun, User, ChevronLeft, ChevronRight } from "lucide-react"
+import { Calendar as CalendarPicker, CircleHelp, ChevronLeft, ChevronRight, Music2, Rows3, Smile, Sun, Moon, User } from "lucide-react"
 import { useTheme } from "next-themes"
 import Link from "next/link"
 import {
@@ -12,23 +12,32 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Calendar } from "@/components/ui/calendar"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { cn } from "@/lib/utils"
+import { toast } from "sonner"
 
 interface FooterProps {
   onNavigate?: (direction: 'prev-week' | 'next-week' | 'prev-day' | 'next-day' | 'today') => void
+  viewMode?: "calendar" | "timeline" | "today"
+  onViewModeChange?: (mode: "calendar" | "timeline" | "today") => void
 }
 
-export function Footer({ onNavigate }: FooterProps) {
+export function Footer({ onNavigate, viewMode = "calendar", onViewModeChange }: FooterProps) {
   const {
     preferences,
     setPreferences,
-    sidebarOpen,
     setSidebarOpen,
     selectedCalendarDate,
     setSelectedCalendarDate,
+    calendarTodos,
   } = useLemonadeStore()
   useTheme()
   const [showHelp, setShowHelp] = useState(false)
+  const [showDatePopover, setShowDatePopover] = useState(false)
   const currentStartDate = parseLocalDateKey(selectedCalendarDate)
+  const [pickerMonth, setPickerMonth] = useState(currentStartDate)
+  const completedTodayCount = calendarTodos.filter((todo) => todo.date === formatLocalDateKey(new Date()) && todo.completed).length
 
   const handleNavigate = (direction: 'prev-week' | 'next-week' | 'prev-day' | 'next-day' | 'today') => {
     if (onNavigate) {
@@ -62,25 +71,104 @@ export function Footer({ onNavigate }: FooterProps) {
 
   return (
     <footer className="lemonade-footer sticky bottom-0 z-30 mt-auto flex h-11 items-center rounded-xl border border-border/35 bg-background/45 px-4 backdrop-blur-[14px] transition-all duration-300 dark:bg-[rgba(19,19,19,0.34)]">
-      <div className="flex min-w-0 flex-1 items-center justify-start gap-1">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="size-8 text-muted-foreground hover:text-foreground"
-          title="Toggle sidebar"
-        >
-          <SlidersHorizontal className="size-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => window.location.reload()}
-          className="size-8 text-muted-foreground hover:text-foreground"
-          title="Refresh"
-        >
-          <RefreshCw className="size-4" />
-        </Button>
+      <div className="flex min-w-0 flex-1 items-center justify-start">
+        <div className="flex w-full max-w-[17rem] items-center justify-between">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => {
+              const nextValue = !preferences.showCelebrations
+              setPreferences({ showCelebrations: nextValue })
+              toast(nextValue ? "Celebrations on" : "Celebrations off", { duration: 2000 })
+            }}
+            className={cn(
+              "size-8 text-muted-foreground hover:text-foreground",
+              preferences.showCelebrations && "text-foreground"
+            )}
+            title="Toggle celebrations"
+          >
+            <Music2 className="size-4" />
+          </Button>
+          <span className="h-5 w-px bg-border/70" aria-hidden="true" />
+
+          <Popover
+            open={showDatePopover}
+            onOpenChange={(open) => {
+              setShowDatePopover(open)
+              if (open) {
+                setPickerMonth(currentStartDate)
+              }
+            }}
+          >
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8 text-muted-foreground hover:text-foreground"
+                title="Choose date"
+              >
+                <CalendarPicker className="size-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="start"
+              side="top"
+              sideOffset={10}
+              collisionPadding={12}
+              className="z-50 w-auto max-w-[calc(100vw-24px)] rounded-2xl border-0 p-0 shadow-[0_10px_30px_rgba(0,0,0,0.12)]"
+            >
+              <Calendar
+                mode="single"
+                selected={currentStartDate}
+                month={pickerMonth}
+                onMonthChange={setPickerMonth}
+                onSelect={(date) => {
+                  if (!date) {
+                    return
+                  }
+                  setSelectedCalendarDate(formatLocalDateKey(date))
+                  setShowDatePopover(false)
+                }}
+                initialFocus
+              />
+            </PopoverContent>
+          </Popover>
+          <span className="h-5 w-px bg-border/70" aria-hidden="true" />
+
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => onViewModeChange?.("calendar")}
+            className={cn(
+              "size-8 text-muted-foreground hover:text-foreground",
+              viewMode === "calendar" && "text-foreground"
+            )}
+            title="List view"
+          >
+            <Rows3 className="size-4" />
+          </Button>
+          <span className="h-5 w-px bg-border/70" aria-hidden="true" />
+
+          <button
+            type="button"
+            onClick={() => onViewModeChange?.("today")}
+            className="inline-flex h-8 min-w-8 items-center justify-center rounded-full bg-[#111111] px-2 text-[12px] font-extrabold tracking-[0.01em] text-white transition-transform duration-200 hover:-translate-y-px"
+            title="Show today view"
+          >
+            {completedTodayCount}!
+          </button>
+          <span className="h-5 w-px bg-border/70" aria-hidden="true" />
+
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setSidebarOpen(true)}
+            className="size-8 text-muted-foreground hover:text-foreground"
+            title="Personalization"
+          >
+            <Smile className="size-4" />
+          </Button>
+        </div>
       </div>
 
       <div className="flex min-w-0 flex-1 items-center justify-center gap-2 text-muted-foreground">
@@ -104,21 +192,7 @@ export function Footer({ onNavigate }: FooterProps) {
             <ChevronRight className="size-4" />
           </Button>
         </div>
-        <div className="flex items-center gap-1">
-          {[1, 3, 5, 7].map((num, index) => (
-            <div key={num} className="flex items-center gap-1">
-              <Button
-                variant={preferences.columns === num ? "secondary" : "ghost"}
-                size="sm"
-                onClick={() => setPreferences({ columns: num as 1 | 3 | 5 | 7 })}
-                className="h-8 min-w-8 px-2 text-[12px] font-semibold"
-              >
-                {num}
-              </Button>
-              {index < 3 && <span className="text-border">|</span>}
-            </div>
-          ))}
-        </div>
+        <span className="h-5 w-px bg-border/70" aria-hidden="true" />
         <Button
           variant="ghost"
           size="icon"
