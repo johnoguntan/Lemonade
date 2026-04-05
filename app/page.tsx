@@ -5,9 +5,9 @@ import { parseLocalDateKey, formatLocalDateKey, useLemonadeStore } from "@/lib/s
 import { Header } from "@/components/lemonade/header"
 import { PreferencesPanel } from "@/components/lemonade/preferences-panel"
 import { CalendarView } from "@/components/lemonade/calendar-view"
-import { TimelineView } from "@/components/lemonade/timeline-view"
 import { TodayView } from "@/components/lemonade/today-view"
-import { ListsSection } from "@/components/lemonade/lists-section"
+import { RightPageView } from "@/components/lemonade/right-page-view"
+import { DualProjectList } from "@/components/lemonade/dual-project-list"
 import { Footer } from "@/components/lemonade/footer"
 import { DailyPlannerModal } from "@/components/lemonade/daily-planner-modal"
 import { ErrorBoundary } from "@/components/error-boundary"
@@ -90,9 +90,35 @@ export default function Home() {
     generateRecurringInstances,
     selectedCalendarDate,
     setSelectedCalendarDate,
+    calendarTimeframe,
+    mainViewMode,
   } = useLemonadeStore()
-  const [viewMode, setViewMode] = useState<"calendar" | "timeline" | "today">("calendar")
-  const startDate = parseLocalDateKey(selectedCalendarDate)
+  const [viewMode, setViewMode] = useState<"calendar" | "today">("calendar")
+  const resolvedCalendarAnchorKey = (() => {
+    if (calendarTimeframe === "next-week") {
+      const today = new Date()
+      const day = today.getDay()
+      const daysUntilNextMonday = ((8 - day) % 7) || 7
+      const next = new Date(today)
+      next.setDate(next.getDate() + daysUntilNextMonday)
+      return formatLocalDateKey(next)
+    }
+
+    if (calendarTimeframe === "this-month") {
+      const today = new Date()
+      const start = new Date(today.getFullYear(), today.getMonth(), 1)
+      return formatLocalDateKey(start)
+    }
+
+    if (calendarTimeframe === "this-year") {
+      const today = new Date()
+      const start = new Date(today.getFullYear(), 0, 1)
+      return formatLocalDateKey(start)
+    }
+
+    return selectedCalendarDate
+  })()
+  const startDate = parseLocalDateKey(resolvedCalendarAnchorKey)
   const mounted = useSyncExternalStore(
     () => () => {},
     () => true,
@@ -155,7 +181,7 @@ export default function Home() {
     setSelectedCalendarDate(formatLocalDateKey(newDate))
   }
 
-  const handleViewModeChange = (mode: "calendar" | "timeline" | "today") => {
+  const handleViewModeChange = (mode: "calendar" | "today") => {
     if (mode === "today") {
       setSelectedCalendarDate(formatLocalDateKey(new Date()))
     }
@@ -226,20 +252,14 @@ export default function Home() {
             msOverflowStyle: "none",
           }}
         >
-          <div style={{ marginBottom: "12px" }}>
+          <div style={{ marginTop: "8px", marginBottom: "12px" }}>
             <Header onNavigate={handleNavigate} viewMode={viewMode} onViewModeChange={handleViewModeChange} />
           </div>
           <ErrorBoundary>
-            {viewMode === "calendar" ? (
-              <CalendarView
-                startDate={startDate}
-                onNavigate={handleNavigate}
-              />
-            ) : viewMode === "timeline" ? (
-              <TimelineView
-                date={startDate}
-                onNavigate={handleNavigate}
-              />
+            {mainViewMode === "dual" ? (
+              <DualProjectList startDate={startDate} />
+            ) : viewMode === "calendar" ? (
+              <CalendarView startDate={startDate} onNavigate={handleNavigate} />
             ) : (
               <TodayView />
             )}
@@ -263,7 +283,13 @@ export default function Home() {
             msOverflowStyle: "none",
           }}
         >
-          <ListsSection />
+          <ErrorBoundary>
+            {mainViewMode === "dual" ? (
+              <CalendarView startDate={startDate} onNavigate={handleNavigate} />
+            ) : (
+              <RightPageView startDate={startDate} onNavigate={handleNavigate} />
+            )}
+          </ErrorBoundary>
         </div>
 
         <div

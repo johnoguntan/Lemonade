@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { RotateCcw, Plus, Minus, X, Moon, Sparkles, PencilLine, ArrowUp, Trash2, ChevronRight, ChevronDown, NotebookPen } from "lucide-react"
 import { toast } from "sonner"
+import { TASK_ICON_LIBRARY, TaskIcon } from "@/lib/task-icons"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -303,6 +304,9 @@ export function TodoItem({
           <input
             ref={inputRef}
             type="text"
+            spellCheck
+            autoCorrect="on"
+            autoCapitalize="sentences"
             value={editText}
             onChange={(e) => setEditText(e.target.value)}
             onBlur={() => handleSave()}
@@ -356,6 +360,7 @@ export function TodoItem({
         <div className="flex-1 min-w-0 flex flex-col justify-center gap-1">
           <div className="flex min-w-0 items-center">
             {priorityIndicator}
+            {todo.icon ? <TaskIcon icon={todo.icon} className="mr-2 size-4 text-muted-foreground" /> : null}
             {todo.isSyncing ? (
               <Sparkles className="mr-2 size-3.5 text-[var(--accent-color)]" />
             ) : isLocalOnly ? (
@@ -365,6 +370,9 @@ export function TodoItem({
               <input
                 ref={inputRef}
                 type="text"
+                spellCheck
+                autoCorrect="on"
+                autoCapitalize="sentences"
                 value={editText}
                 onChange={(e) => setEditText(e.target.value)}
                 onBlur={() => handleSave()}
@@ -565,6 +573,9 @@ export function TodoItem({
                     </div>
                     <input
                       type="text"
+                      spellCheck
+                      autoCorrect="on"
+                      autoCapitalize="sentences"
                       value={customRecurrenceText}
                       onChange={(event) => setCustomRecurrenceText(event.target.value)}
                       placeholder="Every Tuesday and Thursday"
@@ -593,6 +604,43 @@ export function TodoItem({
                     {p}
                   </button>
                 ))}
+              </div>
+              <DropdownMenuSeparator />
+              <div className="px-2 py-1.5 text-sm font-medium">Icon</div>
+              <div className="px-2 pb-2">
+                <div className="mb-2 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => updateCalendarTodo(todo.id, { icon: undefined })}
+                    className={cn(
+                      "inline-flex items-center gap-2 rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                      !todo.icon && "bg-muted text-foreground"
+                    )}
+                  >
+                    Clear
+                  </button>
+                  {todo.icon ? <TaskIcon icon={todo.icon} className="size-4 text-muted-foreground" /> : null}
+                </div>
+                <div className="grid grid-cols-6 gap-2">
+                  {TASK_ICON_LIBRARY.map(({ key, label, Icon }) => {
+                    const selected = todo.icon === key
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => updateCalendarTodo(todo.id, { icon: key })}
+                        className={cn(
+                          "flex items-center justify-center rounded-lg border border-border/70 p-2 transition-colors hover:bg-muted",
+                          selected && "border-transparent bg-foreground text-background hover:bg-foreground"
+                        )}
+                        title={label}
+                        aria-label={label}
+                      >
+                        <Icon className="size-4" />
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
               <DropdownMenuSeparator />
               <div className="px-2 py-1.5 text-sm font-medium">Labels</div>
@@ -670,6 +718,9 @@ export function TodoItem({
             placeholder="Write a note..."
             className="w-full resize-none rounded-md border border-border/60 bg-transparent px-3 py-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground"
             rows={3}
+            spellCheck
+            autoCorrect="on"
+            autoCapitalize="sentences"
             autoFocus={!hasNote}
           />
         </div>
@@ -707,6 +758,9 @@ export function TodoItem({
               {editingSubtaskId === subtask.id ? (
                 <input
                   type="text"
+                  spellCheck
+                  autoCorrect="on"
+                  autoCapitalize="sentences"
                   value={editingSubtaskText}
                   onChange={(event) => setEditingSubtaskText(event.target.value)}
                   onBlur={handleSaveSubtask}
@@ -762,6 +816,9 @@ export function TodoItem({
               <Plus className="size-3 text-muted-foreground" />
               <input
                 type="text"
+                spellCheck
+                autoCorrect="on"
+                autoCapitalize="sentences"
                 value={newSubtaskText}
                 onChange={(e) => setNewSubtaskText(e.target.value)}
                 onBlur={closeSubtaskComposer}

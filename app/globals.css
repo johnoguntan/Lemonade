@@ -403,13 +403,29 @@
 }
 
 .calendar-focus-shortcut {
-  color: #5a5a5a;
-  font-family: "Jore", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 12px;
-  line-height: 1;
-  letter-spacing: 0.02em;
+  color: #4a4a4a;
+  font-family: "Tenaciou Light", "Jore", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 11px;
+  line-height: 1.1;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   transition: color 180ms ease;
+  /* Distressed stamp effect */
+  text-shadow: 
+    0.5px 0px 0px rgba(0, 0, 0, 0.15),
+    -0.5px 0px 0px rgba(255, 255, 255, 0.3),
+    0px 0.5px 0px rgba(0, 0, 0, 0.1),
+    0px -0.5px 0px rgba(255, 255, 255, 0.1);
+  /* Slight rotation variation for stamped look */
+  transform: rotate(-0.5deg);
+  /* Add subtle ink spread effect */
+  filter: contrast(1.05);
+  opacity: 0.85;
+}
+
+.calendar-focus-shortcut:hover {
+  color: #3a3a3a;
+  opacity: 1;
 }
 
 .calendar-focus-overlay:hover {

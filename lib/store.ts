@@ -27,14 +27,16 @@ export interface Todo {
   id: string
   text: string
   completed: boolean
-  date: string // ISO date string
+  date: string | null // ISO date string
   createdAt: number
   endOfDay: boolean
   isSyncing?: boolean
   syncStatus?: 'local'
   time?: string
+  reminderTime?: string
   durationMinutes?: number
   color?: string
+  icon?: string
   isHeading?: boolean
   subtasks: SubTask[]
   isRecurring?: boolean
@@ -50,6 +52,14 @@ export interface Todo {
   returnDeadline?: string
   notes?: string
 }
+
+export type CalendarTimeframe = "week" | "next-week" | "this-month" | "this-year"
+export type CalendarFilterMode = "all" | "ppl"
+export type RightPageViewMode = "project" | "calendar"
+export type ShortcutType = "NEXT_WEEK" | "NEXT_MONTH" | "NEXT_YEAR" | "PPL"
+
+export type MainViewMode = "standard" | "dual"
+export type DualViewRange = "NEXT_WEEK" | "THIS_MONTH" | "THIS_YEAR" | "PPL"
 
 export interface List {
   id: string
@@ -202,6 +212,29 @@ interface LemonadeStore {
   // Calendar selection
   selectedCalendarDate: string
   setSelectedCalendarDate: (date: string) => void
+  calendarTimeframe: CalendarTimeframe
+  setCalendarTimeframe: (timeframe: CalendarTimeframe) => void
+  calendarFilterMode: CalendarFilterMode
+  setCalendarFilterMode: (mode: CalendarFilterMode) => void
+
+  // Task input mode
+  aiMode: boolean
+  setAiMode: (next: boolean) => void
+
+  // Main (book) layout mode
+  mainViewMode: MainViewMode
+  setMainViewMode: (mode: MainViewMode) => void
+  dualViewRange: DualViewRange | null
+  setDualViewRange: (range: DualViewRange | null) => void
+
+  // Playground (undated inbox) note
+  playgroundNote: string
+  setPlaygroundNote: (note: string) => void
+
+  rightPageViewMode: RightPageViewMode
+  setRightPageViewMode: (mode: RightPageViewMode) => void
+  selectedShortcut: ShortcutType | null
+  setSelectedShortcut: (shortcut: ShortcutType | null) => void
   weekCount: number
   lastSessionDate: string | null
   incrementWeekCount: () => void
@@ -230,6 +263,10 @@ type PersistedLemonadeStore = Partial<
     | 'labelFilterIds'
     | 'collapsedSubtasks'
     | 'sidebarOpen'
+    | 'aiMode'
+    | 'mainViewMode'
+    | 'dualViewRange'
+    | 'playgroundNote'
     | 'weekCount'
     | 'isCalendarExpanded'
     | 'lastSessionDate'
@@ -554,6 +591,9 @@ export const normalizeCalendarDateKey = (value: string | null | undefined) => {
 const toIsoDate = (date: Date) => formatLocalDateKey(date)
 
 const normalizeTodoDate = (value: string | null | undefined) => {
+  if (value === null) {
+    return null
+  }
   const normalized = normalizeCalendarDateKey(value)
 
   if (!normalized) {
@@ -1663,6 +1703,25 @@ export const useLemonadeStore = create<LemonadeStore>()(
       // Calendar selection
       selectedCalendarDate: getInitialCalendarDate(false),
       setSelectedCalendarDate: (date) => set({ selectedCalendarDate: date }),
+      calendarTimeframe: "week",
+      setCalendarTimeframe: (timeframe) => set({ calendarTimeframe: timeframe }),
+      calendarFilterMode: "all",
+      setCalendarFilterMode: (mode) => set({ calendarFilterMode: mode }),
+
+      aiMode: true,
+      setAiMode: (next) => set({ aiMode: next }),
+
+      mainViewMode: "standard",
+      setMainViewMode: (mode) => set({ mainViewMode: mode }),
+      dualViewRange: null,
+      setDualViewRange: (range) => set({ dualViewRange: range }),
+      playgroundNote: "",
+      setPlaygroundNote: (note) => set({ playgroundNote: note }),
+
+      rightPageViewMode: "project",
+      setRightPageViewMode: (mode) => set({ rightPageViewMode: mode }),
+      selectedShortcut: null,
+      setSelectedShortcut: (shortcut) => set({ selectedShortcut: shortcut }),
       weekCount: 1,
       lastSessionDate: null,
       incrementWeekCount: () => set({ weekCount: 1 }),
@@ -1675,7 +1734,10 @@ export const useLemonadeStore = create<LemonadeStore>()(
       // Recurring todos
       generateRecurringInstances: () => {
         const state = get()
-        const recurringParents = state.calendarTodos.filter((todo) => todo.isRecurring && !todo.parentId)
+        const recurringParents = state.calendarTodos.filter(
+          (todo): todo is Todo & { date: string } =>
+            todo.isRecurring === true && !todo.parentId && typeof todo.date === "string"
+        )
         const generationStart = startOfDay(new Date())
         const generationEnd = addDays(generationStart, RECURRING_GENERATION_DAYS)
         let currentTodos = [...state.calendarTodos]
@@ -1847,6 +1909,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
               !todo.isRecurring &&
               !todo.parentId &&
               !todo.isHeading &&
+              typeof todo.date === "string" &&
               todo.date < todayStr
             ) {
               movedCount += 1

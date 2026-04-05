@@ -64,7 +64,7 @@ export function PrintPreviewDialog({ selectedDate }: PrintPreviewDialogProps) {
       id: todo.id,
       source: "calendar",
       title: todo.text,
-      date: todo.date,
+      date: todo.date ?? "",
       time: todo.time,
       completed: todo.completed,
       priority: todo.priority,
@@ -77,7 +77,7 @@ export function PrintPreviewDialog({ selectedDate }: PrintPreviewDialogProps) {
         id: `${list.id}:${todo.id}`,
         source: list.type === "shopping-returns" ? "shopping-returns" : "list",
         title: todo.text,
-        date: list.type === "shopping-returns" ? todo.returnDeadline ?? todo.date : todo.date,
+        date: (list.type === "shopping-returns" ? todo.returnDeadline ?? todo.date : todo.date) ?? "",
         time: todo.time,
         completed: todo.completed,
         priority: todo.priority,
@@ -93,6 +93,7 @@ export function PrintPreviewDialog({ selectedDate }: PrintPreviewDialogProps) {
       .filter((entry) => {
         if (!includeBottomListItems && entry.source === "list") return false
         if (!includeShoppingReturns && entry.source === "shopping-returns") return false
+        if (!entry.date) return false
         if (entry.date < fromDate || entry.date > toDate) return false
         if (selectedLabelIds.length > 0 && !entry.labelIds.some((labelId) => selectedLabelIds.includes(labelId))) return false
         if (priorityFilter !== "all" && entry.priority !== priorityFilter) return false

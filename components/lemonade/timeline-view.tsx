@@ -691,7 +691,7 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
             <ChevronLeft className="size-4" />
           </Button>
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Timeline</div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Calendar</div>
             <div className="font-heading text-[20px] leading-[20px]">{formatHeadingDate(date)}</div>
           </div>
           <Button variant="ghost" size="icon" onClick={() => onNavigate("next-day")} className="size-8">

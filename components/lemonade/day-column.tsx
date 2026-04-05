@@ -18,6 +18,7 @@ import { TodoItem } from "./todo-item"
 import { format, isValid, parseISO } from "date-fns"
 import { Check } from "lucide-react"
 import { toast } from "sonner"
+import { IconPicker } from "./icon-picker"
 
 interface DayColumnProps {
   date: Date
@@ -88,6 +89,7 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
   const labels = useLemonadeStore((state) => state.labels)
   const [newTodoText, setNewTodoText] = useState("")
   const [isAdding, setIsAdding] = useState(false)
+  const [newTodoIcon, setNewTodoIcon] = useState<string | undefined>(undefined)
   const [isDragOver, setIsDragOver] = useState(false)
   const [draggedTodoId, setDraggedTodoId] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -123,6 +125,7 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
 
   const handleStartAdding = () => {
     setIsAdding(true)
+    setNewTodoIcon(undefined)
     requestAnimationFrame(() => {
       inputRef.current?.focus()
     })
@@ -194,6 +197,7 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
           priority: parsedTask.priority,
           labelIds,
           subtasks: parsedTask.subtaskTitles.map((subtaskTitle) => ({ title: subtaskTitle })),
+          icon: newTodoIcon,
           isSyncing: true,
           syncStatus: undefined,
         })
@@ -306,6 +310,7 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
       })
 
     setNewTodoText("")
+    setNewTodoIcon(undefined)
     clearLastCreatedTodoId()
     return true
   }
@@ -383,6 +388,9 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
                     <input
                       ref={inputRef}
                       type="text"
+                      spellCheck
+                      autoCorrect="on"
+                      autoCapitalize="sentences"
                       value={newTodoText}
                       onChange={(e) => setNewTodoText(e.target.value)}
                       onKeyDown={async (e) => {
@@ -397,6 +405,7 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
                         } else if (e.key === "Escape") {
                           setIsAdding(false)
                           setNewTodoText("")
+                          setNewTodoIcon(undefined)
                         }
                       }}
                       onBlur={async () => {
@@ -404,11 +413,14 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
                         setIsAdding(false)
                       }}
                       className={cn(
-                        "w-full bg-transparent px-0 pr-7 outline-none font-task",
+                        "w-full bg-transparent px-0 pr-14 outline-none font-task",
                         textSizeClass
                       )}
                       placeholder="Add a todo..."
                     />
+                    <div className="absolute right-7 top-1/2 -translate-y-1/2">
+                      <IconPicker value={newTodoIcon} onChange={setNewTodoIcon} className="size-7" />
+                    </div>
                     {newTodoText.trim() ? (
                       <button
                         type="button"

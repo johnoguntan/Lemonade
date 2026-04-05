@@ -19,8 +19,8 @@ import { toast } from "sonner"
 
 interface FooterProps {
   onNavigate?: (direction: 'prev-week' | 'next-week' | 'prev-day' | 'next-day' | 'today') => void
-  viewMode?: "calendar" | "timeline" | "today"
-  onViewModeChange?: (mode: "calendar" | "timeline" | "today") => void
+  viewMode?: "calendar" | "today"
+  onViewModeChange?: (mode: "calendar" | "today") => void
 }
 
 export function Footer({ onNavigate, viewMode = "calendar", onViewModeChange }: FooterProps) {

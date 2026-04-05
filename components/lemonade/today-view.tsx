@@ -49,11 +49,13 @@ const sortDueTodos = (todos: Todo[]) =>
 
 export const getTodayViewBuckets = (todos: Todo[], showCompleted: boolean, todayKey: string) => {
   const overdue = todos.filter((todo) => {
+    if (!todo.date) return false
     if (todo.date >= todayKey) return false
     if (todo.completed) return false
     return true
   })
   const today = todos.filter((todo) => {
+    if (!todo.date) return false
     if (todo.date !== todayKey) return false
     if (!showCompleted && todo.completed) return false
     return true
