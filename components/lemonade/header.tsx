@@ -18,7 +18,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar"
 import { cn } from "@/lib/utils"
 import { aiParseTasks } from "@/lib/ai-task-parser"
-import { ReminderTimeWheel } from "./reminder-time-wheel"
 import { IconPicker } from "./icon-picker"
 import {
   createOptimisticTodoId,
@@ -59,7 +58,7 @@ const splitNaturalTitleFallback = (input: string, index: number) =>
     .map((fragment) => fragment.trim())
     .filter(Boolean)[index] ?? input.trim()
 
-export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange }: HeaderProps) {
+export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _onViewModeChange }: HeaderProps) {
   const {
     addCalendarTodo,
     updateCalendarTodo,
@@ -67,21 +66,18 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange }: 
     labels,
     calendarTodos,
     selectedCalendarDate,
-    setSelectedCalendarDate,
-    setCalendarTimeframe,
-    setCalendarFilterMode,
-    setRightPageViewMode,
     aiMode,
-    setMainViewMode,
-    setDualViewRange,
     quickAddSessionTodoIds,
     startQuickAddSession,
     endQuickAddSession,
   } = useLemonadeStore()
   const [quickAddText, setQuickAddText] = useState("")
   const [quickAddExpanded, setQuickAddExpanded] = useState(false)
+  const [draftDateKey, setDraftDateKey] = useState<string | null>(selectedCalendarDate)
+  const [draftTime, setDraftTime] = useState<string>("")
   const [showReminderPopover, setShowReminderPopover] = useState(false)
-  const [draftReminderTime, setDraftReminderTime] = useState<string | undefined>(undefined)
+  const [draftReminderOffsetMinutes, setDraftReminderOffsetMinutes] = useState<number | null>(null)
+  const [draftReminderCustomMinutes, setDraftReminderCustomMinutes] = useState<string>("")
   const [showLinkInput, setShowLinkInput] = useState(false)
   const [draftLink, setDraftLink] = useState("")
   const [draftAttachments, setDraftAttachments] = useState<Array<{ name: string; type: string; size: number; lastModified: number }>>([])
@@ -107,32 +103,8 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange }: 
       ? [todayKey]
       : getVisibleDateKeys(currentDate)
 
-  const openStandardWeekAt = (dateKey: string) => {
-    setMainViewMode("standard")
-    setDualViewRange(null)
-    setCalendarFilterMode("all")
-    setCalendarTimeframe("week")
-    setSelectedCalendarDate(dateKey)
-    setRightPageViewMode("project")
-    onViewModeChange("calendar")
-  }
-
-  const openDualRange = (range: "NEXT_WEEK" | "THIS_MONTH" | "THIS_YEAR" | "PPL") => {
-    setMainViewMode("dual")
-    setDualViewRange(range)
-    setCalendarFilterMode("all")
-    if (range === "NEXT_WEEK") {
-      setCalendarTimeframe("next-week")
-    } else if (range === "THIS_MONTH") {
-      setCalendarTimeframe("this-month")
-    } else if (range === "THIS_YEAR") {
-      setCalendarTimeframe("this-year")
-    } else {
-      setCalendarTimeframe("week")
-      setSelectedCalendarDate(todayKey)
-    }
-    onViewModeChange("calendar")
-  }
+  // Note: shortcuts in this header are for setting the *new task's* date (draftDateKey),
+  // not for navigating the calendar.
 
   const draftNotes = useMemo(() => {
     const lines: string[] = []
@@ -155,7 +127,9 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange }: 
 
   const resetPerTaskDraft = () => {
     setShowReminderPopover(false)
-    setDraftReminderTime(undefined)
+    setDraftReminderOffsetMinutes(null)
+    setDraftReminderCustomMinutes("")
+    setDraftTime("")
     setShowLinkInput(false)
     setDraftLink("")
     setDraftAttachments([])
@@ -181,9 +155,12 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange }: 
   useEffect(() => {
     if (quickAddExpanded) {
       startQuickAddSession()
+      setDraftDateKey(selectedCalendarDate)
+      setDraftTime("")
     } else if (wasExpandedRef.current) {
       endQuickAddSession()
       resetPerTaskDraft()
+      setDraftDateKey(selectedCalendarDate)
     }
     wasExpandedRef.current = quickAddExpanded
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -229,7 +206,8 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange }: 
         id: createOptimisticTodoId("header"),
         text: title,
         completed: false,
-        date: selectedCalendarDate,
+        date: draftDateKey,
+        time: draftTime.trim() ? draftTime.trim() : undefined,
         isHeading: title === title.toUpperCase() && title.length > 2,
         priority: draftPriority,
         labelIds: draftLabelIds,
@@ -237,7 +215,7 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange }: 
         color: draftColor,
         icon: draftIcon,
         notes: draftNotes,
-        reminderTime: draftReminderTime,
+        reminderOffsetMinutes: draftReminderOffsetMinutes,
         isSyncing: false,
         syncStatus: undefined,
       })
@@ -262,13 +240,15 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange }: 
           ...draftLabelIds,
         ]))
         const tempId = createOptimisticTodoId("header")
-        const optimisticDate = parsedTask.scheduledDate ?? today
+        const optimisticDate = parsedTask.scheduledDate ?? draftDateKey ?? today
+        const optimisticTime = parsedTask.time ?? (draftTime.trim() ? draftTime.trim() : undefined)
 
         addCalendarTodo({
           id: tempId,
           text: title,
           completed: false,
           date: optimisticDate,
+          time: optimisticTime,
           isHeading: title === title.toUpperCase() && title.length > 2,
           priority: draftPriority !== "none" ? draftPriority : parsedTask.priority,
           labelIds,
@@ -276,7 +256,7 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange }: 
           color: draftColor,
           icon: draftIcon,
           notes: draftNotes,
-          reminderTime: draftReminderTime,
+          reminderOffsetMinutes: draftReminderOffsetMinutes,
           isSyncing: true,
           syncStatus: undefined,
         })
@@ -324,7 +304,14 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange }: 
           updateCalendarTodo(tempId, {
             text: aiTitle,
             date: resolvedDate,
-            time: typeof primaryTask.time === "string" && primaryTask.time ? primaryTask.time : undefined,
+            time:
+              typeof primaryTask.time === "string" && primaryTask.time.trim()
+                ? primaryTask.time.trim()
+                : parsedTask.time
+                  ? parsedTask.time
+                  : draftTime.trim()
+                    ? draftTime.trim()
+                    : undefined,
             isHeading: aiTitle === aiTitle.toUpperCase() && aiTitle.length > 2,
             isSyncing: false,
             syncStatus: undefined,
@@ -355,13 +342,22 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange }: 
       className="lemonade-header flex w-full items-center"
       style={{ borderTopColor: "var(--accent-color)" }}
     >
-      <div className="w-full">
+      <div className="relative w-full">
         {/* Input pill */}
-        <div className="flex w-full items-center gap-2 rounded-full border border-border/45 bg-background/55 px-6 py-3 backdrop-blur-[10px] dark:bg-[rgba(19,19,19,0.42)]">
+        <div
+          className="flex w-full items-center gap-2 rounded-full border border-border/45 bg-background/55 px-6 py-3 backdrop-blur-[10px] dark:bg-[rgba(19,19,19,0.42)]"
+          onMouseDown={(event) => {
+            const target = event.target as HTMLElement
+            // Don't auto-expand when interacting with the buttons (chevron/calendar).
+            if (target.closest("button")) return
+            setQuickAddExpanded(true)
+          }}
+        >
           <Input
             placeholder="Add tasks here in natural language"
             value={quickAddText}
             onChange={(e) => setQuickAddText(e.target.value)}
+            onFocus={() => setQuickAddExpanded(true)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 handleQuickAddSubmit()
@@ -412,25 +408,73 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange }: 
               collisionPadding={12}
               className="z-50 w-auto max-w-[calc(100vw-24px)] rounded-2xl border-0 p-0 shadow-[0_10px_30px_rgba(0,0,0,0.12)]"
             >
-              <Calendar
-                mode="single"
-                selected={parseLocalDateKey(selectedCalendarDate)}
-                month={shortcutPickerMonth}
-                onMonthChange={setShortcutPickerMonth}
-                onSelect={(date) => {
-                  if (!date) return
-                  setShowShortcutDatePopover(false)
-                  openStandardWeekAt(formatLocalDateKey(date))
-                }}
-                initialFocus
-              />
+              <div className="p-3">
+                <Calendar
+                  mode="single"
+                  selected={draftDateKey ? parseLocalDateKey(draftDateKey) : undefined}
+                  month={shortcutPickerMonth}
+                  onMonthChange={setShortcutPickerMonth}
+                  onSelect={(date) => {
+                    if (!date) return
+                    setDraftDateKey(formatLocalDateKey(date))
+                  }}
+                  initialFocus
+                />
+
+                <div className="mt-3 flex items-center gap-2">
+                  <Input
+                    type="time"
+                    value={draftTime}
+                    onChange={(event) => setDraftTime(event.target.value)}
+                    className="h-9"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-9 text-muted-foreground hover:text-foreground"
+                    aria-label="Clear time"
+                    title="Clear time"
+                    onClick={() => setDraftTime("")}
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </div>
+
+                <div className="mt-3 flex items-center justify-between">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8"
+                    onClick={() => setDraftDateKey(null)}
+                  >
+                    No date
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8"
+                    onClick={() => setShowShortcutDatePopover(false)}
+                  >
+                    Done
+                  </Button>
+                </div>
+              </div>
             </PopoverContent>
           </Popover>
         </div>
 
         {/* Expanded panel */}
         {quickAddExpanded ? (
-          <div className="mt-2 w-full rounded-2xl border border-border/35 bg-[rgba(255,255,255,0.34)] px-4 py-4 text-foreground backdrop-blur-[12px] dark:bg-[rgba(19,19,19,0.36)]">
+          <div
+            className={cn(
+              "absolute left-0 right-0 top-full z-50 mt-2",
+              "rounded-2xl border border-border/35 bg-[rgba(255,255,255,0.34)] px-4 py-4 text-foreground backdrop-blur-[12px] shadow-[0_18px_50px_rgba(0,0,0,0.18)]",
+              "dark:bg-[rgba(19,19,19,0.36)]"
+            )}
+            style={{ maxHeight: "min(520px, calc(100vh - 220px))", overflowY: "auto" }}
+          >
             {/* Top: Saved + shortcuts in ONE container */}
             <div className="flex w-full min-w-0 items-start gap-6">
               {/* Saved */}
@@ -469,40 +513,58 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange }: 
                 {(() => {
                   const base = new Date()
                   base.setHours(0, 0, 0, 0)
-                  const nextDays = [1, 2, 3].map((offset) => addDays(base, offset))
+                  const tomorrow = addDays(base, 1)
+                  const dayAfterTomorrow = addDays(base, 2)
+                  const twoDaysAfter = addDays(base, 3)
+
+                  const nextWeekStart = (() => {
+                    const day = base.getDay()
+                    const daysUntilNextMonday = ((8 - day) % 7) || 7
+                    return addDays(base, daysUntilNextMonday)
+                  })()
+
+                  const nextMonthStart = new Date(base.getFullYear(), base.getMonth() + 1, 1)
 
                   const itemClass =
                     "inline-flex w-auto items-center justify-end whitespace-nowrap rounded-lg px-2 py-1.5 text-right text-[12px] transition-colors hover:bg-muted"
 
                   return (
                     <div className="flex flex-col items-end gap-1 text-muted-foreground">
-                      {nextDays.map((date) => (
-                        <button
-                          key={formatLocalDateKey(date)}
-                          type="button"
-                          className={cn(itemClass, "self-end")}
-                          onClick={() => openStandardWeekAt(formatLocalDateKey(date))}
-                        >
-                          <span className="text-foreground">{date.toLocaleDateString("en-US", { weekday: "long" })}</span>
-                        </button>
-                      ))}
+                      <button
+                        type="button"
+                        className={cn(itemClass, "self-end")}
+                        onClick={() => setDraftDateKey(formatLocalDateKey(tomorrow))}
+                      >
+                        <span className="text-foreground">Tomorrow</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(itemClass, "self-end")}
+                        onClick={() => setDraftDateKey(formatLocalDateKey(dayAfterTomorrow))}
+                      >
+                        <span className="text-foreground">Day After Tomorrow</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(itemClass, "self-end")}
+                        onClick={() => setDraftDateKey(formatLocalDateKey(twoDaysAfter))}
+                      >
+                        <span className="text-foreground">2 Days After</span>
+                      </button>
 
                       <div className="my-1 h-px w-full bg-border/50" />
 
-                      <button type="button" className={cn(itemClass, "self-end")} onClick={() => openStandardWeekAt(todayKey)}>
-                        <span className="text-foreground">This week</span>
+                      <button type="button" className={cn(itemClass, "self-end")} onClick={() => setDraftDateKey(selectedCalendarDate)}>
+                        <span className="text-foreground">This Week</span>
                       </button>
-                      <button type="button" className={cn(itemClass, "self-end")} onClick={() => openDualRange("NEXT_WEEK")}>
-                        <span className="text-foreground">Next week</span>
+                      <button type="button" className={cn(itemClass, "self-end")} onClick={() => setDraftDateKey(formatLocalDateKey(nextWeekStart))}>
+                        <span className="text-foreground">Next Week</span>
                       </button>
-                      <button type="button" className={cn(itemClass, "self-end")} onClick={() => openDualRange("THIS_MONTH")}>
-                        <span className="text-foreground">This month</span>
+                      <button type="button" className={cn(itemClass, "self-end")} onClick={() => setDraftDateKey(formatLocalDateKey(nextMonthStart))}>
+                        <span className="text-foreground">Next Month</span>
                       </button>
-                      <button type="button" className={cn(itemClass, "self-end")} onClick={() => openDualRange("THIS_YEAR")}>
-                        <span className="text-foreground">This year</span>
-                      </button>
-                      <button type="button" className={cn(itemClass, "self-end")} onClick={() => openDualRange("PPL")}>
-                        <span className="text-foreground">Playground</span>
+                      <button type="button" className={cn(itemClass, "self-end")} onClick={() => setDraftDateKey(null)}>
+                        <span className="text-foreground">No Date</span>
                       </button>
                     </div>
                   )
@@ -521,7 +583,7 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange }: 
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className={cn("size-8 hover:text-foreground", draftReminderTime && "text-foreground")}
+                    className={cn("size-8 hover:text-foreground", draftReminderOffsetMinutes !== null && "text-foreground")}
                     aria-label="Add reminder"
                   >
                     <Bell className="size-4" />
@@ -531,24 +593,72 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange }: 
                   align="start"
                   side="bottom"
                   sideOffset={10}
-                  className="z-50 w-[320px] border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
+                  className="z-50 w-[260px] border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
                 >
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                        Reminder
-                      </div>
-                      {draftReminderTime ? (
-                        <button
-                          type="button"
-                          onClick={() => setDraftReminderTime(undefined)}
-                          className="text-[10px] font-medium text-foreground/80 hover:text-foreground"
-                        >
-                          Clear
-                        </button>
-                      ) : null}
+                  <div className="space-y-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                      Alert
                     </div>
-                    <ReminderTimeWheel value={draftReminderTime} onChange={setDraftReminderTime} />
+
+                    {[
+                      { label: "None", value: null },
+                      { label: "At time of event", value: 0 },
+                      { label: "5 minutes before", value: 5 },
+                      { label: "10 minutes before", value: 10 },
+                      { label: "15 minutes before", value: 15 },
+                      { label: "30 minutes before", value: 30 },
+                      { label: "1 hour before", value: 60 },
+                      { label: "2 hours before", value: 120 },
+                      { label: "1 day before", value: 1440 },
+                      { label: "2 days before", value: 2880 },
+                    ].map((option) => {
+                      const active = draftReminderOffsetMinutes === option.value
+                      return (
+                        <button
+                          key={option.label}
+                          type="button"
+                          onClick={() => {
+                            setDraftReminderOffsetMinutes(option.value)
+                            setDraftReminderCustomMinutes("")
+                            setShowReminderPopover(false)
+                          }}
+                          className={cn(
+                            "flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-[13px] transition-colors hover:bg-muted",
+                            active && "bg-[#e54848] text-white hover:bg-[#e54848]"
+                          )}
+                        >
+                          <span className="font-medium">{option.label}</span>
+                          {active ? <span className="text-[12px]">✓</span> : null}
+                        </button>
+                      )
+                    })}
+
+                    <div className="my-2 h-px bg-border/50" />
+
+                    <div className="text-[12px] text-muted-foreground">Custom…</div>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        inputMode="numeric"
+                        placeholder="Minutes before"
+                        value={draftReminderCustomMinutes}
+                        onChange={(event) => setDraftReminderCustomMinutes(event.target.value.replace(/[^\d]/g, ""))}
+                        className="h-9"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-9"
+                        onClick={() => {
+                          const minutes = Number(draftReminderCustomMinutes)
+                          if (!Number.isFinite(minutes) || minutes < 0) return
+                          setDraftReminderOffsetMinutes(minutes)
+                          setShowReminderPopover(false)
+                        }}
+                      >
+                        Apply
+                      </Button>
+                    </div>
                   </div>
                 </PopoverContent>
               </Popover>

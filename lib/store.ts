@@ -34,6 +34,9 @@ export interface Todo {
   syncStatus?: 'local'
   time?: string
   reminderTime?: string
+  // Minutes before the task "event time" (todo.time) to alert.
+  // 0 = at time of event. Undefined/null = no reminder.
+  reminderOffsetMinutes?: number | null
   reminderConfig?: {
     oneOffs: Array<{ id: string; date: string; time: string }>
     intervals: Array<{
