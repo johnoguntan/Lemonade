@@ -105,14 +105,14 @@ export default function Home() {
     }
 
     if (calendarTimeframe === "this-month") {
-      const today = new Date()
-      const start = new Date(today.getFullYear(), today.getMonth(), 1)
+      const anchor = parseLocalDateKey(selectedCalendarDate)
+      const start = new Date(anchor.getFullYear(), anchor.getMonth(), 1)
       return formatLocalDateKey(start)
     }
 
     if (calendarTimeframe === "this-year") {
-      const today = new Date()
-      const start = new Date(today.getFullYear(), 0, 1)
+      const anchor = parseLocalDateKey(selectedCalendarDate)
+      const start = new Date(anchor.getFullYear(), 0, 1)
       return formatLocalDateKey(start)
     }
 
@@ -252,7 +252,7 @@ export default function Home() {
             msOverflowStyle: "none",
           }}
         >
-          <div style={{ marginTop: "8px", marginBottom: "12px" }}>
+          <div style={{ marginTop: "28px", marginBottom: "12px" }}>
             <Header onNavigate={handleNavigate} viewMode={viewMode} onViewModeChange={handleViewModeChange} />
           </div>
           <ErrorBoundary>

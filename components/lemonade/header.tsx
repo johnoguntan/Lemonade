@@ -1,11 +1,21 @@
 "use client"
 
-import { Search, Plus, Rows3, SunMedium, X, ChevronDown, Bell, Link2, Paperclip, ListChecks, Palette, Calendar as CalendarIcon } from "lucide-react"
+import {
+  X,
+  ChevronDown,
+  Bell,
+  Link2,
+  Paperclip,
+  ListChecks,
+  Palette,
+  Calendar as CalendarIcon,
+  Tag,
+  AlertTriangle,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
-import { PrintPreviewDialog } from "./print-preview-dialog"
 import { cn } from "@/lib/utils"
 import { aiParseTasks } from "@/lib/ai-task-parser"
 import { ReminderTimeWheel } from "./reminder-time-wheel"
@@ -13,17 +23,14 @@ import { IconPicker } from "./icon-picker"
 import {
   createOptimisticTodoId,
   formatLocalDateKey,
-  localTaskParser,
   normalizeCalendarDateKey,
   parseNaturalLanguageTaskEntries,
   parseLocalDateKey,
   reconcileOptimisticTaskOrder,
   useLemonadeStore,
-  type NaturalLanguagePreviewToken,
 } from "@/lib/store"
 import { format, isValid, parseISO } from "date-fns"
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
-import { getTodayViewBuckets } from "./today-view"
 import { toast } from "sonner"
 
 interface HeaderProps {
@@ -52,34 +59,25 @@ const splitNaturalTitleFallback = (input: string, index: number) =>
     .map((fragment) => fragment.trim())
     .filter(Boolean)[index] ?? input.trim()
 
-export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) {
+export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange }: HeaderProps) {
   const {
-    searchQuery,
-    setSearchQuery,
     addCalendarTodo,
     updateCalendarTodo,
     ensureLabelIds,
     labels,
     calendarTodos,
-    preferences,
-    labelFilterIds,
-    toggleLabelFilter,
-    clearLabelFilters,
-    activeFilterColor,
-    setActiveFilterColor,
-    setPreferences,
     selectedCalendarDate,
     setSelectedCalendarDate,
     setCalendarTimeframe,
     setCalendarFilterMode,
     setRightPageViewMode,
     aiMode,
-    setAiMode,
     setMainViewMode,
     setDualViewRange,
+    quickAddSessionTodoIds,
+    startQuickAddSession,
+    endQuickAddSession,
   } = useLemonadeStore()
-  const [showSearch, setShowSearch] = useState(false)
-  const [showQuickAdd, setShowQuickAdd] = useState(false)
   const [quickAddText, setQuickAddText] = useState("")
   const [quickAddExpanded, setQuickAddExpanded] = useState(false)
   const [showReminderPopover, setShowReminderPopover] = useState(false)
@@ -91,57 +89,23 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
   const [showSubtaskInput, setShowSubtaskInput] = useState(false)
   const [draftSubtasks, setDraftSubtasks] = useState<string[]>([])
   const [draftSubtaskText, setDraftSubtaskText] = useState("")
+  const [showPriorityPopover, setShowPriorityPopover] = useState(false)
+  const [draftPriority, setDraftPriority] = useState<"high" | "medium" | "low" | "none">("none")
+  const [showLabelPopover, setShowLabelPopover] = useState(false)
+  const [draftLabelIds, setDraftLabelIds] = useState<string[]>([])
   const [showDraftColorPopover, setShowDraftColorPopover] = useState(false)
   const [draftColor, setDraftColor] = useState<string | undefined>(undefined)
   const [draftIcon, setDraftIcon] = useState<string | undefined>(undefined)
   const [showShortcutDatePopover, setShowShortcutDatePopover] = useState(false)
-  const [showColorPopover, setShowColorPopover] = useState(false)
-  const [newPaletteColor, setNewPaletteColor] = useState("#fef08a")
   const currentDate = parseLocalDateKey(selectedCalendarDate)
   const [shortcutPickerMonth, setShortcutPickerMonth] = useState<Date>(currentDate)
 
-  const parsedQuickAdd = localTaskParser(quickAddText, { labels })
-  const palette = preferences.colorPalette ?? []
   const todayKey = formatLocalDateKey(new Date())
-  const todayFilteredTodos = calendarTodos.filter((todo) => {
-    if (searchQuery && !todo.text.toLowerCase().includes(searchQuery.toLowerCase())) return false
-    if (labelFilterIds.length > 0 && !todo.labelIds.some((labelId) => labelFilterIds.includes(labelId))) return false
-    if (activeFilterColor && todo.color !== activeFilterColor) return false
-    return true
-  })
-  const todayBuckets = getTodayViewBuckets(todayFilteredTodos, preferences.showCompleted, todayKey)
-  const todayCount = todayBuckets.overdue.length + todayBuckets.today.length
 
-  const visibleDates = getVisibleDateKeys(currentDate)
   const currentlyVisibleDateKeys =
     viewMode === "today"
       ? [todayKey]
-      : visibleDates
-
-  const visibleTodos = calendarTodos.filter((todo) => visibleDates.includes(todo.date))
-  const colorUsage = visibleTodos.reduce<Record<string, number>>((usage, todo) => {
-    if (!todo.color) {
-      return usage
-    }
-
-    usage[todo.color] = (usage[todo.color] ?? 0) + 1
-    return usage
-  }, {})
-  const usedColors = Object.entries(colorUsage)
-
-  const getColorLabel = (hex: string) => {
-    const knownNames: Record<string, string> = {
-      "#fef08a": "Yellow",
-      "#bbf7d0": "Green",
-      "#bfdbfe": "Blue",
-      "#fbcfe8": "Pink",
-      "#fed7aa": "Orange",
-    }
-
-    return knownNames[hex.toLowerCase()] ?? hex.toUpperCase()
-  }
-
-  const isSelectedDateToday = selectedCalendarDate === todayKey
+      : getVisibleDateKeys(currentDate)
 
   const openStandardWeekAt = (dateKey: string) => {
     setMainViewMode("standard")
@@ -170,10 +134,6 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
     onViewModeChange("calendar")
   }
 
-  const goToDefaultView = () => {
-    openStandardWeekAt(todayKey)
-  }
-
   const draftNotes = useMemo(() => {
     const lines: string[] = []
     const trimmedLink = draftLink.trim()
@@ -187,8 +147,13 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
     return joined ? joined : undefined
   }, [draftAttachments, draftLink])
 
-  const resetQuickAddDraft = () => {
-    setQuickAddExpanded(false)
+  const sessionTodos = useMemo(() => {
+    if (quickAddSessionTodoIds.length === 0) return []
+    const map = new Map(calendarTodos.map((todo) => [todo.id, todo] as const))
+    return quickAddSessionTodoIds.map((id) => map.get(id)).filter(Boolean)
+  }, [calendarTodos, quickAddSessionTodoIds])
+
+  const resetPerTaskDraft = () => {
     setShowReminderPopover(false)
     setDraftReminderTime(undefined)
     setShowLinkInput(false)
@@ -197,17 +162,33 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
     setShowSubtaskInput(false)
     setDraftSubtasks([])
     setDraftSubtaskText("")
+    setShowPriorityPopover(false)
+    setDraftPriority("none")
+    setShowLabelPopover(false)
+    setDraftLabelIds([])
     setShowDraftColorPopover(false)
     setDraftColor(undefined)
     setDraftIcon(undefined)
   }
 
   const closeQuickAdd = () => {
-    setShowQuickAdd(false)
+    setQuickAddExpanded(false)
     setQuickAddText("")
-    resetQuickAddDraft()
+    resetPerTaskDraft()
   }
 
+  const wasExpandedRef = useRef(false)
+  useEffect(() => {
+    if (quickAddExpanded) {
+      startQuickAddSession()
+    } else if (wasExpandedRef.current) {
+      endQuickAddSession()
+      resetPerTaskDraft()
+    }
+    wasExpandedRef.current = quickAddExpanded
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quickAddExpanded])
+  
   const handleAttachmentPick = (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? [])
     if (files.length === 0) {
@@ -227,26 +208,11 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
     setDraftSubtaskText("")
   }
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "/") {
-        return
-      }
-
-      const target = event.target as HTMLElement | null
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
-        return
-      }
-
-      event.preventDefault()
-      setShowSearch(false)
-      resetQuickAddDraft()
-      setShowQuickAdd(true)
-    }
-
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [])
+  const toggleDraftLabelId = (labelId: string) => {
+    setDraftLabelIds((current) => (
+      current.includes(labelId) ? current.filter((id) => id !== labelId) : [...current, labelId]
+    ))
+  }
 
   const handleQuickAddSubmit = async () => {
     const rawInputString = quickAddText
@@ -265,7 +231,8 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
         completed: false,
         date: selectedCalendarDate,
         isHeading: title === title.toUpperCase() && title.length > 2,
-        labelIds: [],
+        priority: draftPriority,
+        labelIds: draftLabelIds,
         subtasks: draftSubtasks.map((subtaskTitle) => ({ title: subtaskTitle })),
         color: draftColor,
         icon: draftIcon,
@@ -275,7 +242,8 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
         syncStatus: undefined,
       })
 
-      closeQuickAdd()
+      setQuickAddText("")
+      resetPerTaskDraft()
       return
     }
 
@@ -291,6 +259,7 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
         const labelIds = Array.from(new Set([
           ...parsedTask.labelIds,
           ...ensureLabelIds(parsedTask.newLabelNames),
+          ...draftLabelIds,
         ]))
         const tempId = createOptimisticTodoId("header")
         const optimisticDate = parsedTask.scheduledDate ?? today
@@ -301,7 +270,7 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
           completed: false,
           date: optimisticDate,
           isHeading: title === title.toUpperCase() && title.length > 2,
-          priority: parsedTask.priority,
+          priority: draftPriority !== "none" ? draftPriority : parsedTask.priority,
           labelIds,
           subtasks: [...parsedTask.subtaskTitles, ...draftSubtasks].map((subtaskTitle) => ({ title: subtaskTitle })),
           color: draftColor,
@@ -377,337 +346,126 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
         window.clearTimeout(timeoutId)
       })
 
-    closeQuickAdd()
+    setQuickAddText("")
+    resetPerTaskDraft()
   }
 
   return (
     <header
-      className="lemonade-header flex w-[calc(100%+20px)] -mx-[10px] items-center justify-between rounded-2xl border border-border/45 border-t-2 bg-background/55 px-4 py-3 backdrop-blur-[10px] dark:bg-[rgba(19,19,19,0.42)]"
+      className="lemonade-header flex w-full items-center"
       style={{ borderTopColor: "var(--accent-color)" }}
     >
-      <div className="flex flex-1 items-center gap-2">
-        {showQuickAdd ? (
-          <div className="flex w-full min-w-0 flex-1 items-stretch gap-3">
-            {/* Left: input + icons */}
-            <div className="flex min-w-0 flex-1 flex-col rounded-xl border border-border/35 bg-[rgba(255,255,255,0.34)] px-4 py-2 text-muted-foreground backdrop-blur-[12px] dark:bg-[rgba(19,19,19,0.36)]">
-              <div className="flex h-10 items-center gap-3">
-                <Plus className="size-[15px] shrink-0" />
-                <Input
-                  placeholder={aiMode ? 'AI Mode: try “Call John tomorrow 2pm”' : "Manual: add a task"}
-                  value={quickAddText}
-                  onChange={(e) => setQuickAddText(e.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      handleQuickAddSubmit()
-                    } else if (event.key === "Escape") {
-                      closeQuickAdd()
-                    }
-                  }}
-                  className="h-auto w-full min-w-0 flex-1 border-0 bg-transparent px-0 py-0 text-[12px] text-foreground shadow-none focus-visible:ring-0"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setAiMode(!aiMode)}
-                  className={cn(
-                    "h-7 shrink-0 rounded-full px-2 text-[11px] font-semibold",
-                    aiMode
-                      ? "bg-foreground text-background hover:bg-foreground hover:text-background"
-                      : "text-muted-foreground hover:text-foreground"
+      <div className="w-full">
+        {/* Input pill */}
+        <div className="flex w-full items-center gap-2 rounded-full border border-border/45 bg-background/55 px-6 py-3 backdrop-blur-[10px] dark:bg-[rgba(19,19,19,0.42)]">
+          <Input
+            placeholder="Add tasks here in natural language"
+            value={quickAddText}
+            onChange={(e) => setQuickAddText(e.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                handleQuickAddSubmit()
+              } else if (event.key === "Escape") {
+                closeQuickAdd()
+              }
+            }}
+            className="h-auto w-full min-w-0 flex-1 rounded-full border-0 bg-transparent px-0 py-0 text-[14px] text-foreground shadow-none focus-visible:ring-0"
+          />
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => setQuickAddExpanded((expanded) => !expanded)}
+            className="size-9 rounded-full text-muted-foreground hover:text-foreground"
+            aria-label={quickAddExpanded ? "Collapse" : "Expand"}
+            title={quickAddExpanded ? "Collapse" : "Expand"}
+          >
+            <ChevronDown className={cn("size-4 transition-transform", quickAddExpanded && "rotate-180")} />
+          </Button>
+
+          <Popover
+            open={showShortcutDatePopover}
+            onOpenChange={(open) => {
+              setShowShortcutDatePopover(open)
+              if (open) {
+                setShortcutPickerMonth(parseLocalDateKey(selectedCalendarDate))
+              }
+            }}
+          >
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-9 rounded-full text-muted-foreground hover:text-foreground"
+                aria-label="Pick a date"
+                title="Pick a date"
+              >
+                <CalendarIcon className="size-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="end"
+              side="bottom"
+              sideOffset={10}
+              collisionPadding={12}
+              className="z-50 w-auto max-w-[calc(100vw-24px)] rounded-2xl border-0 p-0 shadow-[0_10px_30px_rgba(0,0,0,0.12)]"
+            >
+              <Calendar
+                mode="single"
+                selected={parseLocalDateKey(selectedCalendarDate)}
+                month={shortcutPickerMonth}
+                onMonthChange={setShortcutPickerMonth}
+                onSelect={(date) => {
+                  if (!date) return
+                  setShowShortcutDatePopover(false)
+                  openStandardWeekAt(formatLocalDateKey(date))
+                }}
+                initialFocus
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
+
+        {/* Expanded panel */}
+        {quickAddExpanded ? (
+          <div className="mt-2 w-full rounded-2xl border border-border/35 bg-[rgba(255,255,255,0.34)] px-4 py-4 text-foreground backdrop-blur-[12px] dark:bg-[rgba(19,19,19,0.36)]">
+            {/* Top: Saved + shortcuts in ONE container */}
+            <div className="flex w-full min-w-0 items-start gap-6">
+              {/* Saved */}
+              <div className="min-w-0 flex-1">
+                <div className="text-[12px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+                  Saved
+                </div>
+                <div className="mt-2 space-y-1 text-[13px] text-foreground">
+                  {sessionTodos.length === 0 ? (
+                    <div className="text-[12px] text-muted-foreground">No tasks saved yet.</div>
+                  ) : (
+                    sessionTodos.map((todo) => {
+                      const dateLabel =
+                        todo.date && typeof todo.date === "string"
+                          ? format(parseISO(todo.date), "EEE MMM d")
+                          : "No date"
+                      const timeLabel = todo.time ? ` ${todo.time}` : ""
+                      return (
+                        <div key={todo.id} className="flex items-start gap-2">
+                          <span className="mt-[6px] size-1.5 shrink-0 rounded-full bg-foreground/70" />
+                          <div className="min-w-0">
+                            <div className="truncate">
+                              <span className="text-muted-foreground">{dateLabel}{timeLabel}: </span>
+                              <span>{todo.text}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })
                   )}
-                  title={aiMode ? "AI Mode (on)" : "Manual mode (off)"}
-                >
-                  {aiMode ? "AI Mode" : "Manual"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setQuickAddExpanded((expanded) => !expanded)}
-                  className="size-7 text-muted-foreground hover:text-foreground"
-                  aria-label={quickAddExpanded ? "Collapse quick add options" : "Expand quick add options"}
-                >
-                  <ChevronDown className={cn("size-4 transition-transform", quickAddExpanded && "rotate-180")} />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => {
-                    closeQuickAdd()
-                  }}
-                  className="ml-auto size-7 text-muted-foreground hover:text-foreground"
-                >
-                  <span className="text-[18px] leading-none">×</span>
-                </Button>
+                </div>
               </div>
 
-              <TokenPreviewBar tokens={parsedQuickAdd.previewTokens} />
-
-              {quickAddExpanded ? (
-                <div className="pt-2">
-                  <div className="flex flex-wrap items-center gap-1">
-                  {/* Reminder */}
-                  <Popover open={showReminderPopover} onOpenChange={setShowReminderPopover}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className={cn(
-                          "size-8 text-muted-foreground hover:text-foreground",
-                          draftReminderTime && "text-foreground"
-                        )}
-                        aria-label="Add reminder"
-                      >
-                        <Bell className="size-4" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent
-                      align="start"
-                      side="bottom"
-                      sideOffset={10}
-                      className="z-50 w-[320px] border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
-                    >
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                            Reminder
-                          </div>
-                          {draftReminderTime ? (
-                            <button
-                              type="button"
-                              onClick={() => setDraftReminderTime(undefined)}
-                              className="text-[10px] font-medium text-foreground/80 hover:text-foreground"
-                            >
-                              Clear
-                            </button>
-                          ) : null}
-                        </div>
-                        <ReminderTimeWheel value={draftReminderTime} onChange={setDraftReminderTime} />
-                      </div>
-                    </PopoverContent>
-                  </Popover>
-
-                  {/* Icon */}
-                  <IconPicker value={draftIcon} onChange={setDraftIcon} />
-
-                  {/* Link */}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setShowLinkInput((open) => !open)}
-                    className={cn(
-                      "size-8 text-muted-foreground hover:text-foreground",
-                      draftLink.trim() && "text-foreground"
-                    )}
-                    aria-label="Add link or phone number"
-                  >
-                    <Link2 className="size-4" />
-                  </Button>
-
-                  {/* Attachments */}
-                  <input
-                    ref={attachmentInputRef}
-                    type="file"
-                    multiple
-                    className="hidden"
-                    onChange={handleAttachmentPick}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => attachmentInputRef.current?.click()}
-                    className={cn(
-                      "size-8 text-muted-foreground hover:text-foreground",
-                      draftAttachments.length > 0 && "text-foreground"
-                    )}
-                    aria-label="Attach files"
-                  >
-                    <Paperclip className="size-4" />
-                  </Button>
-
-                  {/* Subtasks */}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setShowSubtaskInput((open) => !open)}
-                    className={cn(
-                      "size-8 text-muted-foreground hover:text-foreground",
-                      draftSubtasks.length > 0 && "text-foreground"
-                    )}
-                    aria-label="Add subtasks"
-                  >
-                    <ListChecks className="size-4" />
-                  </Button>
-
-                  {/* Colors */}
-                  <Popover open={showDraftColorPopover} onOpenChange={setShowDraftColorPopover}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className={cn(
-                          "size-8 text-muted-foreground hover:text-foreground",
-                          draftColor && "text-foreground"
-                        )}
-                        aria-label="Pick a color"
-                      >
-                        <Palette className="size-4" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent
-                      align="start"
-                      side="bottom"
-                      sideOffset={10}
-                      className="z-50 w-[240px] border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
-                    >
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                            Color
-                          </div>
-                          {draftColor ? (
-                            <button
-                              type="button"
-                              onClick={() => setDraftColor(undefined)}
-                              className="text-[10px] font-medium text-foreground/80 hover:text-foreground"
-                            >
-                              Clear
-                            </button>
-                          ) : null}
-                        </div>
-                        <div className="grid grid-cols-6 gap-2">
-                          {Array.from(new Set([preferences.accentColor, ...palette])).map((hex) => (
-                            <button
-                              key={hex}
-                              type="button"
-                              onClick={() => {
-                                setDraftColor(hex)
-                                setShowDraftColorPopover(false)
-                              }}
-                              className={cn(
-                                "size-6 rounded-full border border-black/5 dark:border-white/10",
-                                draftColor === hex && "ring-2 ring-[var(--accent-color)] ring-offset-2 ring-offset-background"
-                              )}
-                              style={{ backgroundColor: hex }}
-                              title={hex.toUpperCase()}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    </PopoverContent>
-                  </Popover>
-                </div>
-
-                {showLinkInput ? (
-                  <div className="mt-2 flex items-center gap-2">
-                    <Input
-                      placeholder="Paste a URL or phone number"
-                      value={draftLink}
-                      onChange={(event) => setDraftLink(event.target.value)}
-                      className="h-9"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setDraftLink("")}
-                      className="size-9 text-muted-foreground hover:text-foreground"
-                      aria-label="Clear link"
-                    >
-                      <X className="size-4" />
-                    </Button>
-                  </div>
-                ) : null}
-
-                {showSubtaskInput ? (
-                  <div className="mt-2 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Input
-                        placeholder="Add a subtask"
-                        value={draftSubtaskText}
-                        onChange={(event) => setDraftSubtaskText(event.target.value)}
-                        onKeyDown={(event) => event.key === "Enter" && addDraftSubtask()}
-                        className="h-9"
-                      />
-                      <Button type="button" variant="outline" size="sm" onClick={addDraftSubtask} className="h-9">
-                        Add
-                      </Button>
-                    </div>
-                    {draftSubtasks.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {draftSubtasks.map((subtask, index) => (
-                          <button
-                            key={`${subtask}-${index}`}
-                            type="button"
-                            onClick={() => setDraftSubtasks((current) => current.filter((_, i) => i !== index))}
-                            className="rounded-full bg-muted px-2 py-1 text-[11px] text-foreground hover:bg-muted/70"
-                            title="Remove subtask"
-                          >
-                            {subtask}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-                </div>
-              ) : null}
-            </div>
-
-            {/* Right: shortcuts (vertical) */}
-            {quickAddExpanded ? (
-              <div className="w-[100px] shrink-0 rounded-xl border border-border/35 bg-[rgba(255,255,255,0.34)] px-2 py-2 text-foreground backdrop-blur-[12px] dark:bg-[rgba(19,19,19,0.36)]">
-                <div className="mb-1 flex items-center justify-end">
-                  <Popover
-                    open={showShortcutDatePopover}
-                    onOpenChange={(open) => {
-                      setShowShortcutDatePopover(open)
-                      if (open) {
-                        setShortcutPickerMonth(parseLocalDateKey(selectedCalendarDate))
-                      }
-                    }}
-                  >
-                    <PopoverTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="size-8 text-muted-foreground hover:text-foreground"
-                        aria-label="Pick a date"
-                        title="Pick a date"
-                      >
-                        <CalendarIcon className="size-4" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent
-                      align="end"
-                      side="bottom"
-                      sideOffset={10}
-                      collisionPadding={12}
-                      className="z-50 w-auto max-w-[calc(100vw-24px)] rounded-2xl border-0 p-0 shadow-[0_10px_30px_rgba(0,0,0,0.12)]"
-                    >
-                      <Calendar
-                        mode="single"
-                        selected={parseLocalDateKey(selectedCalendarDate)}
-                        month={shortcutPickerMonth}
-                        onMonthChange={setShortcutPickerMonth}
-                        onSelect={(date) => {
-                          if (!date) return
-                          setShowShortcutDatePopover(false)
-                          openStandardWeekAt(formatLocalDateKey(date))
-                        }}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-
+              {/* Shortcuts */}
+              <div className="w-[120px] shrink-0">
                 {(() => {
                   const base = new Date()
                   base.setHours(0, 0, 0, 0)
@@ -717,7 +475,7 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
                     "inline-flex w-auto items-center justify-end whitespace-nowrap rounded-lg px-2 py-1.5 text-right text-[12px] transition-colors hover:bg-muted"
 
                   return (
-                    <div className="flex flex-col items-end gap-1">
+                    <div className="flex flex-col items-end gap-1 text-muted-foreground">
                       {nextDays.map((date) => (
                         <button
                           key={formatLocalDateKey(date)}
@@ -725,222 +483,193 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
                           className={cn(itemClass, "self-end")}
                           onClick={() => openStandardWeekAt(formatLocalDateKey(date))}
                         >
-                          <span>{date.toLocaleDateString("en-US", { weekday: "long" })}</span>
+                          <span className="text-foreground">{date.toLocaleDateString("en-US", { weekday: "long" })}</span>
                         </button>
                       ))}
 
                       <div className="my-1 h-px w-full bg-border/50" />
 
                       <button type="button" className={cn(itemClass, "self-end")} onClick={() => openStandardWeekAt(todayKey)}>
-                        <span>This week</span>
+                        <span className="text-foreground">This week</span>
                       </button>
                       <button type="button" className={cn(itemClass, "self-end")} onClick={() => openDualRange("NEXT_WEEK")}>
-                        <span>Next week</span>
+                        <span className="text-foreground">Next week</span>
                       </button>
                       <button type="button" className={cn(itemClass, "self-end")} onClick={() => openDualRange("THIS_MONTH")}>
-                        <span>This month</span>
+                        <span className="text-foreground">This month</span>
                       </button>
                       <button type="button" className={cn(itemClass, "self-end")} onClick={() => openDualRange("THIS_YEAR")}>
-                        <span>This year</span>
+                        <span className="text-foreground">This year</span>
                       </button>
                       <button type="button" className={cn(itemClass, "self-end")} onClick={() => openDualRange("PPL")}>
-                        <span>Playground</span>
+                        <span className="text-foreground">Playground</span>
                       </button>
                     </div>
                   )
                 })()}
               </div>
-            ) : null}
-          </div>
-        ) : showSearch ? (
-          <div className="flex h-10 w-full items-center gap-3 rounded-xl border border-border/35 bg-[rgba(255,255,255,0.34)] px-4 text-muted-foreground backdrop-blur-[12px] dark:bg-[rgba(19,19,19,0.36)]">
-            <Search className="size-[15px] shrink-0" />
-            <Input
-              placeholder="Search for a to-do"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-auto border-0 bg-transparent px-0 py-0 text-[12px] text-foreground shadow-none focus-visible:ring-0"
-            />
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setShowSearch(false)}
-              className="ml-auto size-7 text-muted-foreground hover:text-foreground"
-            >
-              <span className="text-[18px] leading-none">×</span>
-            </Button>
-          </div>
-        ) : (
-          <>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => {
-                setShowQuickAdd(false)
-                setShowSearch(true)
-              }}
-              className="size-8 text-muted-foreground hover:text-foreground"
-            >
-              <Search className="size-[15px]" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => {
-                setShowSearch(false)
-                resetQuickAddDraft()
-                setShowQuickAdd(true)
-              }}
-              className="size-8 text-muted-foreground hover:text-foreground"
-            >
-              <Plus className="size-[15px]" />
-            </Button>
-            {!isSelectedDateToday && viewMode !== "today" && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onNavigate('today')}
-                className="ml-[4px] mr-3 h-6 shrink-0 self-center rounded-md border border-border/35 bg-background/45 px-2 text-[9px] font-semibold tracking-[0.05em] text-foreground backdrop-blur-[10px] transition-colors hover:bg-black hover:text-white dark:bg-[rgba(29,35,48,0.55)] dark:text-foreground dark:hover:bg-black dark:hover:text-white"
-              >
-                TODAY
-              </Button>
-            )}
-          </>
-        )}
-      </div>
+            </div>
 
-      {!showSearch && !showQuickAdd ? (
-        <div 
-          style={{ 
-            fontFamily: '"Alternate Gothic No2 D", "Arial Narrow", "Roboto Condensed", sans-serif',
-            fontStyle: 'normal',
-            fontWeight: 400,
-            fontSize: '14px',
-            lineHeight: '14px',
-            color: 'var(--accent-color)'
-          }}
-          className="font-logo rounded-full border border-border/35 bg-[rgba(255,255,255,0.3)] px-3 py-1.5 uppercase backdrop-blur-[12px] dark:bg-[rgba(19,19,19,0.3)]"
-        >
-          LEMONADE<span style={{ color: 'var(--accent-color)' }}>*</span>
-        </div>
-      ) : null}
+            <div className="my-4 h-px w-full bg-border/50" />
 
-      {!showSearch && !showQuickAdd ? (
-        <div className="flex flex-1 items-center justify-end gap-1">
-          <Popover open={showColorPopover} onOpenChange={setShowColorPopover}>
-            <PopoverTrigger asChild>
+            {/* Bottom: action icons (functional) */}
+            <div className="flex flex-wrap items-center gap-1 text-muted-foreground">
+              {/* 1) Alert/Reminder */}
+              <Popover open={showReminderPopover} onOpenChange={setShowReminderPopover}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className={cn("size-8 hover:text-foreground", draftReminderTime && "text-foreground")}
+                    aria-label="Add reminder"
+                  >
+                    <Bell className="size-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  side="bottom"
+                  sideOffset={10}
+                  className="z-50 w-[320px] border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                        Reminder
+                      </div>
+                      {draftReminderTime ? (
+                        <button
+                          type="button"
+                          onClick={() => setDraftReminderTime(undefined)}
+                          className="text-[10px] font-medium text-foreground/80 hover:text-foreground"
+                        >
+                          Clear
+                        </button>
+                      ) : null}
+                    </div>
+                    <ReminderTimeWheel value={draftReminderTime} onChange={setDraftReminderTime} />
+                  </div>
+                </PopoverContent>
+              </Popover>
+
+              {/* 2) Subtask */}
               <Button
+                type="button"
                 variant="ghost"
                 size="icon"
-                className="mr-2 size-8 rounded-full text-muted-foreground hover:text-foreground"
-                aria-label="Open task color filter"
+                onClick={() => setShowSubtaskInput((open) => !open)}
+                className={cn("size-8 hover:text-foreground", draftSubtasks.length > 0 && "text-foreground")}
+                aria-label="Add subtasks"
               >
-                <span
-                  className="size-3 rounded-full border border-black/5 dark:border-white/10"
-                  style={{ backgroundColor: activeFilterColor ?? preferences.accentColor }}
-                />
+                <ListChecks className="size-4" />
               </Button>
-            </PopoverTrigger>
-            <PopoverContent
-              align="end"
-              side="bottom"
-              sideOffset={10}
-              className="w-[260px] border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
-            >
-              <div className="space-y-4">
-                <div>
-                  <div className="mb-2 flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                    <span>Current Usage</span>
-                    {activeFilterColor ? (
-                      <button
-                        type="button"
-                        onClick={() => setActiveFilterColor(null)}
-                        className="text-[10px] font-medium normal-case tracking-normal text-foreground/70 hover:text-foreground"
-                      >
-                        Clear filter
-                      </button>
-                    ) : null}
+
+              {/* 3) URL / Phone */}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowLinkInput((open) => !open)}
+                className={cn("size-8 hover:text-foreground", draftLink.trim() && "text-foreground")}
+                aria-label="Add link or phone number"
+              >
+                <Link2 className="size-4" />
+              </Button>
+
+              {/* 4) Urgency */}
+              <Popover open={showPriorityPopover} onOpenChange={setShowPriorityPopover}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className={cn("size-8 hover:text-foreground", draftPriority !== "none" && "text-foreground")}
+                    aria-label="Set urgency"
+                  >
+                    <AlertTriangle className="size-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  side="bottom"
+                  sideOffset={10}
+                  className="z-50 w-[220px] border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
+                >
+                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    Urgency
                   </div>
-                  {usedColors.length === 0 ? (
-                    <div className="text-[12px] text-muted-foreground">No colors used yet</div>
-                  ) : (
-                    <div className="space-y-1">
-                      {usedColors.map(([hex, count]) => {
-                        const isActive = activeFilterColor === hex
+                  <div className="grid grid-cols-2 gap-2">
+                    {(["high", "medium", "low", "none"] as const).map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => {
+                          setDraftPriority(p)
+                          setShowPriorityPopover(false)
+                        }}
+                        className={cn(
+                          "rounded-lg border border-border/70 px-2 py-2 text-[12px] capitalize transition-colors hover:bg-muted",
+                          draftPriority === p && "border-transparent bg-foreground text-background hover:bg-foreground"
+                        )}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
 
-                        return (
-                          <button
-                            key={hex}
-                            type="button"
-                            onClick={() => {
-                              setActiveFilterColor(isActive ? null : hex)
-                              setShowColorPopover(false)
-                            }}
-                            className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[12px] text-foreground transition-colors hover:bg-muted"
-                          >
-                            <span
-                              className="size-3 rounded-full border border-black/5 dark:border-white/10"
-                              style={{ backgroundColor: hex }}
-                            />
-                            <span className="flex-1">
-                              {getColorLabel(hex)} ({count})
-                            </span>
-                            {isActive ? (
-                              <span
-                                role="button"
-                                tabIndex={0}
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  setActiveFilterColor(null)
-                                }}
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter" || event.key === " ") {
-                                    event.preventDefault()
-                                    event.stopPropagation()
-                                    setActiveFilterColor(null)
-                                  }
-                                }}
-                                className="inline-flex items-center justify-center rounded-full border border-border/70 p-0.5 text-muted-foreground hover:text-foreground"
-                                aria-label={`Clear ${getColorLabel(hex)} filter`}
-                              >
-                                <X className="size-3" />
-                              </span>
-                            ) : null}
-                          </button>
-                        )
-                      })}
+              {/* 5) Icon */}
+              <IconPicker value={draftIcon} onChange={setDraftIcon} />
+
+              {/* 6) Label */}
+              <Popover open={showLabelPopover} onOpenChange={setShowLabelPopover}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className={cn("size-8 hover:text-foreground", draftLabelIds.length > 0 && "text-foreground")}
+                    aria-label="Select labels"
+                  >
+                    <Tag className="size-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  side="bottom"
+                  sideOffset={10}
+                  className="z-50 w-[260px] border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                      Labels
                     </div>
-                  )}
-                </div>
-
-                <div>
-                  <div className="mb-2 flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                    <span>Labels</span>
-                    {labelFilterIds.length > 0 ? (
+                    {draftLabelIds.length > 0 ? (
                       <button
                         type="button"
-                        onClick={() => clearLabelFilters()}
+                        onClick={() => setDraftLabelIds([])}
                         className="text-[10px] font-medium text-foreground/80 hover:text-foreground"
                       >
                         Clear
                       </button>
                     ) : null}
                   </div>
-                  {labels.length === 0 ? (
-                    <div className="mb-4 text-[12px] text-muted-foreground">No labels created yet</div>
-                  ) : (
-                    <div className="mb-4 flex flex-wrap gap-2">
-                      {labels.map((label) => {
-                        const isActive = labelFilterIds.includes(label.id)
-
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {labels.length === 0 ? (
+                      <div className="text-[12px] text-muted-foreground">No labels created yet</div>
+                    ) : (
+                      labels.map((label) => {
+                        const active = draftLabelIds.includes(label.id)
                         return (
                           <button
                             key={label.id}
                             type="button"
-                            onClick={() => toggleLabelFilter(label.id)}
+                            onClick={() => toggleDraftLabelId(label.id)}
                             className={cn(
                               "inline-flex items-center gap-2 rounded-full border px-2 py-1 text-[11px] transition-colors",
-                              isActive
+                              active
                                 ? "border-transparent bg-foreground text-background"
                                 : "border-border bg-transparent text-foreground hover:bg-muted"
                             )}
@@ -949,114 +678,194 @@ export function Header({ onNavigate, viewMode, onViewModeChange }: HeaderProps) 
                             <span>{label.name}</span>
                           </button>
                         )
-                      })}
+                      })
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
+
+              {/* 7) Color */}
+              <Popover open={showDraftColorPopover} onOpenChange={setShowDraftColorPopover}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className={cn("size-8 hover:text-foreground", draftColor && "text-foreground")}
+                    aria-label="Pick a color"
+                  >
+                    <Palette className="size-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  side="bottom"
+                  sideOffset={10}
+                  className="z-50 w-[240px] border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                        Color
+                      </div>
+                      {draftColor ? (
+                        <button
+                          type="button"
+                          onClick={() => setDraftColor(undefined)}
+                          className="text-[10px] font-medium text-foreground/80 hover:text-foreground"
+                        >
+                          Clear
+                        </button>
+                      ) : null}
                     </div>
-                  )}
-                </div>
+                    <div className="grid grid-cols-6 gap-2">
+                      {[
+                        "#fef08a",
+                        "#bbf7d0",
+                        "#bfdbfe",
+                        "#fbcfe8",
+                        "#fed7aa",
+                        "#e5e7eb",
+                      ].map((hex) => (
+                        <button
+                          key={hex}
+                          type="button"
+                          onClick={() => {
+                            setDraftColor(hex)
+                            setShowDraftColorPopover(false)
+                          }}
+                          className={cn(
+                            "size-6 rounded-full border border-black/5 dark:border-white/10",
+                            draftColor === hex && "ring-2 ring-[var(--accent-color)] ring-offset-2 ring-offset-background"
+                          )}
+                          style={{ backgroundColor: hex }}
+                          title={hex.toUpperCase()}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
 
-                <div>
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                    Palette Expansion
-                  </div>
-                  <div className="mb-2 flex flex-wrap gap-2">
-                    {palette.map((hex) => (
-                      <button
-                        key={hex}
-                        type="button"
-                        onClick={() => {
-                          setActiveFilterColor(activeFilterColor === hex ? null : hex)
-                          setShowColorPopover(false)
-                        }}
-                        className="size-5 rounded-full border border-black/5 dark:border-white/10"
-                        style={{ backgroundColor: hex }}
-                        title={hex.toUpperCase()}
-                      />
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      value={newPaletteColor}
-                      onChange={(event) => setNewPaletteColor(event.target.value)}
-                      className="h-9 w-11 cursor-pointer rounded border border-border bg-transparent p-1"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        const normalized = newPaletteColor.toLowerCase()
-                        if (palette.includes(normalized)) {
-                          return
-                        }
+              {/* Attachments (kept, even though not in the 7 list) */}
+              <input
+                ref={attachmentInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleAttachmentPick}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => attachmentInputRef.current?.click()}
+                className={cn("size-8 hover:text-foreground", draftAttachments.length > 0 && "text-foreground")}
+                aria-label="Attach files"
+              >
+                <Paperclip className="size-4" />
+              </Button>
+            </div>
 
-                        setPreferences({
-                          colorPalette: [...palette, normalized],
-                        })
-                      }}
-                      className="h-9 text-[12px]"
-                    >
-                      Add
-                    </Button>
-                  </div>
-                </div>
+            {showLinkInput ? (
+              <div className="mt-2 flex items-center gap-2">
+                <Input
+                  placeholder="Paste a URL or phone number"
+                  value={draftLink}
+                  onChange={(event) => setDraftLink(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      setShowLinkInput(false)
+                    }
+                  }}
+                  className="h-9"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setDraftLink("")
+                    setShowLinkInput(false)
+                  }}
+                  className="size-9 text-muted-foreground hover:text-foreground"
+                  aria-label="Close link input"
+                >
+                  <X className="size-4" />
+                </Button>
               </div>
-            </PopoverContent>
-          </Popover>
-          <PrintPreviewDialog selectedDate={selectedCalendarDate} />
-          <div className="ml-2 flex items-center rounded-full border border-border/70 bg-background/80 p-0.5">
-            <Button
-              variant="ghost"
-              onClick={goToDefaultView}
-              className={cn(
-                "h-8 rounded-full px-3 text-[12px] font-medium",
-                viewMode === "today" ? "bg-foreground text-background hover:bg-foreground hover:text-background" : "text-muted-foreground hover:text-foreground"
-              )}
-              title="Today"
-            >
-              <SunMedium className="mr-1.5 size-4" />
-              Today
-              <span className={cn(
-                "ml-2 rounded-full px-1.5 py-0.5 text-[10px] leading-none",
-                viewMode === "today" ? "bg-background/15 text-background" : "bg-muted text-foreground"
-              )}>
-                {todayCount}
-              </span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => onViewModeChange("calendar")}
-              className={cn(
-                "size-8 rounded-full",
-                viewMode === "calendar" ? "bg-foreground text-background hover:bg-foreground hover:text-background" : "text-muted-foreground hover:text-foreground"
-              )}
-              title="Calendar view"
-            >
-              <Rows3 className="size-4" />
-            </Button>
+            ) : null}
+
+            {showSubtaskInput ? (
+              <div className="mt-2 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Input
+                    placeholder="Add a subtask"
+                    value={draftSubtaskText}
+                    onChange={(event) => setDraftSubtaskText(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        addDraftSubtask()
+                      } else if (event.key === "Escape") {
+                        setShowSubtaskInput(false)
+                        setDraftSubtaskText("")
+                      }
+                    }}
+                    className="h-9"
+                  />
+                  <Button type="button" variant="outline" size="sm" onClick={addDraftSubtask} className="h-9">
+                    Add
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => {
+                      setShowSubtaskInput(false)
+                      setDraftSubtaskText("")
+                    }}
+                    className="size-9 text-muted-foreground hover:text-foreground"
+                    aria-label="Close subtasks"
+                    title="Close"
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </div>
+                {draftSubtasks.length > 0 ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] font-medium text-muted-foreground">
+                        Subtasks
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setDraftSubtasks([])}
+                        className="text-[10px] font-medium text-foreground/70 hover:text-foreground"
+                      >
+                        Clear all
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {draftSubtasks.map((subtask, index) => (
+                        <button
+                          key={`${subtask}-${index}`}
+                          type="button"
+                          onClick={() => setDraftSubtasks((current) => current.filter((_, i) => i !== index))}
+                          className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-[11px] text-foreground hover:bg-muted/70"
+                          title="Remove subtask"
+                        >
+                          <span>{subtask}</span>
+                          <span className="text-muted-foreground">×</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </header>
-  )
-}
-
-function TokenPreviewBar({ tokens }: { tokens: NaturalLanguagePreviewToken[] }) {
-  if (tokens.length === 0) {
-    return null
-  }
-
-  return (
-    <div className="flex flex-wrap gap-1.5 pb-1">
-      {tokens.map((token) => (
-        <span
-          key={token.key}
-          className="rounded-full bg-muted px-2 py-1 text-[10px] font-medium text-muted-foreground"
-        >
-          {token.label}
-        </span>
-      ))}
-    </div>
   )
 }

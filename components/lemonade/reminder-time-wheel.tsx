@@ -4,8 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 
 const ITEM_HEIGHT_PX = 32
-const LOOP_COPIES = 5
+const LOOP_COPIES = 3
 const LOOP_MIDDLE_INDEX = Math.floor(LOOP_COPIES / 2)
+const PADDING_ITEMS = 2
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 
@@ -69,7 +70,7 @@ function WheelColumn({
     const baseIndex = values.indexOf(target)
     const resolvedBaseIndex = baseIndex >= 0 ? baseIndex : 0
     const loopIndex = centerOffset + resolvedBaseIndex
-    container.scrollTo({ top: loopIndex * ITEM_HEIGHT_PX, behavior })
+    container.scrollTo({ top: (loopIndex + PADDING_ITEMS) * ITEM_HEIGHT_PX, behavior })
   }
 
   useEffect(() => {
@@ -78,7 +79,8 @@ function WheelColumn({
   }, [])
 
   useEffect(() => {
-    scrollToValue(value, "smooth")
+    // Use "auto" to avoid fighting with user scroll + snap behavior.
+    scrollToValue(value, "auto")
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value])
 
@@ -86,10 +88,10 @@ function WheelColumn({
     const container = ref.current
     if (!container) return
 
-    const rawIndex = Math.round(container.scrollTop / ITEM_HEIGHT_PX)
+    const rawIndex = Math.round(container.scrollTop / ITEM_HEIGHT_PX) - PADDING_ITEMS
     const baseIndex = ((rawIndex % values.length) + values.length) % values.length
     const desiredIndex = centerOffset + baseIndex
-    const desiredTop = desiredIndex * ITEM_HEIGHT_PX
+    const desiredTop = (desiredIndex + PADDING_ITEMS) * ITEM_HEIGHT_PX
     const delta = Math.abs(desiredTop - container.scrollTop)
     if (delta > values.length * ITEM_HEIGHT_PX) {
       container.scrollTo({ top: desiredTop, behavior: "auto" })
@@ -102,9 +104,9 @@ function WheelColumn({
 
     normalizeLoopPosition()
 
-    const rawIndex = Math.round(container.scrollTop / ITEM_HEIGHT_PX)
+    const rawIndex = Math.round(container.scrollTop / ITEM_HEIGHT_PX) - PADDING_ITEMS
     const baseIndex = ((rawIndex % values.length) + values.length) % values.length
-    const desiredTop = (centerOffset + baseIndex) * ITEM_HEIGHT_PX
+    const desiredTop = (centerOffset + baseIndex + PADDING_ITEMS) * ITEM_HEIGHT_PX
     container.scrollTo({ top: desiredTop, behavior: "smooth" })
 
     const nextValue = values[baseIndex]
@@ -114,7 +116,6 @@ function WheelColumn({
   }
 
   const handleScroll = () => {
-    normalizeLoopPosition()
     if (stopTimerRef.current) {
       window.clearTimeout(stopTimerRef.current)
     }
@@ -139,13 +140,13 @@ function WheelColumn({
         onScroll={handleScroll}
         className={cn(
           "h-[160px] w-[86px] overflow-y-auto overscroll-contain rounded-lg",
-          "snap-y snap-mandatory scroll-smooth",
+          "snap-y snap-mandatory",
           "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         )}
         style={{ scrollSnapType: "y mandatory" }}
       >
         {/* top padding so first item can center */}
-        <div style={{ height: ITEM_HEIGHT_PX * 2 }} />
+        <div style={{ height: ITEM_HEIGHT_PX * PADDING_ITEMS }} />
         {looped.map((entry, index) => (
           <div
             key={`${entry}-${index}`}
@@ -156,7 +157,7 @@ function WheelColumn({
           </div>
         ))}
         {/* bottom padding */}
-        <div style={{ height: ITEM_HEIGHT_PX * 2 }} />
+        <div style={{ height: ITEM_HEIGHT_PX * PADDING_ITEMS }} />
       </div>
 
       {/* center highlight */}
@@ -187,9 +188,12 @@ export function ReminderTimeWheel({
   }, [parsed.hour, parsed.meridiem, parsed.minute])
 
   useEffect(() => {
-    onChange(formatReminderTime(Number(hour), minute, meridiem))
+    const next = formatReminderTime(Number(hour), minute, meridiem)
+    if (next !== value) {
+      onChange(next)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hour, minute, meridiem])
+  }, [hour, minute, meridiem, value])
 
   const hours = useMemo(() => Array.from({ length: 12 }, (_, index) => String(index + 1)), [])
   const minutes = useMemo(
@@ -206,4 +210,3 @@ export function ReminderTimeWheel({
     </div>
   )
 }
-

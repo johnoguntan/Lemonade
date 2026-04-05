@@ -34,6 +34,17 @@ export interface Todo {
   syncStatus?: 'local'
   time?: string
   reminderTime?: string
+  reminderConfig?: {
+    oneOffs: Array<{ id: string; date: string; time: string }>
+    intervals: Array<{
+      id: string
+      everyMinutes: number
+      startDate: string
+      startTime: string
+      endDate?: string
+      endTime?: string
+    }>
+  }
   durationMinutes?: number
   color?: string
   icon?: string
@@ -230,6 +241,12 @@ interface LemonadeStore {
   // Playground (undated inbox) note
   playgroundNote: string
   setPlaygroundNote: (note: string) => void
+
+  // Header quick-add session tracking (for showing recently added tasks)
+  quickAddSessionActive: boolean
+  quickAddSessionTodoIds: string[]
+  startQuickAddSession: () => void
+  endQuickAddSession: () => void
 
   rightPageViewMode: RightPageViewMode
   setRightPageViewMode: (mode: RightPageViewMode) => void
@@ -1166,20 +1183,29 @@ export const useLemonadeStore = create<LemonadeStore>()(
               .map((subtask) => normalizeSubtask(subtask, id))
               .filter((subtask) => subtask.title.trim().length > 0)
           : []
-        set((state) => ({
-          calendarTodos: [...state.calendarTodos, {
-            ...todo,
-            id,
-            date: resolvedDate,
-            labelIds: resolvedLabelIds,
-            createdAt: todo.createdAt ?? Date.now(),
-            endOfDay: todo.endOfDay ?? false,
-            isSyncing: todo.isSyncing ?? false,
-            syncStatus: todo.syncStatus === "local" ? "local" : undefined,
-            subtasks: resolvedSubtasks,
-          }],
-          lastCreatedTodoId: id,
-        }))
+        set((state) => {
+          const shouldTrack = state.quickAddSessionActive
+          const nextSessionIds =
+            shouldTrack && !state.quickAddSessionTodoIds.includes(id)
+              ? [...state.quickAddSessionTodoIds, id]
+              : state.quickAddSessionTodoIds
+
+          return {
+            calendarTodos: [...state.calendarTodos, {
+              ...todo,
+              id,
+              date: resolvedDate,
+              labelIds: resolvedLabelIds,
+              createdAt: todo.createdAt ?? Date.now(),
+              endOfDay: todo.endOfDay ?? false,
+              isSyncing: todo.isSyncing ?? false,
+              syncStatus: todo.syncStatus === "local" ? "local" : undefined,
+              subtasks: resolvedSubtasks,
+            }],
+            lastCreatedTodoId: id,
+            quickAddSessionTodoIds: nextSessionIds,
+          }
+        })
         if (todo.isRecurring && !todo.parentId) {
           get().generateRecurringInstances()
         }
@@ -1717,6 +1743,10 @@ export const useLemonadeStore = create<LemonadeStore>()(
       setDualViewRange: (range) => set({ dualViewRange: range }),
       playgroundNote: "",
       setPlaygroundNote: (note) => set({ playgroundNote: note }),
+      quickAddSessionActive: false,
+      quickAddSessionTodoIds: [],
+      startQuickAddSession: () => set({ quickAddSessionActive: true, quickAddSessionTodoIds: [] }),
+      endQuickAddSession: () => set({ quickAddSessionActive: false, quickAddSessionTodoIds: [] }),
 
       rightPageViewMode: "project",
       setRightPageViewMode: (mode) => set({ rightPageViewMode: mode }),

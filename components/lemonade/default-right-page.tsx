@@ -80,13 +80,13 @@ export function DefaultRightPage({ startDate, onNavigate: _onNavigate }: Default
   }, [today])
 
   const nextMonthStartKey = useMemo(() => {
-    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
-    return formatLocalDateKey(startOfMonth)
+    const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1)
+    return formatLocalDateKey(nextMonth)
   }, [today])
 
   const nextYearStartKey = useMemo(() => {
-    const startOfYear = new Date(today.getFullYear(), 0, 1)
-    return formatLocalDateKey(startOfYear)
+    const nextYear = new Date(today.getFullYear() + 1, 0, 1)
+    return formatLocalDateKey(nextYear)
   }, [today])
 
   const pplTodos = useMemo(
