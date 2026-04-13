@@ -1,16 +1,16 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
-import { useLemonadeStore, type Todo } from "@/lib/store"
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
+import { normalizeTodoPriority, useLemonadeStore, type Todo } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { RotateCcw, Plus, Minus, X, Moon, Sparkles, PencilLine, ArrowUp, Trash2, ChevronRight, ChevronDown, NotebookPen } from "lucide-react"
+import { RotateCcw, Plus, Minus, X, Moon, Sparkles, ArrowUp, Trash2, ChevronRight, ChevronDown, NotebookPen, Link2, Paperclip, Bell, ListChecks, AlertTriangle, Tag, Palette, Shapes } from "lucide-react"
 import { toast } from "sonner"
 import { TASK_ICON_LIBRARY, TaskIcon } from "@/lib/task-icons"
+import { ColorPickerPanel } from "@/components/lemonade/color-picker-panel"
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -39,6 +39,79 @@ interface TodoItemProps {
   draggable?: boolean
   onDragStart?: (event: React.DragEvent<HTMLDivElement>) => void
   onDragEnd?: (event: React.DragEvent<HTMLDivElement>) => void
+}
+
+const ATTACHMENT_PREFIX = "Attachment: "
+
+const isStructuredLinkValue = (value: string) => {
+  const normalized = value.trim()
+
+  return (
+    /^https?:\/\//i.test(normalized) ||
+    /^www\./i.test(normalized) ||
+    /^tel:/i.test(normalized) ||
+    /^\+?[\d()\-\s]{6,}$/.test(normalized)
+  )
+}
+
+const parseStructuredTaskNotes = (notes?: string) => {
+  const lines = (notes ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  const attachments: string[] = []
+  const remainder: string[] = []
+  let link = ""
+
+  for (const line of lines) {
+    if (line.startsWith(ATTACHMENT_PREFIX)) {
+      const attachmentName = line.slice(ATTACHMENT_PREFIX.length).trim()
+      if (attachmentName) {
+        attachments.push(attachmentName)
+      }
+      continue
+    }
+
+    if (!link && isStructuredLinkValue(line)) {
+      link = line
+      continue
+    }
+
+    remainder.push(line)
+  }
+
+  return { link, attachments, remainder }
+}
+
+const composeStructuredTaskNotes = ({
+  sourceNotes,
+  link,
+  attachments,
+}: {
+  sourceNotes?: string
+  link: string
+  attachments: string[]
+}) => {
+  const parsed = parseStructuredTaskNotes(sourceNotes)
+  const lines: string[] = []
+  const trimmedLink = link.trim()
+
+  if (trimmedLink) {
+    lines.push(trimmedLink)
+  }
+
+  lines.push(...parsed.remainder)
+
+  attachments.forEach((attachment) => {
+    const trimmedAttachment = attachment.trim()
+    if (trimmedAttachment) {
+      lines.push(`${ATTACHMENT_PREFIX}${trimmedAttachment}`)
+    }
+  })
+
+  const joined = lines.join("\n").trim()
+  return joined.length > 0 ? joined : undefined
 }
 
 export function TodoItem({
@@ -71,6 +144,7 @@ export function TodoItem({
     labels,
     addLabelToTask,
     removeLabelFromTask,
+    setPreferences,
   } = useLemonadeStore()
   const colorPalette = preferences.colorPalette ?? []
   
@@ -82,9 +156,18 @@ export function TodoItem({
   const [editingSubtaskText, setEditingSubtaskText] = useState("")
   const [isNotesOpen, setIsNotesOpen] = useState(false)
   const [noteText, setNoteText] = useState(todo.notes ?? "")
+  const [showReminderEditor, setShowReminderEditor] = useState(false)
+  const [reminderCustomMinutes, setReminderCustomMinutes] = useState("")
+  const [linkDraft, setLinkDraft] = useState("")
+  const [attachmentDrafts, setAttachmentDrafts] = useState<string[]>([])
+  const [taskMenuOpen, setTaskMenuOpen] = useState(false)
+  const [activeToolPanel, setActiveToolPanel] = useState<
+    "reminder" | "subtasks" | "link" | "priority" | "icon" | "labels" | "color" | "attachment" | null
+  >(null)
   const [pendingRecurringUpdate, setPendingRecurringUpdate] = useState<Partial<Todo> | null>(null)
   const [customRecurrenceText, setCustomRecurrenceText] = useState(todo.recurringCustomText ?? "")
   const inputRef = useRef<HTMLInputElement>(null)
+  const attachmentInputRef = useRef<HTMLInputElement>(null)
 
   const recurringValue = todo.isRecurring
     ? todo.recurringCustomText
@@ -92,13 +175,44 @@ export function TodoItem({
       : (todo.recurringFrequency || "daily")
     : "off"
 
+  const resolvedPriority = normalizeTodoPriority(todo.priority)
   const priorityIndicator = {
-    high: <span className="size-2 rounded-full bg-red-500 mr-2 flex-shrink-0" />,
-    medium: <span className="size-2 rounded-full bg-orange-500 mr-2 flex-shrink-0" />,
-    low: <span className="size-2 rounded-full bg-blue-500 mr-2 flex-shrink-0" />,
-    none: null,
-  }[todo.priority || 'none']
-  const isLocalOnly = todo.syncStatus === "local"
+    urgent: <span className="mr-2 size-2 rounded-full bg-red-500 shrink-0" />,
+    important: <span className="mr-2 size-2 rounded-full bg-amber-500 shrink-0" />,
+    normal: <span className="mr-2 size-2 rounded-full bg-border shrink-0" />,
+  }[resolvedPriority]
+  const priorityPillClasses = {
+    urgent: "border-red-200 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300",
+    important: "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300",
+    normal: "border-border/70 bg-background/70 text-muted-foreground hover:bg-muted hover:text-foreground",
+  } as const
+  const nextPriority = {
+    normal: "important",
+    important: "urgent",
+    urgent: "normal",
+  } as const
+  const priorityLabels = {
+    urgent: "Urgent",
+    important: "Important",
+    normal: "Normal",
+  } as const
+  const structuredNotes = useMemo(() => parseStructuredTaskNotes(todo.notes), [todo.notes])
+  const reminderLabel = typeof todo.reminderOffsetMinutes === "number"
+    ? todo.reminderOffsetMinutes === 0
+      ? "At time"
+      : `${todo.reminderOffsetMinutes}m`
+    : "Alert"
+  const reminderPresetOptions = [
+    { label: "None", value: null },
+    { label: "At time of event", value: 0 },
+    { label: "5 minutes before", value: 5 },
+    { label: "10 minutes before", value: 10 },
+    { label: "15 minutes before", value: 15 },
+    { label: "30 minutes before", value: 30 },
+    { label: "1 hour before", value: 60 },
+    { label: "2 hours before", value: 120 },
+    { label: "1 day before", value: 1440 },
+  ] as const
 
   const handleSave = () => {
     const trimmedText = editText.trim()
@@ -284,6 +398,74 @@ export function TodoItem({
     setIsNotesOpen(false)
   }
 
+  const persistStructuredNotes = (nextLink: string, nextAttachments: string[]) => {
+    const sourceNotes = isNotesOpen ? noteText : todo.notes
+    const nextNotes = composeStructuredTaskNotes({
+      sourceNotes,
+      link: nextLink,
+      attachments: nextAttachments,
+    })
+
+    updateCalendarTodo(todo.id, { notes: nextNotes })
+
+    if (isNotesOpen) {
+      setNoteText(nextNotes ?? "")
+    }
+  }
+
+  const openLinkEditor = () => {
+    setLinkDraft(structuredNotes.link)
+    setAttachmentDrafts(structuredNotes.attachments)
+  }
+
+  const handleSaveLink = () => {
+    persistStructuredNotes(linkDraft, attachmentDrafts.length > 0 ? attachmentDrafts : structuredNotes.attachments)
+  }
+
+  const handleAttachmentPick = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? [])
+    if (files.length === 0) {
+      return
+    }
+
+    const nextAttachments = [...structuredNotes.attachments, ...files.map((file) => file.name)]
+    setAttachmentDrafts(nextAttachments)
+    persistStructuredNotes(structuredNotes.link, nextAttachments)
+    event.target.value = ""
+  }
+
+  const handleClearStructuredLink = () => {
+    setLinkDraft("")
+    persistStructuredNotes("", structuredNotes.attachments)
+  }
+
+  const handleRemoveAttachment = (attachmentName: string) => {
+    const nextAttachments = structuredNotes.attachments.filter((attachment) => attachment !== attachmentName)
+    setAttachmentDrafts(nextAttachments)
+    persistStructuredNotes(structuredNotes.link, nextAttachments)
+  }
+
+  const applyReminderOffset = (minutes: number | null) => {
+    updateCalendarTodo(todo.id, { reminderOffsetMinutes: minutes })
+    setShowReminderEditor(false)
+    setReminderCustomMinutes("")
+  }
+
+  const handleOpenToolPanel = (
+    panel: "reminder" | "subtasks" | "link" | "priority" | "icon" | "labels" | "color" | "attachment"
+  ) => {
+    setTaskMenuOpen(true)
+    setActiveToolPanel(panel)
+
+    if (panel === "link") {
+      openLinkEditor()
+    }
+
+    if (panel === "attachment") {
+      setAttachmentDrafts(structuredNotes.attachments)
+    }
+  }
+
   const completedSubtaskCount = todo.subtasks.filter((subtask) => subtask.completed).length
   const hasCustomColor = Boolean(todo.color)
   const hasSubtasks = todo.subtasks.length > 0
@@ -338,34 +520,27 @@ export function TodoItem({
         )}
         style={{ backgroundColor: todo.color }}
       >
-        <div className="flex min-h-[52px] items-center justify-center w-5 mr-2">
-          <button
-            onClick={() => toggleCalendarTodo(todo.id)}
-            className={cn(
-              "size-4 rounded-full border transition-all flex items-center justify-center shrink-0",
-              todo.completed 
-                ? "bg-[var(--accent-color)] border-[var(--accent-color)] opacity-100" 
-                : "border-[var(--accent-color)] opacity-0 group-hover:opacity-100"
-            )}
-            style={{ borderColor: todo.completed ? 'var(--accent-color)' : 'rgba(var(--accent-color-rgb), 0.3)' }}
-          >
-            {todo.completed && (
-              <svg className="size-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M5 13l4 4L19 7" />
-              </svg>
-            )}
-          </button>
-        </div>
-
         <div className="flex-1 min-w-0 flex flex-col justify-center gap-1">
           <div className="flex min-w-0 items-center">
+            <button
+              onClick={() => toggleCalendarTodo(todo.id)}
+              className={cn(
+                "mr-2 size-4 rounded-full border transition-all flex items-center justify-center shrink-0",
+                todo.completed
+                  ? "bg-[var(--accent-color)] border-[var(--accent-color)] opacity-100"
+                  : "border-[var(--accent-color)] opacity-0 group-hover:opacity-100"
+              )}
+              style={{ borderColor: todo.completed ? 'var(--accent-color)' : 'rgba(var(--accent-color-rgb), 0.3)' }}
+            >
+              {todo.completed && (
+                <svg className="size-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </button>
             {priorityIndicator}
             {todo.icon ? <TaskIcon icon={todo.icon} className="mr-2 size-4 text-muted-foreground" /> : null}
-            {todo.isSyncing ? (
-              <Sparkles className="mr-2 size-3.5 text-[var(--accent-color)]" />
-            ) : isLocalOnly ? (
-              <PencilLine className="mr-2 size-3.5 text-muted-foreground" />
-            ) : null}
+            {todo.isSyncing ? <Sparkles className="mr-2 size-3.5 text-[var(--accent-color)]" /> : null}
             {isEditing ? (
               <input
                 ref={inputRef}
@@ -446,14 +621,23 @@ export function TodoItem({
             <div className="text-[9px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
               Syncing...
             </div>
-          ) : isLocalOnly ? (
-            <div className="text-[9px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-              Local
-            </div>
           ) : null}
         </div>
 
         <div className="flex min-h-[52px] items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => updateCalendarTodo(todo.id, { priority: nextPriority[resolvedPriority] })}
+            className={cn(
+              "h-7 rounded-full border px-2.5 text-[10px] font-semibold uppercase tracking-[0.08em]",
+              priorityPillClasses[resolvedPriority]
+            )}
+            aria-label={`Priority ${priorityLabels[resolvedPriority]}. Click to cycle priority.`}
+          >
+            {priorityLabels[resolvedPriority]}
+          </Button>
+
           <Button
             variant="ghost"
             size="icon"
@@ -482,7 +666,16 @@ export function TodoItem({
             <Moon className="size-3.5" />
           </Button>
 
-          <DropdownMenu>
+          <DropdownMenu
+            open={taskMenuOpen}
+            onOpenChange={(open) => {
+              setTaskMenuOpen(open)
+              if (!open) {
+                setActiveToolPanel(null)
+                setShowReminderEditor(false)
+              }
+            }}
+          >
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
@@ -492,11 +685,109 @@ export function TodoItem({
                 <Plus className="size-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={openSubtaskComposer}>
-                <Plus className="size-4 mr-2" />
-                Add subtask
-              </DropdownMenuItem>
+            <DropdownMenuContent align="end" className="w-[300px] max-w-[calc(100vw-24px)] p-0">
+              <div className="grid grid-cols-8 gap-1 border-b border-border/60 px-2 py-2">
+                <button
+                  type="button"
+                  onClick={() => handleOpenToolPanel("reminder")}
+                  className={cn(
+                    "inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                    activeToolPanel === "reminder" && "bg-muted text-foreground",
+                    typeof todo.reminderOffsetMinutes === "number" && activeToolPanel !== "reminder" && "text-foreground"
+                  )}
+                  title="Reminder"
+                >
+                  <Bell className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenToolPanel("subtasks")}
+                  className={cn(
+                    "inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                    activeToolPanel === "subtasks" && "bg-muted text-foreground"
+                  )}
+                  title="Add subtask"
+                >
+                  <ListChecks className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenToolPanel("link")}
+                  className={cn(
+                    "inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                    activeToolPanel === "link" && "bg-muted text-foreground",
+                    structuredNotes.link && activeToolPanel !== "link" && "text-foreground"
+                  )}
+                  title="URL or phone"
+                >
+                  <Link2 className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenToolPanel("priority")}
+                  className={cn(
+                    "inline-flex size-8 items-center justify-center rounded-full transition-colors hover:bg-muted",
+                    activeToolPanel === "priority" && "bg-muted",
+                    resolvedPriority === "urgent"
+                      ? "text-red-500"
+                      : resolvedPriority === "important"
+                        ? "text-amber-500"
+                        : "text-muted-foreground hover:text-foreground"
+                  )}
+                  title="Priority"
+                >
+                  <AlertTriangle className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenToolPanel("icon")}
+                  className={cn(
+                    "inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                    activeToolPanel === "icon" && "bg-muted text-foreground",
+                    todo.icon && activeToolPanel !== "icon" && "text-foreground"
+                  )}
+                  title="Icon"
+                >
+                  <Shapes className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenToolPanel("labels")}
+                  className={cn(
+                    "inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                    activeToolPanel === "labels" && "bg-muted text-foreground",
+                    todo.labelIds.length > 0 && activeToolPanel !== "labels" && "text-foreground"
+                  )}
+                  title="Labels"
+                >
+                  <Tag className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenToolPanel("color")}
+                  className={cn(
+                    "inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                    activeToolPanel === "color" && "bg-muted text-foreground",
+                    todo.color && activeToolPanel !== "color" && "text-foreground"
+                  )}
+                  title="Color"
+                >
+                  <Palette className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenToolPanel("attachment")}
+                  className={cn(
+                    "inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                    activeToolPanel === "attachment" && "bg-muted text-foreground",
+                    structuredNotes.attachments.length > 0 && activeToolPanel !== "attachment" && "text-foreground"
+                  )}
+                  title="Attachment"
+                >
+                  <Paperclip className="size-4" />
+                </button>
+              </div>
+
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>
                   <RotateCcw className="size-4 mr-2" />
@@ -587,113 +878,261 @@ export function TodoItem({
                   </div>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
-              <DropdownMenuSeparator />
-              <div className="px-2 py-1.5 text-sm font-medium">Priority</div>
-              <div className="flex gap-1 px-2 pb-2">
-                {(['none', 'low', 'medium', 'high'] as const).map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => updateCalendarTodo(todo.id, { priority: p })}
-                    className={cn(
-                      "px-2 py-1 text-[10px] rounded border border-border capitalize transition-colors",
-                      todo.priority === p || (!todo.priority && p === 'none')
-                        ? "bg-foreground text-background border-foreground"
-                        : "bg-transparent text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    {p}
-                  </button>
-                ))}
-              </div>
-              <DropdownMenuSeparator />
-              <div className="px-2 py-1.5 text-sm font-medium">Icon</div>
-              <div className="px-2 pb-2">
-                <div className="mb-2 flex items-center justify-between">
-                  <button
-                    type="button"
-                    onClick={() => updateCalendarTodo(todo.id, { icon: undefined })}
-                    className={cn(
-                      "inline-flex items-center gap-2 rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-                      !todo.icon && "bg-muted text-foreground"
-                    )}
-                  >
-                    Clear
-                  </button>
-                  {todo.icon ? <TaskIcon icon={todo.icon} className="size-4 text-muted-foreground" /> : null}
-                </div>
-                <div className="grid grid-cols-6 gap-2">
-                  {TASK_ICON_LIBRARY.map(({ key, label, Icon }) => {
-                    const selected = todo.icon === key
-                    return (
-                      <button
-                        key={key}
+              {activeToolPanel ? <DropdownMenuSeparator /> : null}
+              {activeToolPanel === "reminder" ? (
+                <div className="space-y-3 px-2 py-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-medium">Reminder</div>
+                    <button
+                      type="button"
+                      onClick={() => setShowReminderEditor((current) => !current)}
+                      className="inline-flex rounded-full border border-border/70 px-2 py-1 text-[10px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                    >
+                      {showReminderEditor ? "Hide custom" : reminderLabel}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2">
+                    {reminderPresetOptions.map((option) => {
+                      const active = todo.reminderOffsetMinutes === option.value
+                      return (
+                        <button
+                          key={option.label}
+                          type="button"
+                          onClick={() => applyReminderOffset(option.value)}
+                          className={cn(
+                            "rounded-lg border border-border/70 px-3 py-2 text-left text-[11px] transition-colors hover:bg-muted",
+                            active && "border-transparent bg-foreground text-background hover:bg-foreground"
+                          )}
+                        >
+                          {option.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {showReminderEditor ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        inputMode="numeric"
+                        value={reminderCustomMinutes}
+                        onChange={(event) => setReminderCustomMinutes(event.target.value.replace(/[^\d]/g, ""))}
+                        placeholder="Minutes before"
+                        className="h-8 w-full rounded-md border border-border bg-transparent px-2 text-[11px] outline-none"
+                      />
+                      <Button
                         type="button"
-                        onClick={() => updateCalendarTodo(todo.id, { icon: key })}
-                        className={cn(
-                          "flex items-center justify-center rounded-lg border border-border/70 p-2 transition-colors hover:bg-muted",
-                          selected && "border-transparent bg-foreground text-background hover:bg-foreground"
-                        )}
-                        title={label}
-                        aria-label={label}
-                      >
-                        <Icon className="size-4" />
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-              <DropdownMenuSeparator />
-              <div className="px-2 py-1.5 text-sm font-medium">Labels</div>
-              <div className="px-2 pb-2">
-                <div className="flex flex-wrap gap-1 max-h-[100px] overflow-y-auto">
-                  {labels.length > 0 ? (
-                    labels.map((label) => (
-                      <button
-                        key={label.id}
-                        onClick={() => toggleLabel(label.id)}
-                        className={cn(
-                          "px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors",
-                          todo.labelIds.includes(label.id)
-                            ? "text-white"
-                            : "bg-transparent text-muted-foreground hover:text-foreground border-border"
-                        )}
-                        style={{ 
-                          backgroundColor: todo.labelIds.includes(label.id) ? label.color : 'transparent',
-                          borderColor: todo.labelIds.includes(label.id) ? label.color : undefined
+                        size="sm"
+                        className="h-8 text-[11px]"
+                        onClick={() => {
+                          const minutes = Number(reminderCustomMinutes)
+                          if (!Number.isFinite(minutes) || minutes < 0) return
+                          applyReminderOffset(minutes)
                         }}
                       >
-                        {label.name}
+                        Apply
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {activeToolPanel === "subtasks" ? (
+                <div className="space-y-3 px-2 py-2">
+                  <div className="text-sm font-medium">Subtasks</div>
+                  <Button type="button" size="sm" className="h-8 w-full text-[11px]" onClick={openSubtaskComposer}>
+                    <Plus className="mr-2 size-3.5" />
+                    Add subtask
+                  </Button>
+                  <p className="text-[11px] leading-5 text-muted-foreground">
+                    Add a checklist item and it will appear right under this task.
+                  </p>
+                </div>
+              ) : null}
+
+              {activeToolPanel === "link" ? (
+                <div className="space-y-3 px-2 py-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-medium">URL / Phone</div>
+                    {structuredNotes.link ? (
+                      <button
+                        type="button"
+                        onClick={handleClearStructuredLink}
+                        className="text-[10px] font-medium text-foreground/80 hover:text-foreground"
+                      >
+                        Clear
                       </button>
-                    ))
+                    ) : null}
+                  </div>
+                  <input
+                    type="text"
+                    spellCheck={false}
+                    value={linkDraft}
+                    onChange={(event) => setLinkDraft(event.target.value)}
+                    placeholder="Paste a URL or phone number"
+                    className="h-8 w-full rounded-md border border-border bg-transparent px-2 text-[11px] outline-none"
+                  />
+                  <Button type="button" size="sm" className="h-8 w-full text-[11px]" onClick={handleSaveLink}>
+                    Save link
+                  </Button>
+                </div>
+              ) : null}
+
+              {activeToolPanel === "priority" ? (
+                <div className="space-y-3 px-2 py-2">
+                  <div className="text-sm font-medium">Priority</div>
+                  <div className="flex flex-wrap gap-2">
+                    {(["urgent", "important", "normal"] as const).map((priority) => (
+                      <button
+                        key={priority}
+                        type="button"
+                        onClick={() => updateCalendarTodo(todo.id, { priority })}
+                        className={cn(
+                          "rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] transition-colors",
+                          priority === "urgent"
+                            ? todo.priority === "urgent"
+                              ? "border-red-500 bg-red-500 text-white"
+                              : "border-red-200 text-red-700 hover:bg-red-50"
+                            : priority === "important"
+                              ? todo.priority === "important"
+                                ? "border-amber-500 bg-amber-500 text-white"
+                                : "border-amber-200 text-amber-700 hover:bg-amber-50"
+                              : resolvedPriority === "normal"
+                                ? "border-foreground bg-foreground text-background"
+                                : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+                        )}
+                      >
+                        {priority}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {activeToolPanel === "icon" ? (
+                <div className="space-y-3 px-2 py-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-medium">Icon</div>
+                    <button
+                      type="button"
+                      onClick={() => updateCalendarTodo(todo.id, { icon: undefined })}
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                        !todo.icon && "bg-muted text-foreground"
+                      )}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-5 gap-2">
+                    {TASK_ICON_LIBRARY.map(({ key, label, Icon }) => {
+                      const selected = todo.icon === key
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => updateCalendarTodo(todo.id, { icon: key })}
+                          className={cn(
+                            "flex items-center justify-center rounded-lg border border-border/70 p-2 transition-colors hover:bg-muted",
+                            selected && "border-transparent bg-foreground text-background hover:bg-foreground"
+                          )}
+                          title={label}
+                          aria-label={label}
+                        >
+                          <Icon className="size-4" />
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              {activeToolPanel === "labels" ? (
+                <div className="space-y-3 px-2 py-2">
+                  <div className="text-sm font-medium">Labels</div>
+                  <div className="flex max-h-[160px] flex-wrap gap-1 overflow-y-auto">
+                    {labels.length > 0 ? (
+                      labels.map((label) => (
+                        <button
+                          key={label.id}
+                          onClick={() => toggleLabel(label.id)}
+                          className={cn(
+                            "rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors",
+                            todo.labelIds.includes(label.id)
+                              ? "text-white"
+                              : "border-border bg-transparent text-muted-foreground hover:text-foreground"
+                          )}
+                          style={{
+                            backgroundColor: todo.labelIds.includes(label.id) ? label.color : "transparent",
+                            borderColor: todo.labelIds.includes(label.id) ? label.color : undefined,
+                          }}
+                        >
+                          {label.name}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="text-[10px] italic text-muted-foreground">No labels created yet</div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
+              {activeToolPanel === "color" ? (
+                <div className="space-y-3 px-2 py-2">
+                  <ColorPickerPanel
+                    value={todo.color}
+                    palette={colorPalette}
+                    onChange={(color) => updateCalendarTodo(todo.id, { color })}
+                    onPaletteChange={(palette) => setPreferences({ colorPalette: palette })}
+                    onClear={() => updateCalendarTodo(todo.id, { color: undefined })}
+                    description="Pick a saved swatch or open the system color wheel for a custom task color."
+                  />
+                </div>
+              ) : null}
+
+              {activeToolPanel === "attachment" ? (
+                <div className="space-y-3 px-2 py-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-medium">Attachments</div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[11px]"
+                      onClick={() => attachmentInputRef.current?.click()}
+                    >
+                      <Paperclip className="mr-1.5 size-3.5" />
+                      Add
+                    </Button>
+                  </div>
+                  <input
+                    ref={attachmentInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={handleAttachmentPick}
+                  />
+                  {structuredNotes.attachments.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {structuredNotes.attachments.map((attachmentName) => (
+                        <button
+                          key={attachmentName}
+                          type="button"
+                          onClick={() => handleRemoveAttachment(attachmentName)}
+                          className="inline-flex items-center gap-1 rounded-full border border-border/70 px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                          title="Remove attachment"
+                        >
+                          <Paperclip className="size-3" />
+                          <span>{attachmentName}</span>
+                          <X className="size-3" />
+                        </button>
+                      ))}
+                    </div>
                   ) : (
-                    <div className="text-[10px] text-muted-foreground italic">No labels created yet</div>
+                    <p className="text-[11px] leading-5 text-muted-foreground">
+                      No attachments added yet.
+                    </p>
                   )}
                 </div>
-              </div>
-              <DropdownMenuSeparator />
-              <div className="px-2 py-1.5 text-sm font-medium">Color</div>
-              <div className="flex gap-1 px-2 pb-2">
-                <button
-                  onClick={() => updateCalendarTodo(todo.id, { color: undefined })}
-                  className={cn(
-                    "size-5 rounded border border-border bg-transparent",
-                    !todo.color && "ring-2 ring-foreground"
-                  )}
-                  title="None"
-                />
-                {colorPalette.map((hex) => (
-                  <button
-                    key={hex}
-                    onClick={() => updateCalendarTodo(todo.id, { color: hex })}
-                    className={cn(
-                      "size-5 rounded border border-border",
-                      todo.color === hex && "ring-2 ring-foreground"
-                    )}
-                    style={{ backgroundColor: hex }}
-                    title={hex.toUpperCase()}
-                  />
-                ))}
-              </div>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
 

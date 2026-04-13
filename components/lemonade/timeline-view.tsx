@@ -5,10 +5,11 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { createOptimisticTodoId, localTaskParser, normalizeCalendarDateKey, parseNaturalLanguageTaskEntries, reconcileOptimisticTaskOrder, useLemonadeStore, type Todo } from "@/lib/store"
+import { createOptimisticTodoId, localTaskParser, normalizeCalendarDateKey, normalizeTodoPriority, parseNaturalLanguageTaskEntries, reconcileOptimisticTaskOrder, todoMatchesSearchFilters, useLemonadeStore, type Todo } from "@/lib/store"
+import { getPlannerTaskDragData, setPlannerTaskDragData } from "@/lib/task-dnd"
 import { cn } from "@/lib/utils"
 import { format, isValid, parseISO } from "date-fns"
-import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Flag, PencilLine, Plus, Sparkles, Trash2 } from "lucide-react"
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Flag, GripVertical, PencilLine, Plus, Sparkles, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 interface TimelineViewProps {
@@ -247,6 +248,8 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
     labelFilterIds,
     activeFilterColor,
     searchQuery,
+    searchModeActive,
+    taskSearchFilters,
     addCalendarTodo,
     ensureLabelIds,
     updateCalendarTodo,
@@ -272,13 +275,17 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
     () =>
       calendarTodos.filter((todo) => {
         if (todo.date !== selectedDateKey) return false
-        if (!preferences.showCompleted && todo.completed) return false
-        if (searchQuery && !todo.text.toLowerCase().includes(searchQuery.toLowerCase())) return false
-        if (labelFilterIds.length > 0 && !todo.labelIds.some((labelId) => labelFilterIds.includes(labelId))) return false
-        if (activeFilterColor && todo.color !== activeFilterColor) return false
-        return true
+        return todoMatchesSearchFilters(todo, {
+          searchQuery,
+          searchModeActive,
+          taskSearchFilters,
+          labelFilterIds,
+          activeFilterColor,
+          showCompleted: preferences.showCompleted,
+          referenceDate: date,
+        })
       }),
-    [activeFilterColor, calendarTodos, labelFilterIds, preferences.showCompleted, searchQuery, selectedDateKey]
+    [activeFilterColor, calendarTodos, date, labelFilterIds, preferences.showCompleted, searchModeActive, searchQuery, selectedDateKey, taskSearchFilters]
   )
 
   const unscheduledTodos = dayTodos.filter((todo) => !parseTimeToMinutes(todo.time))
@@ -466,20 +473,24 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
   }
 
   const handleUnscheduledDragStart = (event: ReactDragEvent<HTMLButtonElement>, todoId: string) => {
-    event.dataTransfer.setData("text/plain", todoId)
-    event.dataTransfer.effectAllowed = "move"
+    setPlannerTaskDragData(event, { todoId, source: "timeline-unscheduled" })
+  }
+
+  const handleTimedBlockDragStart = (event: ReactDragEvent<HTMLButtonElement>, todoId: string) => {
+    event.stopPropagation()
+    setPlannerTaskDragData(event, { todoId, source: "timeline-timed" })
   }
 
   const handleTimelineDrop = (event: ReactDragEvent<HTMLDivElement>) => {
     event.preventDefault()
     setIsTimelineDropActive(false)
 
-    const todoId = event.dataTransfer.getData("text/plain")
-    if (!todoId) {
+    const dragData = getPlannerTaskDragData(event)
+    if (!dragData?.todoId) {
       return
     }
 
-    const targetTodo = dayTodos.find((todo) => todo.id === todoId)
+    const targetTodo = calendarTodos.find((todo) => todo.id === dragData.todoId)
     if (!targetTodo) {
       return
     }
@@ -491,7 +502,8 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
 
     const durationMinutes = clampDurationMinutes(resolveTodoDuration(targetTodo), droppedMinutes)
 
-    updateCalendarTodo(todoId, {
+    updateCalendarTodo(dragData.todoId, {
+      date: selectedDateKey,
       time: formatTimeToken(droppedMinutes),
       durationMinutes,
     })
@@ -591,10 +603,7 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
               ? primaryTask.labels.filter((label): label is string => typeof label === "string")
               : []
           )
-          const aiPriority: Todo["priority"] =
-            primaryTask.priority === "high" || primaryTask.priority === "medium" || primaryTask.priority === "low"
-              ? primaryTask.priority
-              : parsedTask.priority
+          const aiPriority: Todo["priority"] = normalizeTodoPriority(primaryTask.priority ?? parsedTask.priority)
           const aiRecurringFrequency =
             primaryTask.recurringFrequency === "daily" ||
             primaryTask.recurringFrequency === "weekday" ||
@@ -747,9 +756,9 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
                 <button
                   key={todo.id}
                   type="button"
-                  onClick={() => openEditDialog(todo)}
-                  draggable
-                  onDragStart={(event) => handleUnscheduledDragStart(event, todo.id)}
+                    onClick={() => openEditDialog(todo)}
+                    draggable
+                    onDragStart={(event) => handleUnscheduledDragStart(event, todo.id)}
                   className={cn(
                     "flex w-full items-center gap-3 rounded-xl border border-border/60 px-3 py-2 text-left transition-colors hover:bg-muted/40",
                     todo.isSyncing && "animate-pulse"
@@ -760,7 +769,7 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
                   ) : todo.syncStatus === "local" ? (
                     <PencilLine className="size-3.5 text-muted-foreground" />
                   ) : null}
-                  <div className={cn("size-2 rounded-full", todo.priority === "high" ? "bg-red-500" : todo.priority === "medium" ? "bg-orange-500" : todo.priority === "low" ? "bg-blue-500" : "bg-muted-foreground/30")} />
+                  <div className={cn("size-2 rounded-full", normalizeTodoPriority(todo.priority) === "urgent" ? "bg-red-500" : normalizeTodoPriority(todo.priority) === "important" ? "bg-amber-500" : "bg-muted-foreground/30")} />
                   <span className={cn("flex-1 text-sm", todo.completed && "line-through opacity-50")}>{todo.text}</span>
                   {firstLabel ? (
                     <span className="rounded-full px-2 py-0.5 text-[10px] font-medium text-white" style={{ backgroundColor: firstLabel.color }}>
@@ -888,9 +897,7 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
                     ) : todo.syncStatus === "local" ? (
                       <PencilLine className="size-3.5 text-muted-foreground" />
                     ) : null}
-                    {todo.priority ? (
-                      <Flag className={cn("size-3.5", todo.priority === "high" ? "text-red-500" : todo.priority === "medium" ? "text-orange-500" : "text-blue-500")} />
-                    ) : null}
+                    <Flag className={cn("size-3.5", normalizeTodoPriority(todo.priority) === "urgent" ? "text-red-500" : normalizeTodoPriority(todo.priority) === "important" ? "text-amber-500" : "text-muted-foreground/50")} />
                     <span className={cn("truncate text-sm font-medium", todo.completed && "line-through opacity-50")}>
                       {todo.text}
                     </span>
@@ -943,6 +950,18 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
                         </PopoverContent>
                         </Popover>
                     ) : null}
+                    <button
+                      type="button"
+                      draggable
+                      onDragStart={(event) => handleTimedBlockDragStart(event, todo.id)}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => event.stopPropagation()}
+                      className="ml-1 inline-flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10"
+                      aria-label={`Drag ${todo.text} to another panel`}
+                      title="Drag to another panel"
+                    >
+                      <GripVertical className="size-3.5" />
+                    </button>
                   </div>
                   <div className="mt-1 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
                     {todo.time} • {durationMinutes} min
@@ -950,10 +969,6 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
                   {todo.isSyncing ? (
                     <div className="mt-1 text-[9px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
                       Syncing...
-                    </div>
-                  ) : todo.syncStatus === "local" ? (
-                    <div className="mt-1 text-[9px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                      Local
                     </div>
                   ) : null}
                   </div>

@@ -11,6 +11,7 @@ import {
   Calendar as CalendarIcon,
   Tag,
   AlertTriangle,
+  Search,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -18,8 +19,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar"
 import { cn } from "@/lib/utils"
 import { aiParseTasks } from "@/lib/ai-task-parser"
-import { IconPicker } from "./icon-picker"
+import { ColorPickerPanel } from "./color-picker-panel"
 import {
+  DEFAULT_TASK_SEARCH_FILTERS,
   createOptimisticTodoId,
   formatLocalDateKey,
   normalizeCalendarDateKey,
@@ -29,8 +31,9 @@ import {
   useLemonadeStore,
 } from "@/lib/store"
 import { format, isValid, parseISO } from "date-fns"
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
 import { toast } from "sonner"
+import { TASK_ICON_LIBRARY } from "@/lib/task-icons"
 
 interface HeaderProps {
   onNavigate: (direction: 'prev-week' | 'next-week' | 'prev-day' | 'next-day' | 'today') => void
@@ -58,6 +61,12 @@ const splitNaturalTitleFallback = (input: string, index: number) =>
     .map((fragment) => fragment.trim())
     .filter(Boolean)[index] ?? input.trim()
 
+const optionRowClass = (active: boolean) =>
+  cn(
+    "flex w-full items-center justify-center rounded-lg px-3 py-2 text-center text-[12px] transition-colors",
+    active ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+  )
+
 export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _onViewModeChange }: HeaderProps) {
   const {
     addCalendarTodo,
@@ -65,11 +74,26 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
     ensureLabelIds,
     labels,
     calendarTodos,
+    lists,
     selectedCalendarDate,
     aiMode,
+    preferences,
+    setPreferences,
     quickAddSessionTodoIds,
     startQuickAddSession,
     endQuickAddSession,
+    searchQuery,
+    setSearchQuery,
+    searchModeActive,
+    setSearchModeActive,
+    taskSearchFilters,
+    setTaskSearchFilters,
+    resetTaskSearchFilters,
+    labelFilterIds,
+    setLabelFilterIds,
+    clearLabelFilters,
+    activeFilterColor,
+    setActiveFilterColor,
   } = useLemonadeStore()
   const [quickAddText, setQuickAddText] = useState("")
   const [quickAddExpanded, setQuickAddExpanded] = useState(false)
@@ -86,13 +110,14 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
   const [draftSubtasks, setDraftSubtasks] = useState<string[]>([])
   const [draftSubtaskText, setDraftSubtaskText] = useState("")
   const [showPriorityPopover, setShowPriorityPopover] = useState(false)
-  const [draftPriority, setDraftPriority] = useState<"high" | "medium" | "low" | "none">("none")
+  const [draftPriority, setDraftPriority] = useState<"urgent" | "important" | "normal">("normal")
   const [showLabelPopover, setShowLabelPopover] = useState(false)
   const [draftLabelIds, setDraftLabelIds] = useState<string[]>([])
   const [showDraftColorPopover, setShowDraftColorPopover] = useState(false)
   const [draftColor, setDraftColor] = useState<string | undefined>(undefined)
-  const [draftIcon, setDraftIcon] = useState<string | undefined>(undefined)
   const [showShortcutDatePopover, setShowShortcutDatePopover] = useState(false)
+  const [searchFiltersExpanded, setSearchFiltersExpanded] = useState(false)
+  const quickAddBoundaryRef = useRef<HTMLDivElement>(null)
   const currentDate = parseLocalDateKey(selectedCalendarDate)
   const [shortcutPickerMonth, setShortcutPickerMonth] = useState<Date>(currentDate)
 
@@ -102,6 +127,7 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
     viewMode === "today"
       ? [todayKey]
       : getVisibleDateKeys(currentDate)
+  const canScheduleDraft = quickAddText.trim().length > 0
 
   // Note: shortcuts in this header are for setting the *new task's* date (draftDateKey),
   // not for navigating the calendar.
@@ -122,10 +148,51 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
   const sessionTodos = useMemo(() => {
     if (quickAddSessionTodoIds.length === 0) return []
     const map = new Map(calendarTodos.map((todo) => [todo.id, todo] as const))
-    return quickAddSessionTodoIds.map((id) => map.get(id)).filter(Boolean)
+    return quickAddSessionTodoIds
+      .map((id) => map.get(id))
+      .filter((todo): todo is (typeof calendarTodos)[number] => Boolean(todo))
   }, [calendarTodos, quickAddSessionTodoIds])
 
-  const resetPerTaskDraft = () => {
+  const allTaskColors = useMemo(() => {
+    const usedColors = new Set<string>()
+
+    calendarTodos.forEach((todo) => {
+      if (todo.color) usedColors.add(todo.color)
+    })
+
+    lists.forEach((list) => {
+      list.todos.forEach((todo) => {
+        if (todo.color) usedColors.add(todo.color)
+      })
+    })
+
+    return usedColors.size > 0 ? Array.from(usedColors) : preferences.colorPalette
+  }, [calendarTodos, lists, preferences.colorPalette])
+
+  const searchStatusChecks = useMemo(
+    () => ({
+      done: taskSearchFilters.status !== "todo",
+      todo: taskSearchFilters.status !== "done",
+    }),
+    [taskSearchFilters.status]
+  )
+
+  const hasActiveSearchFilters =
+    searchQuery.trim().length > 0 ||
+    taskSearchFilters.status !== DEFAULT_TASK_SEARCH_FILTERS.status ||
+    taskSearchFilters.when !== DEFAULT_TASK_SEARCH_FILTERS.when ||
+    taskSearchFilters.priority !== DEFAULT_TASK_SEARCH_FILTERS.priority ||
+    taskSearchFilters.recurring !== DEFAULT_TASK_SEARCH_FILTERS.recurring ||
+    taskSearchFilters.icon !== DEFAULT_TASK_SEARCH_FILTERS.icon ||
+    taskSearchFilters.attachment !== DEFAULT_TASK_SEARCH_FILTERS.attachment ||
+    taskSearchFilters.url !== DEFAULT_TASK_SEARCH_FILTERS.url ||
+    taskSearchFilters.phone !== DEFAULT_TASK_SEARCH_FILTERS.phone ||
+    taskSearchFilters.alert !== DEFAULT_TASK_SEARCH_FILTERS.alert ||
+    taskSearchFilters.dateAdded !== DEFAULT_TASK_SEARCH_FILTERS.dateAdded ||
+    labelFilterIds.length > 0 ||
+    activeFilterColor !== null
+
+  const resetPerTaskDraft = useCallback(() => {
     setShowReminderPopover(false)
     setDraftReminderOffsetMinutes(null)
     setDraftReminderCustomMinutes("")
@@ -137,34 +204,83 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
     setDraftSubtasks([])
     setDraftSubtaskText("")
     setShowPriorityPopover(false)
-    setDraftPriority("none")
+    setDraftPriority("normal")
     setShowLabelPopover(false)
     setDraftLabelIds([])
     setShowDraftColorPopover(false)
     setDraftColor(undefined)
-    setDraftIcon(undefined)
-  }
+  }, [])
 
-  const closeQuickAdd = () => {
+  const clearSearchMode = useCallback(() => {
+    setSearchQuery("")
+    resetTaskSearchFilters()
+    clearLabelFilters()
+    setActiveFilterColor(null)
+    setSearchModeActive(false)
+    setSearchFiltersExpanded(false)
+  }, [clearLabelFilters, resetTaskSearchFilters, setActiveFilterColor, setSearchModeActive, setSearchQuery])
+
+  const updateSearchStatus = useCallback((nextDone: boolean, nextTodo: boolean) => {
+    const nextStatus =
+      nextDone && nextTodo ? "all" :
+      nextDone ? "done" :
+      nextTodo ? "todo" :
+      "all"
+    setTaskSearchFilters({ status: nextStatus })
+  }, [setTaskSearchFilters])
+
+  const closeQuickAdd = useCallback(() => {
     setQuickAddExpanded(false)
     setQuickAddText("")
     resetPerTaskDraft()
-  }
+    setDraftDateKey(selectedCalendarDate)
+    setDraftTime("")
+    setShowShortcutDatePopover(false)
+  }, [resetPerTaskDraft, selectedCalendarDate])
+
+  const openQuickAdd = useCallback(() => {
+    setQuickAddExpanded(true)
+    setDraftDateKey(selectedCalendarDate)
+    setDraftTime("")
+  }, [selectedCalendarDate])
+
+  const openSearchMode = useCallback(() => {
+    closeQuickAdd()
+    setSearchModeActive(true)
+    setSearchFiltersExpanded(true)
+  }, [closeQuickAdd, setSearchModeActive])
 
   const wasExpandedRef = useRef(false)
   useEffect(() => {
     if (quickAddExpanded) {
       startQuickAddSession()
-      setDraftDateKey(selectedCalendarDate)
-      setDraftTime("")
     } else if (wasExpandedRef.current) {
       endQuickAddSession()
-      resetPerTaskDraft()
-      setDraftDateKey(selectedCalendarDate)
     }
     wasExpandedRef.current = quickAddExpanded
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quickAddExpanded])
+  }, [endQuickAddSession, quickAddExpanded, startQuickAddSession])
+
+  useEffect(() => {
+    if (!quickAddExpanded) {
+      return
+    }
+
+    const handlePointerDownOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null
+      if (!target) {
+        return
+      }
+
+      if (target.closest("[data-quick-add-surface='true']")) {
+        return
+      }
+
+      closeQuickAdd()
+    }
+
+    document.addEventListener("mousedown", handlePointerDownOutside)
+    return () => document.removeEventListener("mousedown", handlePointerDownOutside)
+  }, [closeQuickAdd, quickAddExpanded])
   
   const handleAttachmentPick = (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? [])
@@ -209,11 +325,10 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
         date: draftDateKey,
         time: draftTime.trim() ? draftTime.trim() : undefined,
         isHeading: title === title.toUpperCase() && title.length > 2,
-        priority: draftPriority,
+          priority: draftPriority,
         labelIds: draftLabelIds,
         subtasks: draftSubtasks.map((subtaskTitle) => ({ title: subtaskTitle })),
         color: draftColor,
-        icon: draftIcon,
         notes: draftNotes,
         reminderOffsetMinutes: draftReminderOffsetMinutes,
         isSyncing: false,
@@ -250,11 +365,10 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
           date: optimisticDate,
           time: optimisticTime,
           isHeading: title === title.toUpperCase() && title.length > 2,
-          priority: draftPriority !== "none" ? draftPriority : parsedTask.priority,
+          priority: draftPriority !== "normal" ? draftPriority : parsedTask.priority,
           labelIds,
           subtasks: [...parsedTask.subtaskTitles, ...draftSubtasks].map((subtaskTitle) => ({ title: subtaskTitle })),
           color: draftColor,
-          icon: draftIcon,
           notes: draftNotes,
           reminderOffsetMinutes: draftReminderOffsetMinutes,
           isSyncing: true,
@@ -267,7 +381,7 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
 
     if (optimisticTasks.length === 0) {
       setQuickAddText("")
-      setShowQuickAdd(false)
+      closeQuickAdd()
       return
     }
 
@@ -337,28 +451,176 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
     resetPerTaskDraft()
   }
 
+  const activeFilterChips = useMemo(() => {
+    const chips: Array<{ key: string; label: string; clear: () => void }> = []
+
+    if (searchQuery.trim()) {
+      chips.push({
+        key: "query",
+        label: `Search: ${searchQuery.trim()}`,
+        clear: () => setSearchQuery(""),
+      })
+    }
+
+    if (taskSearchFilters.status === "done") {
+      chips.push({ key: "status-done", label: "Done", clear: () => setTaskSearchFilters({ status: "all" }) })
+    } else if (taskSearchFilters.status === "todo") {
+      chips.push({ key: "status-todo", label: "To Do", clear: () => setTaskSearchFilters({ status: "all" }) })
+    }
+
+    if (taskSearchFilters.when !== "all") {
+      const labels: Record<string, string> = {
+        today: "When: Today",
+        tomorrow: "When: Tomorrow",
+        "this-week": "When: This Week",
+        "next-week": "When: Next Week",
+        "this-month": "When: This Month",
+        "next-month": "When: Next Month",
+        "this-year": "When: This Year",
+        someday: "When: Someday",
+      }
+      chips.push({ key: "when", label: labels[taskSearchFilters.when], clear: () => setTaskSearchFilters({ when: "all" }) })
+    }
+
+    if (taskSearchFilters.priority !== "all") {
+      const labels: Record<string, string> = { high: "Priority: High", med: "Priority: Med", low: "Priority: Low", none: "Priority: None" }
+      chips.push({ key: "priority", label: labels[taskSearchFilters.priority], clear: () => setTaskSearchFilters({ priority: "all" }) })
+    }
+
+    if (labelFilterIds.length > 0) {
+      labelFilterIds.forEach((labelId) => {
+        const label = labels.find((entry) => entry.id === labelId)
+        if (!label) return
+        chips.push({
+          key: `label-${label.id}`,
+          label: `Label: ${label.name}`,
+          clear: () => setLabelFilterIds(labelFilterIds.filter((id) => id !== label.id)),
+        })
+      })
+    }
+
+    if (taskSearchFilters.recurring !== "all") {
+      chips.push({
+        key: "recurring",
+        label: `Recurring: ${
+          taskSearchFilters.recurring === "yes"
+            ? "Yes"
+            : taskSearchFilters.recurring === "no"
+              ? "No"
+              : "Both"
+        }`,
+        clear: () => setTaskSearchFilters({ recurring: "all" }),
+      })
+    }
+
+    if (activeFilterColor) {
+      chips.push({ key: "color", label: "Color", clear: () => setActiveFilterColor(null) })
+    }
+
+    if (taskSearchFilters.icon) {
+      const iconLabel = TASK_ICON_LIBRARY.find((icon) => icon.key === taskSearchFilters.icon)?.label ?? "Icon"
+      chips.push({ key: "icon", label: `Icon: ${iconLabel}`, clear: () => setTaskSearchFilters({ icon: null }) })
+    }
+
+    ;(["attachment", "url", "phone"] as const).forEach((key) => {
+      if (taskSearchFilters[key] === "all") return
+      const title = key === "attachment" ? "Attachment" : key.toUpperCase()
+      chips.push({
+        key,
+        label: `${title}: ${
+          taskSearchFilters[key] === "yes"
+            ? "Yes"
+            : taskSearchFilters[key] === "no"
+              ? "No"
+              : "Both"
+        }`,
+        clear: () => setTaskSearchFilters({ [key]: "all" }),
+      })
+    })
+
+    if (taskSearchFilters.alert !== "all") {
+      const alertLabel = {
+        none: "Alert: None",
+        "5min": "Alert: 5min",
+        "10min": "Alert: 10min",
+        "15min": "Alert: 15min",
+        "30min": "Alert: 30min",
+        "1hr": "Alert: 1hr",
+      }[taskSearchFilters.alert]
+
+      chips.push({ key: "alert", label: alertLabel, clear: () => setTaskSearchFilters({ alert: "all" }) })
+    }
+
+    if (taskSearchFilters.dateAdded !== "all") {
+      const labelsByValue: Record<string, string> = {
+        today: "Date Added: Today",
+        yesterday: "Date Added: Yesterday",
+        "this-week": "Date Added: This Week",
+      }
+      chips.push({ key: "date-added", label: labelsByValue[taskSearchFilters.dateAdded], clear: () => setTaskSearchFilters({ dateAdded: "all" }) })
+    }
+
+    return chips
+  }, [activeFilterColor, labelFilterIds, labels, searchQuery, setActiveFilterColor, setLabelFilterIds, setSearchQuery, setTaskSearchFilters, taskSearchFilters])
+
   return (
     <header
       className="lemonade-header flex w-full items-center"
       style={{ borderTopColor: "var(--accent-color)" }}
     >
-      <div className="relative w-full">
-        {/* Input pill */}
+      <div ref={quickAddBoundaryRef} data-quick-add-surface="true" className="relative w-full">
         <div
-          className="flex w-full items-center gap-2 rounded-full border border-border/45 bg-background/55 px-6 py-3 backdrop-blur-[10px] dark:bg-[rgba(19,19,19,0.42)]"
+          className="flex w-full items-center gap-2 rounded-full border border-border/45 bg-background/55 px-4 py-3 backdrop-blur-[10px] dark:bg-[rgba(19,19,19,0.42)]"
           onMouseDown={(event) => {
+            if (searchModeActive) return
             const target = event.target as HTMLElement
-            // Don't auto-expand when interacting with the buttons (chevron/calendar).
             if (target.closest("button")) return
-            setQuickAddExpanded(true)
+            openQuickAdd()
           }}
         >
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => {
+              if (searchModeActive) {
+                clearSearchMode()
+              } else {
+                openSearchMode()
+              }
+            }}
+            className={cn("size-8 rounded-full text-muted-foreground hover:text-foreground", searchModeActive && "text-foreground")}
+            aria-label={searchModeActive ? "Exit search" : "Search tasks"}
+            title={searchModeActive ? "Exit search" : "Search tasks"}
+          >
+            <Search className="size-4" />
+          </Button>
+
           <Input
-            placeholder="Add tasks here in natural language"
-            value={quickAddText}
-            onChange={(e) => setQuickAddText(e.target.value)}
-            onFocus={() => setQuickAddExpanded(true)}
+            placeholder={searchModeActive ? "Search tasks..." : "Add tasks here in natural language"}
+            value={searchModeActive ? searchQuery : quickAddText}
+            onChange={(event) => {
+              if (searchModeActive) {
+                setSearchQuery(event.target.value)
+              } else {
+                setQuickAddText(event.target.value)
+              }
+            }}
+            onFocus={() => {
+              if (!searchModeActive) {
+                openQuickAdd()
+              }
+            }}
             onKeyDown={(event) => {
+              if (searchModeActive) {
+                if (event.key === "Enter") {
+                  event.preventDefault()
+                } else if (event.key === "Escape") {
+                  clearSearchMode()
+                }
+                return
+              }
+
               if (event.key === "Enter") {
                 handleQuickAddSubmit()
               } else if (event.key === "Escape") {
@@ -368,105 +630,417 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
             className="h-auto w-full min-w-0 flex-1 rounded-full border-0 bg-transparent px-0 py-0 text-[14px] text-foreground shadow-none focus-visible:ring-0"
           />
 
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={() => setQuickAddExpanded((expanded) => !expanded)}
-            className="size-9 rounded-full text-muted-foreground hover:text-foreground"
-            aria-label={quickAddExpanded ? "Collapse" : "Expand"}
-            title={quickAddExpanded ? "Collapse" : "Expand"}
-          >
-            <ChevronDown className={cn("size-4 transition-transform", quickAddExpanded && "rotate-180")} />
-          </Button>
-
-          <Popover
-            open={showShortcutDatePopover}
-            onOpenChange={(open) => {
-              setShowShortcutDatePopover(open)
-              if (open) {
-                setShortcutPickerMonth(parseLocalDateKey(selectedCalendarDate))
-              }
-            }}
-          >
-            <PopoverTrigger asChild>
+          {searchModeActive ? (
+            <>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="size-9 rounded-full text-muted-foreground hover:text-foreground"
-                aria-label="Pick a date"
-                title="Pick a date"
+                onClick={() => setSearchFiltersExpanded((current) => !current)}
+                className="size-8 rounded-full text-muted-foreground hover:text-foreground"
+                aria-label={searchFiltersExpanded ? "Collapse filters" : "Expand filters"}
+                title={searchFiltersExpanded ? "Collapse filters" : "Expand filters"}
               >
-                <CalendarIcon className="size-4" />
+                <ChevronDown className={cn("size-4 transition-transform", searchFiltersExpanded && "rotate-180")} />
               </Button>
-            </PopoverTrigger>
-            <PopoverContent
-              align="end"
-              side="bottom"
-              sideOffset={10}
-              collisionPadding={12}
-              className="z-50 w-auto max-w-[calc(100vw-24px)] rounded-2xl border-0 p-0 shadow-[0_10px_30px_rgba(0,0,0,0.12)]"
-            >
-              <div className="p-3">
-                <Calendar
-                  mode="single"
-                  selected={draftDateKey ? parseLocalDateKey(draftDateKey) : undefined}
-                  month={shortcutPickerMonth}
-                  onMonthChange={setShortcutPickerMonth}
-                  onSelect={(date) => {
-                    if (!date) return
-                    setDraftDateKey(formatLocalDateKey(date))
-                  }}
-                  initialFocus
-                />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={clearSearchMode}
+                className="size-8 rounded-full text-muted-foreground hover:text-foreground"
+                aria-label="Exit search mode"
+                title="Exit search mode"
+              >
+                <X className="size-4" />
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  if (quickAddExpanded) {
+                    closeQuickAdd()
+                  } else {
+                    openQuickAdd()
+                  }
+                }}
+                className="size-9 rounded-full text-muted-foreground hover:text-foreground"
+                aria-label={quickAddExpanded ? "Collapse" : "Expand"}
+                title={quickAddExpanded ? "Collapse" : "Expand"}
+              >
+                <ChevronDown className={cn("size-4 transition-transform", quickAddExpanded && "rotate-180")} />
+              </Button>
 
-                <div className="mt-3 flex items-center gap-2">
-                  <Input
-                    type="time"
-                    value={draftTime}
-                    onChange={(event) => setDraftTime(event.target.value)}
-                    className="h-9"
-                  />
+              <Popover
+                open={showShortcutDatePopover}
+                onOpenChange={(open) => {
+                  setShowShortcutDatePopover(open)
+                  if (open) {
+                    setShortcutPickerMonth(parseLocalDateKey(selectedCalendarDate))
+                  }
+                }}
+              >
+                <PopoverTrigger asChild>
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="size-9 text-muted-foreground hover:text-foreground"
-                    aria-label="Clear time"
-                    title="Clear time"
-                    onClick={() => setDraftTime("")}
+                    disabled={!canScheduleDraft}
+                    className="size-9 rounded-full text-muted-foreground hover:text-foreground"
+                    aria-label="Pick a date"
+                    title="Pick a date"
                   >
-                    <X className="size-4" />
+                    <CalendarIcon className="size-4" />
                   </Button>
-                </div>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="end"
+                  side="bottom"
+                  sideOffset={10}
+                  collisionPadding={12}
+                  data-quick-add-surface="true"
+                  className="z-50 w-auto max-w-[calc(100vw-24px)] rounded-2xl border-0 p-0 shadow-[0_10px_30px_rgba(0,0,0,0.12)]"
+                >
+                  <div className="p-3">
+                    <Calendar
+                      mode="single"
+                      selected={draftDateKey ? parseLocalDateKey(draftDateKey) : undefined}
+                      month={shortcutPickerMonth}
+                      onMonthChange={setShortcutPickerMonth}
+                      onSelect={(date) => {
+                        if (!canScheduleDraft || !date) return
+                        setDraftDateKey(formatLocalDateKey(date))
+                      }}
+                      initialFocus
+                    />
 
-                <div className="mt-3 flex items-center justify-between">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-8"
-                    onClick={() => setDraftDateKey(null)}
-                  >
-                    No date
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="h-8"
-                    onClick={() => setShowShortcutDatePopover(false)}
-                  >
-                    Done
-                  </Button>
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
+                    <div className="mt-3 flex items-center gap-2">
+                      <Input
+                        type="time"
+                        value={draftTime}
+                        disabled={!canScheduleDraft}
+                        onChange={(event) => setDraftTime(event.target.value)}
+                        className="h-9"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-9 text-muted-foreground hover:text-foreground"
+                        aria-label="Clear time"
+                        title="Clear time"
+                        onClick={() => setDraftTime("")}
+                        disabled={!canScheduleDraft}
+                      >
+                        <X className="size-4" />
+                      </Button>
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-between">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8"
+                        disabled={!canScheduleDraft}
+                        onClick={() => setDraftDateKey(null)}
+                      >
+                        No date
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-8"
+                        onClick={() => setShowShortcutDatePopover(false)}
+                      >
+                        Done
+                      </Button>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </>
+          )}
         </div>
 
+        {searchModeActive ? (
+          <div className="mt-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-4 text-[12px] text-foreground">
+                <label className="inline-flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={searchStatusChecks.done}
+                    onChange={(event) => updateSearchStatus(event.target.checked, searchStatusChecks.todo)}
+                    className="size-3.5 rounded border-border"
+                  />
+                  <span>Done</span>
+                </label>
+                <label className="inline-flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={searchStatusChecks.todo}
+                    onChange={(event) => updateSearchStatus(searchStatusChecks.done, event.target.checked)}
+                    className="size-3.5 rounded border-border"
+                  />
+                  <span>To Do</span>
+                </label>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setSearchFiltersExpanded((current) => !current)}
+                className="h-8 rounded-full px-3 text-[11px] uppercase tracking-[0.12em] text-muted-foreground"
+              >
+                Filters
+                <ChevronDown className={cn("ml-1 size-3.5 transition-transform", searchFiltersExpanded && "rotate-180")} />
+              </Button>
+            </div>
+
+            {searchFiltersExpanded ? (
+              <div className="mt-2 space-y-3 rounded-[24px] border border-border/35 bg-background/50 px-4 py-4 backdrop-blur-[8px] dark:bg-[rgba(19,19,19,0.34)]">
+                {hasActiveSearchFilters ? (
+                  <div className="flex items-center justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchQuery("")
+                        resetTaskSearchFilters()
+                        setLabelFilterIds([])
+                        setActiveFilterColor(null)
+                      }}
+                      className="rounded-full border border-border/70 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      Clear filters
+                    </button>
+                  </div>
+                ) : null}
+
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="max-h-[360px] space-y-4 overflow-y-auto rounded-[22px] border border-border/55 bg-[rgba(255,255,255,0.56)] p-4 backdrop-blur-[10px] dark:bg-[rgba(19,19,19,0.34)]" style={{ scrollbarWidth: "thin" }}>
+                    <section>
+                      <div className="mb-2 text-center text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground">When?</div>
+                      <div className="space-y-1">
+                        {[
+                          ["all", "All"],
+                          ["today", "Today"],
+                          ["tomorrow", "Tomorrow (Next Day)"],
+                          ["this-week", "This Week"],
+                          ["next-week", "Next Week"],
+                          ["this-month", "This Month"],
+                          ["next-month", "Next Month"],
+                          ["this-year", "This Year"],
+                          ["someday", "Someday"],
+                        ].map(([value, label]) => (
+                          <button key={value} type="button" onClick={() => setTaskSearchFilters({ when: value as typeof taskSearchFilters.when })} className={optionRowClass(taskSearchFilters.when === value)}>
+                            <span>{label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section>
+                      <div className="mb-2 text-center text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground">Recurring?</div>
+                      <div className="space-y-1">
+                        {[
+                          ["all", "All"],
+                          ["yes", "Yes"],
+                          ["no", "No"],
+                          ["both", "Both"],
+                        ].map(([value, label]) => (
+                          <button key={value} type="button" onClick={() => setTaskSearchFilters({ recurring: value as typeof taskSearchFilters.recurring })} className={optionRowClass(taskSearchFilters.recurring === value)}>
+                            <span>{label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section>
+                      <div className="mb-2 text-center text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground">Date Added</div>
+                      <div className="space-y-1">
+                        {[
+                          ["all", "All"],
+                          ["today", "Today"],
+                          ["yesterday", "Yesterday"],
+                          ["this-week", "This Week"],
+                        ].map(([value, label]) => (
+                          <button key={value} type="button" onClick={() => setTaskSearchFilters({ dateAdded: value as typeof taskSearchFilters.dateAdded })} className={optionRowClass(taskSearchFilters.dateAdded === value)}>
+                            <span>{label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  </div>
+
+                  <div className="max-h-[360px] space-y-4 overflow-y-auto rounded-[22px] border border-border/55 bg-[rgba(255,255,255,0.56)] p-4 backdrop-blur-[10px] dark:bg-[rgba(19,19,19,0.34)]" style={{ scrollbarWidth: "thin" }}>
+                    <section>
+                      <div className="mb-2 text-center text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground">Priority?</div>
+                      <div className="space-y-1">
+                        {[
+                          ["all", "All"],
+                          ["high", "High"],
+                          ["med", "Med"],
+                          ["low", "Low"],
+                          ["none", "None"],
+                        ].map(([value, label]) => (
+                          <button key={value} type="button" onClick={() => setTaskSearchFilters({ priority: value as typeof taskSearchFilters.priority })} className={optionRowClass(taskSearchFilters.priority === value)}>
+                            <span>{label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section>
+                      <div className="mb-2 text-center text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground">Label</div>
+                      <div className="max-h-40 space-y-1 overflow-y-auto">
+                        <button type="button" onClick={() => setLabelFilterIds([])} className={optionRowClass(labelFilterIds.length === 0)}>
+                          <span>All</span>
+                        </button>
+                        {labels.map((label) => (
+                          <button key={label.id} type="button" onClick={() => setLabelFilterIds([label.id])} className={optionRowClass(labelFilterIds.includes(label.id))}>
+                            <span className="inline-flex items-center gap-2">
+                              <span className="size-2 rounded-full" style={{ backgroundColor: label.color }} />
+                              <span>{label.name}</span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section>
+                      <div className="mb-2 text-center text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground">Color</div>
+                      <div className="space-y-2">
+                        <button type="button" onClick={() => setActiveFilterColor(null)} className={optionRowClass(activeFilterColor === null)}>
+                          <span>All</span>
+                        </button>
+                        <div className="flex flex-wrap gap-2 px-1">
+                          {allTaskColors.map((color) => (
+                            <button
+                              key={color}
+                              type="button"
+                              onClick={() => setActiveFilterColor(color)}
+                              className={cn("size-7 rounded-full border-2 transition-transform hover:scale-105", activeFilterColor === color ? "border-foreground" : "border-transparent")}
+                              style={{ backgroundColor: color }}
+                              aria-label={`Filter by ${color}`}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </section>
+
+                    <section>
+                      <div className="mb-2 text-center text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground">Icon?</div>
+                      <div className="max-h-40 space-y-1 overflow-y-auto">
+                        <button type="button" onClick={() => setTaskSearchFilters({ icon: null })} className={optionRowClass(taskSearchFilters.icon === null)}>
+                          <span>All</span>
+                        </button>
+                        {TASK_ICON_LIBRARY.map((icon) => (
+                          <button key={icon.key} type="button" onClick={() => setTaskSearchFilters({ icon: icon.key })} className={optionRowClass(taskSearchFilters.icon === icon.key)}>
+                            <span>{icon.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  </div>
+
+                  <div className="max-h-[360px] space-y-4 overflow-y-auto rounded-[22px] border border-border/55 bg-[rgba(255,255,255,0.56)] p-4 backdrop-blur-[10px] dark:bg-[rgba(19,19,19,0.34)]" style={{ scrollbarWidth: "thin" }}>
+                    <section>
+                      <div className="mb-2 text-center text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground">Phone?</div>
+                      <div className="space-y-1">
+                        {[
+                          ["all", "All"],
+                          ["yes", "Yes"],
+                          ["no", "No"],
+                        ].map(([value, label]) => (
+                          <button key={value} type="button" onClick={() => setTaskSearchFilters({ phone: value as typeof taskSearchFilters.phone })} className={optionRowClass(taskSearchFilters.phone === value)}>
+                            <span>{label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section>
+                      <div className="mb-2 text-center text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground">URL?</div>
+                      <div className="space-y-1">
+                        {[
+                          ["all", "All"],
+                          ["yes", "Yes"],
+                          ["no", "No"],
+                        ].map(([value, label]) => (
+                          <button key={value} type="button" onClick={() => setTaskSearchFilters({ url: value as typeof taskSearchFilters.url })} className={optionRowClass(taskSearchFilters.url === value)}>
+                            <span>{label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section>
+                      <div className="mb-2 text-center text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground">Attachment?</div>
+                      <div className="space-y-1">
+                        {[
+                          ["all", "All"],
+                          ["yes", "Yes"],
+                          ["no", "No"],
+                          ["both", "Both"],
+                        ].map(([value, label]) => (
+                          <button key={value} type="button" onClick={() => setTaskSearchFilters({ attachment: value as typeof taskSearchFilters.attachment })} className={optionRowClass(taskSearchFilters.attachment === value)}>
+                            <span>{label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section>
+                      <div className="mb-2 text-center text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground">Alert</div>
+                      <div className="space-y-1">
+                        {[
+                          ["all", "All"],
+                          ["none", "None"],
+                          ["5min", "5min"],
+                          ["10min", "10min"],
+                          ["15min", "15min"],
+                          ["30min", "30min"],
+                          ["1hr", "1hr"],
+                        ].map(([value, label]) => (
+                          <button key={value} type="button" onClick={() => setTaskSearchFilters({ alert: value as typeof taskSearchFilters.alert })} className={optionRowClass(taskSearchFilters.alert === value)}>
+                            <span>{label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  </div>
+                </div>
+
+                {hasActiveSearchFilters ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {activeFilterChips.map((chip) => (
+                      <button key={chip.key} type="button" onClick={chip.clear} className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-[11px] text-foreground hover:bg-muted/80">
+                        <span>{chip.label}</span>
+                        <X className="size-3" />
+                      </button>
+                    ))}
+                    <button type="button" onClick={() => {
+                      setSearchQuery("")
+                      resetTaskSearchFilters()
+                      setLabelFilterIds([])
+                      setActiveFilterColor(null)
+                    }} className="text-[11px] font-medium text-muted-foreground hover:text-foreground">
+                      Clear all
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         {/* Expanded panel */}
-        {quickAddExpanded ? (
+        {!searchModeActive && quickAddExpanded ? (
           <div
             className={cn(
               "absolute left-0 right-0 top-full z-50 mt-2",
@@ -530,9 +1104,15 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
 
                   return (
                     <div className="flex flex-col items-end gap-1 text-muted-foreground">
+                      {!canScheduleDraft ? (
+                        <div className="rounded-lg px-2 py-1.5 text-right text-[12px] text-muted-foreground">
+                          Add a task title first
+                        </div>
+                      ) : null}
                       <button
                         type="button"
                         className={cn(itemClass, "self-end")}
+                        disabled={!canScheduleDraft}
                         onClick={() => setDraftDateKey(formatLocalDateKey(tomorrow))}
                       >
                         <span className="text-foreground">Tomorrow</span>
@@ -540,6 +1120,7 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
                       <button
                         type="button"
                         className={cn(itemClass, "self-end")}
+                        disabled={!canScheduleDraft}
                         onClick={() => setDraftDateKey(formatLocalDateKey(dayAfterTomorrow))}
                       >
                         <span className="text-foreground">Day After Tomorrow</span>
@@ -547,6 +1128,7 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
                       <button
                         type="button"
                         className={cn(itemClass, "self-end")}
+                        disabled={!canScheduleDraft}
                         onClick={() => setDraftDateKey(formatLocalDateKey(twoDaysAfter))}
                       >
                         <span className="text-foreground">2 Days After</span>
@@ -554,16 +1136,16 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
 
                       <div className="my-1 h-px w-full bg-border/50" />
 
-                      <button type="button" className={cn(itemClass, "self-end")} onClick={() => setDraftDateKey(selectedCalendarDate)}>
+                      <button type="button" className={cn(itemClass, "self-end")} disabled={!canScheduleDraft} onClick={() => setDraftDateKey(selectedCalendarDate)}>
                         <span className="text-foreground">This Week</span>
                       </button>
-                      <button type="button" className={cn(itemClass, "self-end")} onClick={() => setDraftDateKey(formatLocalDateKey(nextWeekStart))}>
+                      <button type="button" className={cn(itemClass, "self-end")} disabled={!canScheduleDraft} onClick={() => setDraftDateKey(formatLocalDateKey(nextWeekStart))}>
                         <span className="text-foreground">Next Week</span>
                       </button>
-                      <button type="button" className={cn(itemClass, "self-end")} onClick={() => setDraftDateKey(formatLocalDateKey(nextMonthStart))}>
+                      <button type="button" className={cn(itemClass, "self-end")} disabled={!canScheduleDraft} onClick={() => setDraftDateKey(formatLocalDateKey(nextMonthStart))}>
                         <span className="text-foreground">Next Month</span>
                       </button>
-                      <button type="button" className={cn(itemClass, "self-end")} onClick={() => setDraftDateKey(null)}>
+                      <button type="button" className={cn(itemClass, "self-end")} disabled={!canScheduleDraft} onClick={() => setDraftDateKey(null)}>
                         <span className="text-foreground">No Date</span>
                       </button>
                     </div>
@@ -593,6 +1175,7 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
                   align="start"
                   side="bottom"
                   sideOffset={10}
+                  data-quick-add-surface="true"
                   className="z-50 w-[260px] border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
                 >
                   <div className="space-y-2">
@@ -694,7 +1277,7 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className={cn("size-8 hover:text-foreground", draftPriority !== "none" && "text-foreground")}
+                    className={cn("size-8 hover:text-foreground", draftPriority !== "normal" && "text-foreground")}
                     aria-label="Set urgency"
                   >
                     <AlertTriangle className="size-4" />
@@ -704,13 +1287,14 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
                   align="start"
                   side="bottom"
                   sideOffset={10}
+                  data-quick-add-surface="true"
                   className="z-50 w-[220px] border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
                 >
                   <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                     Urgency
                   </div>
                   <div className="grid grid-cols-2 gap-2">
-                    {(["high", "medium", "low", "none"] as const).map((p) => (
+                    {(["urgent", "important", "normal"] as const).map((p) => (
                       <button
                         key={p}
                         type="button"
@@ -730,10 +1314,7 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
                 </PopoverContent>
               </Popover>
 
-              {/* 5) Icon */}
-              <IconPicker value={draftIcon} onChange={setDraftIcon} />
-
-              {/* 6) Label */}
+              {/* 5) Label */}
               <Popover open={showLabelPopover} onOpenChange={setShowLabelPopover}>
                 <PopoverTrigger asChild>
                   <Button
@@ -750,6 +1331,7 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
                   align="start"
                   side="bottom"
                   sideOffset={10}
+                  data-quick-add-surface="true"
                   className="z-50 w-[260px] border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
                 >
                   <div className="flex items-center justify-between">
@@ -811,49 +1393,21 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
                   align="start"
                   side="bottom"
                   sideOffset={10}
-                  className="z-50 w-[240px] border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
+                  data-quick-add-surface="true"
+                  className="z-50 w-[320px] border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
                 >
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                        Color
-                      </div>
-                      {draftColor ? (
-                        <button
-                          type="button"
-                          onClick={() => setDraftColor(undefined)}
-                          className="text-[10px] font-medium text-foreground/80 hover:text-foreground"
-                        >
-                          Clear
-                        </button>
-                      ) : null}
-                    </div>
-                    <div className="grid grid-cols-6 gap-2">
-                      {[
-                        "#fef08a",
-                        "#bbf7d0",
-                        "#bfdbfe",
-                        "#fbcfe8",
-                        "#fed7aa",
-                        "#e5e7eb",
-                      ].map((hex) => (
-                        <button
-                          key={hex}
-                          type="button"
-                          onClick={() => {
-                            setDraftColor(hex)
-                            setShowDraftColorPopover(false)
-                          }}
-                          className={cn(
-                            "size-6 rounded-full border border-black/5 dark:border-white/10",
-                            draftColor === hex && "ring-2 ring-[var(--accent-color)] ring-offset-2 ring-offset-background"
-                          )}
-                          style={{ backgroundColor: hex }}
-                          title={hex.toUpperCase()}
-                        />
-                      ))}
-                    </div>
-                  </div>
+                  <ColorPickerPanel
+                    value={draftColor}
+                    palette={preferences.colorPalette}
+                    onChange={(color) => {
+                      setDraftColor(color)
+                      setShowDraftColorPopover(false)
+                    }}
+                    onPaletteChange={(palette) => setPreferences({ colorPalette: palette })}
+                    onClear={() => setDraftColor(undefined)}
+                    title="Color"
+                    description="Choose a saved swatch or open the system color wheel for a custom task color."
+                  />
                 </PopoverContent>
               </Popover>
 

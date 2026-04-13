@@ -22,6 +22,68 @@ const splitInputFragments = (input: string) =>
     .map((fragment) => fragment.trim())
     .filter(Boolean);
 
+const normalizeSchedulingPhrase = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(
+      /^(?:i need to|need to|please|don't forget to|dont forget to|remember to|make sure to)\s+/,
+      ""
+    )
+    .trim();
+
+const shouldTreatBareWeekdayAsTaskDate = (input: string) => {
+  const normalized = normalizeSchedulingPhrase(input);
+  const weekdayMatch = normalized.match(/\b(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/);
+
+  if (!weekdayMatch) {
+    return false;
+  }
+
+  if (
+    /\b(?:on|by|this|next)\s+(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/.test(normalized) ||
+    /\b(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\s+at\b/.test(normalized)
+  ) {
+    return true;
+  }
+
+  const before = normalized.slice(0, weekdayMatch.index).trim();
+  const after = normalized.slice((weekdayMatch.index ?? 0) + weekdayMatch[0].length).trim();
+
+  if (after.length > 0) {
+    return false;
+  }
+
+  if (
+    /\b(?:is|are|was|were|be|been|being|coming|arriving|available|delivered|delivery|ship(?:ping|ped)?|message|email|text|tell|told|say|said|because|that)\b/.test(
+      before
+    )
+  ) {
+    return false;
+  }
+
+  const wordCount = before.split(/\s+/).filter(Boolean).length;
+  return wordCount <= 4;
+};
+
+const isAmbiguousWeekdayReference = (input: string) => {
+  const normalized = input.toLowerCase();
+  const hasWeekday = new RegExp(WEEKDAY_PATTERN, "i").test(normalized);
+
+  if (!hasWeekday) {
+    return false;
+  }
+
+  if (
+    /\b(?:today|tomorrow|tmr|next week)\b/.test(normalized) ||
+    /\b(?:on|by|this|next)\s+(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/.test(normalized) ||
+    /\b(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\s+at\b/.test(normalized)
+  ) {
+    return false;
+  }
+
+  return !shouldTreatBareWeekdayAsTaskDate(normalized);
+};
+
 const detectSharedDate = (input: string, today: Date) => {
   const firstFragment = splitInputFragments(input)[0]?.toLowerCase() ?? "";
 
@@ -51,6 +113,7 @@ const hasExplicitDateOverride = (fragment: string) => {
     /\b(?:today|tomorrow|tmr|next week)\b/.test(normalized) ||
     new RegExp(`\\b(?:on|by|this|next)\\s+${WEEKDAY_PATTERN.slice(2, -2)}\\b`, "i").test(normalized) ||
     new RegExp(`${WEEKDAY_PATTERN}\\s+at\\b`, "i").test(normalized) ||
+    shouldTreatBareWeekdayAsTaskDate(normalized) ||
     /\b\d{4}-\d{2}-\d{2}\b/.test(normalized) ||
     /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/.test(normalized)
   );
@@ -120,6 +183,9 @@ RULES:
 - Remove date, time, label, and priority words from the title
 - Fix obvious typos (e.g. "thereapist" → "therapist", "resutunet" → "restaurant")
 - Expand abbreviations: tmr=tomorrow, eod=17:00, mtg=meeting, appt=appointment, w/=with
+- If a weekday is ambiguous and looks like part of the message content, keep the full original wording in the title
+- Example: "Tell Ricardo the doors are coming Tuesday" keeps "Tuesday" in the title and date stays null
+- Only treat a weekday as the task date when the task itself is clearly scheduled, such as "Call Ricardo on Tuesday", "Call Ricardo Tuesday", or "Pay bill Tuesday"
 
 3. DATE
 - Today is ${today}. Use this as the reference for all relative dates.
@@ -134,6 +200,7 @@ RULES:
 - Always output YYYY-MM-DD
 - Never output partial dates, month/day only, or dates without the full 4-digit year
 - If no date mentioned → null
+- If a weekday mention is ambiguous, return date: null
 - Date precedence rule:
   - A leading shared date like "today", "tomorrow", "tmr", or "next week" should apply to all subsequent split tasks by default
   - Do not override that shared date because of a bare weekday word inside a later task fragment unless it is clearly attached with date language like "on Friday", "by Friday", "this Friday", "next Friday", or "Friday at 2pm"
@@ -223,36 +290,45 @@ RULES:
         })
       : parsed;
 
-    const sanitized = normalized.map((task) => ({
-      ...task,
-      title: typeof task?.title === "string" ? task.title : "",
-      date: normalizeIsoDate(task?.date),
-      time: typeof task?.time === "string" ? task.time : null,
-      labels: Array.isArray(task?.labels) ? task.labels.filter((label): label is string => typeof label === "string") : [],
-      priority:
-        task?.priority === "low" || task?.priority === "medium" || task?.priority === "high"
-          ? task.priority
+    const sanitized = normalized.map((task, index) => {
+      const fragment = fragments[index] ?? input.trim();
+      const ambiguousWeekday = isAmbiguousWeekdayReference(fragment);
+
+      return {
+        ...task,
+        title: ambiguousWeekday
+          ? fragment
+          : typeof task?.title === "string"
+            ? task.title
+            : "",
+        date: ambiguousWeekday ? null : normalizeIsoDate(task?.date),
+        time: typeof task?.time === "string" ? task.time : null,
+        labels: Array.isArray(task?.labels) ? task.labels.filter((label: unknown): label is string => typeof label === "string") : [],
+        priority:
+          task?.priority === "low" || task?.priority === "medium" || task?.priority === "high"
+            ? task.priority
+            : null,
+        isRecurring: task?.isRecurring === true ? true : null,
+        recurringFrequency:
+          task?.recurringFrequency === "daily" ||
+          task?.recurringFrequency === "weekday" ||
+          task?.recurringFrequency === "weekly" ||
+          task?.recurringFrequency === "monthly"
+            ? task.recurringFrequency
+            : null,
+        recurringDays: Array.isArray(task?.recurringDays)
+          ? task.recurringDays.filter((day: unknown): day is number => typeof day === "number")
           : null,
-      isRecurring: task?.isRecurring === true ? true : null,
-      recurringFrequency:
-        task?.recurringFrequency === "daily" ||
-        task?.recurringFrequency === "weekday" ||
-        task?.recurringFrequency === "weekly" ||
-        task?.recurringFrequency === "monthly"
-          ? task.recurringFrequency
-          : null,
-      recurringDays: Array.isArray(task?.recurringDays)
-        ? task.recurringDays.filter((day): day is number => typeof day === "number")
-        : null,
-      recurringInterval:
-        typeof task?.recurringInterval === "number" && Number.isFinite(task.recurringInterval) && task.recurringInterval > 1
-          ? Math.floor(task.recurringInterval)
-          : null,
-      recurringCustomText:
-        typeof task?.recurringCustomText === "string" && task.recurringCustomText.trim()
-          ? task.recurringCustomText.trim()
-          : null,
-    }));
+        recurringInterval:
+          typeof task?.recurringInterval === "number" && Number.isFinite(task.recurringInterval) && task.recurringInterval > 1
+            ? Math.floor(task.recurringInterval)
+            : null,
+        recurringCustomText:
+          typeof task?.recurringCustomText === "string" && task.recurringCustomText.trim()
+            ? task.recurringCustomText.trim()
+            : null,
+      };
+    });
 
     return NextResponse.json(sanitized);
 

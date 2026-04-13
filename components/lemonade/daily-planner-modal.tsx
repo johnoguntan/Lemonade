@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useSyncExternalStore } from "react"
-import { createOptimisticTodoId, formatLocalDateKey, normalizeCalendarDateKey, parseNaturalLanguageTaskEntries, reconcileOptimisticTaskOrder, useLemonadeStore, type Todo } from "@/lib/store"
+import { createOptimisticTodoId, formatLocalDateKey, normalizeCalendarDateKey, normalizeTodoPriority, parseNaturalLanguageTaskEntries, reconcileOptimisticTaskOrder, useLemonadeStore, type Todo } from "@/lib/store"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { format, isValid, parseISO } from "date-fns"
@@ -83,7 +83,7 @@ export function DailyPlannerModal() {
             text: title,
             completed: false,
             date: optimisticDate,
-            priority: parsedTask.priority ?? "high",
+            priority: parsedTask.priority ?? "important",
             labelIds,
             subtasks: parsedTask.subtaskTitles.map((subtaskTitle) => ({ title: subtaskTitle })),
             isSyncing: true,
@@ -143,10 +143,7 @@ export function DailyPlannerModal() {
                 ? primaryTask.labels.filter((label): label is string => typeof label === "string")
                 : []
             )
-            const aiPriority: Todo["priority"] =
-              primaryTask.priority === "high" || primaryTask.priority === "medium" || primaryTask.priority === "low"
-                ? primaryTask.priority
-                : parsedTask.priority ?? "high"
+            const aiPriority: Todo["priority"] = normalizeTodoPriority(primaryTask.priority ?? parsedTask.priority ?? "important")
             const aiRecurringFrequency =
               primaryTask.recurringFrequency === "daily" ||
               primaryTask.recurringFrequency === "weekday" ||

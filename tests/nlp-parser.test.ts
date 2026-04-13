@@ -13,7 +13,7 @@ test("extracts label and priority tokens while fast-pathing obvious dates", () =
   const result = parse("call dentist tomorrow at 3pm #health high priority")
 
   assert.equal(result.cleanText, "call dentist tomorrow at 3pm")
-  assert.equal(result.priority, "high")
+  assert.equal(result.priority, "urgent")
   assert.deepEqual(result.labelIds, ["label-health"])
   assert.equal(result.scheduledDate, "2026-03-25")
   assert.equal(result.time, undefined)
@@ -21,9 +21,9 @@ test("extracts label and priority tokens while fast-pathing obvious dates", () =
 })
 
 test("supports shorthand priorities like p1 and p2", () => {
-  assert.equal(parse("Ship invoice p1").priority, "high")
-  assert.equal(parse("Review notes p2").priority, "medium")
-  assert.equal(parse("Organize desk p3").priority, "low")
+  assert.equal(parse("Ship invoice p1").priority, "urgent")
+  assert.equal(parse("Review notes p2").priority, "important")
+  assert.equal(parse("Organize desk p3").priority, "normal")
 })
 
 test("keeps > subtasks as structural syntax", () => {

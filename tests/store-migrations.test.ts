@@ -25,6 +25,7 @@ test("legacy todos gain normalized createdAt and endOfDay values", () => {
         text: "Legacy todo",
         completed: false,
         date: "2026-03-24",
+        priority: "high",
         subtasks: [{ id: "sub-1", text: "Legacy subtask", completed: false }],
       },
     ],
@@ -34,9 +35,26 @@ test("legacy todos gain normalized createdAt and endOfDay values", () => {
   assert.equal(migrated.calendarTodos?.[0]?.createdAt, 0)
   assert.equal(migrated.calendarTodos?.[0]?.endOfDay, false)
   assert.equal(migrated.calendarTodos?.[0]?.parentId, null)
+  assert.equal(migrated.calendarTodos?.[0]?.priority, "urgent")
   assert.deepEqual(migrated.calendarTodos?.[0]?.subtasks, [
     { id: "sub-1", title: "Legacy subtask", completed: false, parentId: "todo-1" },
   ])
+})
+
+test("tasks without a priority are normalized to normal", () => {
+  const migrated = migratePersistedLemonadeState({
+    calendarTodos: [
+      {
+        id: "todo-1",
+        text: "No priority",
+        completed: false,
+        date: "2026-03-24",
+        subtasks: [],
+      },
+    ],
+  })
+
+  assert.equal(migrated.calendarTodos?.[0]?.priority, "normal")
 })
 
 test("legacy list todos are normalized during migration", () => {

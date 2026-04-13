@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useState, type DragEvent } from "react"
-import { useLemonadeStore, type List } from "@/lib/store"
+import { todoMatchesSearchFilters, useLemonadeStore, type List, type TaskSearchFilters } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Plus, ChevronDown, ChevronUp, ChevronRight, MoreVertical, Trash2, Equal, PenLine, ArrowRight, CornerUpLeft, CornerUpRight, Link2, Check, ListTodo, AlertTriangle } from "lucide-react"
@@ -41,7 +41,11 @@ export function ListsSection() {
     deleteListTodo,
     preferences,
     labels,
+    searchQuery,
+    searchModeActive,
+    taskSearchFilters,
     labelFilterIds,
+    activeFilterColor,
   } = useLemonadeStore()
   const [activeTabId, setActiveTabId] = useState("planning-tab")
   const [newTabName, setNewTabName] = useState("")
@@ -65,7 +69,15 @@ export function ListsSection() {
   const shoppingReturnsList = lists.find((list) => list.id === "shopping-returns") ?? null
   const isShoppingReturnsTab = activeTabId === "shopping-returns-tab"
   const visibleShoppingReturns = (shoppingReturnsList?.todos ?? []).filter(
-    (todo) => preferences.showCompleted || !todo.completed
+    (todo) =>
+      todoMatchesSearchFilters(todo, {
+        searchQuery,
+        searchModeActive,
+        taskSearchFilters,
+        labelFilterIds,
+        activeFilterColor,
+        showCompleted: preferences.showCompleted,
+      })
   )
   const getTabCount = (tabId: string) => lists.filter((list) => getListTabId(list) === tabId).length
   const activeTab = listTabs.find((tab) => tab.id === activeTabId) ?? null
@@ -342,7 +354,12 @@ export function ListsSection() {
                 onToggleTodo={(todoId) => toggleListTodo(list.id, todoId)}
                 onDeleteTodo={(todoId) => deleteListTodo(list.id, todoId)}
                 labels={labels}
+                searchQuery={searchQuery}
+                searchModeActive={searchModeActive}
+                taskSearchFilters={taskSearchFilters}
                 labelFilterIds={labelFilterIds}
+                activeFilterColor={activeFilterColor}
+                showCompleted={preferences.showCompleted}
                 listTabs={listTabs}
               />
             ))}
@@ -383,7 +400,12 @@ interface ListCardProps {
   onToggleTodo: (todoId: string) => void
   onDeleteTodo: (todoId: string) => void
   labels: Array<{ id: string; name: string; color: string }>
+  searchQuery: string
+  searchModeActive: boolean
+  taskSearchFilters: TaskSearchFilters
   labelFilterIds: string[]
+  activeFilterColor: string | null
+  showCompleted: boolean
   listTabs: Array<{ id: string; name: string }>
 }
 
@@ -567,7 +589,12 @@ function ListCard({
   onToggleTodo,
   onDeleteTodo,
   labels,
+  searchQuery,
+  searchModeActive,
+  taskSearchFilters,
   labelFilterIds,
+  activeFilterColor,
+  showCompleted,
   listTabs,
 }: ListCardProps) {
   const [isEditingName, setIsEditingName] = useState(false)
@@ -589,7 +616,14 @@ function ListCard({
 
   const currentTabId = list.tabId ?? (list.type === "planning" ? "planning-tab" : "my-lists-tab")
   const visibleTodos = list.todos.filter((todo) =>
-    labelFilterIds.length === 0 || todo.labelIds.some((labelId) => labelFilterIds.includes(labelId))
+    todoMatchesSearchFilters(todo, {
+      searchQuery,
+      searchModeActive,
+      taskSearchFilters,
+      labelFilterIds,
+      activeFilterColor,
+      showCompleted,
+    })
   )
 
   return (

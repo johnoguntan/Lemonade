@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import { formatLocalDateKey, useLemonadeStore, type ShortcutType } from "@/lib/store"
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react"
+import { formatLocalDateKey, todoMatchesSearchFilters, useLemonadeStore, type ShortcutType } from "@/lib/store"
 import { DayColumn } from "./day-column"
 import { cn } from "@/lib/utils"
 import { ChevronUp } from "lucide-react"
 import { TodoItem } from "./todo-item"
+import { setPlannerTaskDragData } from "@/lib/task-dnd"
 
 interface DefaultRightPageProps {
   startDate: Date
@@ -37,6 +38,8 @@ export function DefaultRightPage({ startDate, onNavigate: _onNavigate }: Default
     preferences,
     calendarTodos,
     searchQuery,
+    searchModeActive,
+    taskSearchFilters,
     labelFilterIds,
     activeFilterColor,
     selectedCalendarDate,
@@ -50,7 +53,6 @@ export function DefaultRightPage({ startDate, onNavigate: _onNavigate }: Default
   const scrollRef = useRef<HTMLDivElement>(null)
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const today = useMemo(() => startOfDay(new Date()), [])
-  const todayKey = useMemo(() => formatLocalDateKey(today), [today])
   const visibleStartDate = useMemo(() => startOfDay(startDate), [startDate])
   const expandedDays = useMemo(
     () => getDateArray(visibleStartDate, Math.max(preferences.columns * 10, 35)),
@@ -93,13 +95,16 @@ export function DefaultRightPage({ startDate, onNavigate: _onNavigate }: Default
     () =>
       calendarTodos.filter((todo) => {
         if (todo.date !== null) return false
-        if (!preferences.showCompleted && todo.completed) return false
-        if (searchQuery && !todo.text.toLowerCase().includes(searchQuery.toLowerCase())) return false
-        if (labelFilterIds.length > 0 && !todo.labelIds.some((labelId) => labelFilterIds.includes(labelId))) return false
-        if (activeFilterColor && todo.color !== activeFilterColor) return false
-        return true
+        return todoMatchesSearchFilters(todo, {
+          searchQuery,
+          searchModeActive,
+          taskSearchFilters,
+          labelFilterIds,
+          activeFilterColor,
+          showCompleted: preferences.showCompleted,
+        })
       }),
-    [activeFilterColor, calendarTodos, labelFilterIds, preferences.showCompleted, searchQuery]
+    [activeFilterColor, calendarTodos, labelFilterIds, preferences.showCompleted, searchModeActive, searchQuery, taskSearchFilters]
   )
 
   useEffect(() => {
@@ -155,6 +160,10 @@ export function DefaultRightPage({ startDate, onNavigate: _onNavigate }: Default
     }
   }
 
+  const handlePplTodoDragStart = (event: DragEvent<HTMLDivElement>, todoId: string) => {
+    setPlannerTaskDragData(event, { todoId, source: "calendar" })
+  }
+
   return (
     <div className="calendar-focus-mode relative flex flex-1 px-4 pt-6">
       <div className="absolute bottom-[1.4rem] left-[0.35rem] z-[4] flex flex-col items-start gap-[0.12rem]">
@@ -178,20 +187,6 @@ export function DefaultRightPage({ startDate, onNavigate: _onNavigate }: Default
             </button>
           )
         })}
-        <button
-          type="button"
-          onClick={() => {
-            setCalendarFilterMode("all")
-            setCalendarTimeframe("week")
-            setSelectedCalendarDate(todayKey)
-          }}
-          className={cn(
-            "calendar-focus-shortcut cursor-pointer",
-            calendarFilterMode === "all" && calendarTimeframe === "week" && selectedCalendarDate === todayKey && "text-[var(--accent-color)]"
-          )}
-        >
-          WEEK
-        </button>
         <button
           type="button"
           onClick={() => handleShortcutClick("NEXT_WEEK")}
@@ -264,7 +259,13 @@ export function DefaultRightPage({ startDate, onNavigate: _onNavigate }: Default
             </div>
             <div className="space-y-1">
               {pplTodos.map((todo) => (
-                <TodoItem key={todo.id} todo={todo} textSizeClass="lemonade-task-text" />
+                <TodoItem
+                  key={todo.id}
+                  todo={todo}
+                  textSizeClass="lemonade-task-text"
+                  draggable
+                  onDragStart={(event) => handlePplTodoDragStart(event, todo.id)}
+                />
               ))}
               {pplTodos.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-border/70 bg-background/60 px-5 py-10 text-center text-sm text-muted-foreground dark:bg-[rgba(19,19,19,0.5)]">

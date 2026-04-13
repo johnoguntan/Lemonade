@@ -37,6 +37,7 @@ export function IconPicker({
         align="start"
         side="bottom"
         sideOffset={10}
+        data-quick-add-surface="true"
         className="z-50 w-[280px] border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
       >
         <div className="mb-2 flex items-center justify-between">
@@ -82,4 +83,3 @@ export function IconPicker({
     </Popover>
   )
 }
-

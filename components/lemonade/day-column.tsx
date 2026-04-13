@@ -6,8 +6,10 @@ import {
   formatLocalDateKey,
   localTaskParser,
   normalizeCalendarDateKey,
+  normalizeTodoPriority,
   parseNaturalLanguageTaskEntries,
   reconcileOptimisticTaskOrder,
+  todoMatchesSearchFilters,
   useLemonadeStore,
   holidays,
   type NaturalLanguagePreviewToken,
@@ -15,6 +17,7 @@ import {
 } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { TodoItem } from "./todo-item"
+import { getPlannerTaskDragData, setPlannerTaskDragData } from "@/lib/task-dnd"
 import { format, isValid, parseISO } from "date-fns"
 import { Check } from "lucide-react"
 import { toast } from "sonner"
@@ -83,6 +86,8 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
   const ensureLabelIds = useLemonadeStore((state) => state.ensureLabelIds)
   const moveTodoToDate = useLemonadeStore((state) => state.moveTodoToDate)
   const searchQuery = useLemonadeStore((state) => state.searchQuery)
+  const searchModeActive = useLemonadeStore((state) => state.searchModeActive)
+  const taskSearchFilters = useLemonadeStore((state) => state.taskSearchFilters)
   const isCalendarExpanded = useLemonadeStore((state) => state.isCalendarExpanded)
   const labelFilterIds = useLemonadeStore((state) => state.labelFilterIds)
   const activeFilterColor = useLemonadeStore((state) => state.activeFilterColor)
@@ -103,14 +108,17 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
       sortEndOfDayTodos(
         calendarTodos.filter((todo) => {
           if (todo.date !== dateStr) return false
-          if (!preferences.showCompleted && todo.completed) return false
-          if (searchQuery && !todo.text.toLowerCase().includes(searchQuery.toLowerCase())) return false
-          if (labelFilterIds.length > 0 && !todo.labelIds.some((labelId) => labelFilterIds.includes(labelId))) return false
-          if (activeFilterColor && todo.color !== activeFilterColor) return false
-          return true
+          return todoMatchesSearchFilters(todo, {
+            searchQuery,
+            searchModeActive,
+            taskSearchFilters,
+            labelFilterIds,
+            activeFilterColor,
+            showCompleted: preferences.showCompleted,
+          })
         })
       ),
-    [activeFilterColor, calendarTodos, dateStr, labelFilterIds, preferences.showCompleted, searchQuery]
+    [activeFilterColor, calendarTodos, dateStr, labelFilterIds, preferences.showCompleted, searchModeActive, searchQuery, taskSearchFilters]
   )
 
   const textSizeClass = "lemonade-task-text"
@@ -141,8 +149,7 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
   const parsedInput = localTaskParser(newTodoText, { labels })
 
   const handleTodoDragStart = (event: DragEvent<HTMLDivElement>, todoId: string) => {
-    event.dataTransfer.setData("text/plain", todoId)
-    event.dataTransfer.effectAllowed = "move"
+    setPlannerTaskDragData(event, { todoId, source: "calendar" })
     setDraggedTodoId(todoId)
   }
 
@@ -154,11 +161,20 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
 
   const handleColumnDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
-    const todoId = event.dataTransfer.getData("text/plain")
+    const dragData = getPlannerTaskDragData(event)
 
-    if (todoId) {
-      moveTodoToDate(todoId, dateStr)
-      toast("Task moved", { duration: 2000 })
+    if (dragData?.todoId) {
+      if (dragData.source === "timeline-unscheduled" || dragData.source === "timeline-timed") {
+        updateCalendarTodo(dragData.todoId, {
+          date: dateStr,
+          time: undefined,
+          durationMinutes: undefined,
+        })
+        toast("Task moved back to calendar", { duration: 2000 })
+      } else {
+        moveTodoToDate(dragData.todoId, dateStr)
+        toast("Task moved", { duration: 2000 })
+      }
     }
 
     setIsDragOver(false)
@@ -256,10 +272,7 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
               ? primaryTask.labels.filter((label): label is string => typeof label === "string")
               : []
           )
-          const aiPriority: Todo["priority"] =
-            primaryTask.priority === "high" || primaryTask.priority === "medium" || primaryTask.priority === "low"
-              ? primaryTask.priority
-              : parsedTask.priority
+          const aiPriority: Todo["priority"] = normalizeTodoPriority(primaryTask.priority ?? parsedTask.priority)
           const aiRecurringFrequency =
             primaryTask.recurringFrequency === "daily" ||
             primaryTask.recurringFrequency === "weekday" ||

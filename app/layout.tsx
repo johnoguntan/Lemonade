@@ -2,15 +2,36 @@ import type { Metadata, Viewport } from 'next'
 import { Analytics } from '@vercel/analytics/next'
 import { ThemeProvider } from '@/components/theme-provider'
 import { AccentColorSync } from '@/components/accent-color-sync'
+import { PwaUpdateBanner } from '@/components/pwa-update-banner'
 import { Toaster } from '@/components/ui/sonner'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Lemonade - Simple Todo App',
+  title: 'Alessandro',
   description: 'A beautifully simple way to organize your days and get things done.',
+  applicationName: 'Alessandro',
   generator: 'v0.app',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'Alessandro',
+  },
+  formatDetection: {
+    telephone: false,
+  },
   icons: {
     icon: [
+      {
+        url: '/icons/icon-192x192.png',
+        sizes: '192x192',
+        type: 'image/png',
+      },
+      {
+        url: '/icons/icon-512x512.png',
+        sizes: '512x512',
+        type: 'image/png',
+      },
       {
         url: '/icon-light-32x32.png',
         media: '(prefers-color-scheme: light)',
@@ -25,6 +46,11 @@ export const metadata: Metadata = {
       },
     ],
     apple: '/apple-icon.png',
+  },
+  other: {
+    'mobile-web-app-capable': 'yes',
+    'msapplication-TileColor': '#2563eb',
+    'msapplication-tap-highlight': 'no',
   },
 }
 
@@ -54,6 +80,7 @@ export default function RootLayout({
         >
           <AccentColorSync />
           {children}
+          <PwaUpdateBanner />
           <Toaster richColors closeButton />
         </ThemeProvider>
         <Analytics />

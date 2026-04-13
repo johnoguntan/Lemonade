@@ -3,6 +3,7 @@
 import { addDays, addMonths, format, isValid, parseISO } from 'date-fns'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { DEFAULT_COLOR_PALETTE } from './colors'
 
 export type ThemeColor = 
   | 'green' | 'lime' | 'teal' | 'cyan' | 'blue' | 'indigo' | 'violet' | 'purple'
@@ -22,6 +23,8 @@ export interface Label {
   name: string
   color: string
 }
+
+export type TodoPriority = 'urgent' | 'important' | 'normal'
 
 export interface Todo {
   id: string
@@ -59,7 +62,7 @@ export interface Todo {
   recurringInterval?: number
   recurringCustomText?: string
   parentId?: string | null // For recurring instances
-  priority?: 'high' | 'medium' | 'low' | 'none'
+  priority?: TodoPriority
   labelIds: string[]
   tags?: string[] // Legacy migrated tag IDs
   storeName?: string
@@ -74,6 +77,36 @@ export type ShortcutType = "NEXT_WEEK" | "NEXT_MONTH" | "NEXT_YEAR" | "PPL"
 
 export type MainViewMode = "standard" | "dual"
 export type DualViewRange = "NEXT_WEEK" | "THIS_MONTH" | "THIS_YEAR" | "PPL"
+
+export type TaskSearchStatusFilter = "all" | "done" | "todo"
+export type TaskSearchWhenFilter =
+  | "all"
+  | "today"
+  | "tomorrow"
+  | "this-week"
+  | "next-week"
+  | "this-month"
+  | "next-month"
+  | "this-year"
+  | "someday"
+export type TaskSearchPriorityFilter = "all" | "high" | "med" | "low" | "none"
+export type TaskSearchRecurringFilter = "all" | "yes" | "no" | "both"
+export type TaskSearchBooleanFilter = "all" | "yes" | "no" | "both"
+export type TaskSearchAlertFilter = "all" | "none" | "5min" | "10min" | "15min" | "30min" | "1hr"
+export type TaskSearchDateAddedFilter = "all" | "today" | "yesterday" | "this-week"
+
+export interface TaskSearchFilters {
+  status: TaskSearchStatusFilter
+  when: TaskSearchWhenFilter
+  priority: TaskSearchPriorityFilter
+  recurring: TaskSearchRecurringFilter
+  icon: string | null
+  attachment: TaskSearchBooleanFilter
+  url: TaskSearchBooleanFilter
+  phone: TaskSearchBooleanFilter
+  alert: TaskSearchAlertFilter
+  dateAdded: TaskSearchDateAddedFilter
+}
 
 export interface List {
   id: string
@@ -211,11 +244,17 @@ interface LemonadeStore {
   // Search
   searchQuery: string
   setSearchQuery: (query: string) => void
+  searchModeActive: boolean
+  setSearchModeActive: (active: boolean) => void
+  taskSearchFilters: TaskSearchFilters
+  setTaskSearchFilters: (updates: Partial<TaskSearchFilters>) => void
+  resetTaskSearchFilters: () => void
   
   // Filter
   labelFilterIds: string[]
   activeFilterColor: string | null
   setActiveFilterColor: (color: string | null) => void
+  setLabelFilterIds: (labelIds: string[]) => void
   toggleLabelFilter: (labelId: string) => void
   clearLabelFilters: () => void
   
@@ -271,31 +310,263 @@ interface LemonadeStore {
     autoRollover: () => void
 }
 
-type PersistedLemonadeStore = Partial<
-  Pick<
-    LemonadeStore,
-    | 'preferences'
-    | 'calendarTodos'
-    | 'listTabs'
-    | 'lists'
-    | 'labels'
-    | 'searchQuery'
-    | 'labelFilterIds'
-    | 'collapsedSubtasks'
-    | 'sidebarOpen'
-    | 'aiMode'
-    | 'mainViewMode'
-    | 'dualViewRange'
-    | 'playgroundNote'
-    | 'weekCount'
-    | 'isCalendarExpanded'
-    | 'lastSessionDate'
-  >
->
+type PersistedLemonadeStore = {
+  preferences: UserPreferences
+  calendarTodos: Todo[]
+  listTabs: ListTab[]
+  lists: List[]
+  labels: Label[]
+  searchQuery: string
+  labelFilterIds: string[]
+  collapsedSubtasks: Record<string, boolean>
+  sidebarOpen: boolean
+  aiMode?: boolean
+  mainViewMode?: MainViewMode
+  dualViewRange?: DualViewRange | null
+  playgroundNote?: string
+  weekCount: number
+  isCalendarExpanded: boolean
+  lastSessionDate: string | null
+}
 
 const generateId = () => Math.random().toString(36).substring(2, 15)
 
 export const createOptimisticTodoId = (scope = "task") => `optimistic-${scope}-${generateId()}`
+
+export const DEFAULT_TASK_SEARCH_FILTERS: TaskSearchFilters = {
+  status: "all",
+  when: "all",
+  priority: "all",
+  recurring: "all",
+  icon: null,
+  attachment: "all",
+  url: "all",
+  phone: "all",
+  alert: "all",
+  dateAdded: "all",
+}
+
+const ATTACHMENT_PREFIX = "Attachment: "
+
+const isStructuredLinkValue = (value: string) => {
+  const normalized = value.trim()
+
+  return (
+    /^https?:\/\//i.test(normalized) ||
+    /^www\./i.test(normalized) ||
+    /^tel:/i.test(normalized) ||
+    /^\+?[\d()\-\s]{6,}$/.test(normalized)
+  )
+}
+
+const isStructuredPhoneValue = (value: string) => {
+  const normalized = value.trim()
+  return /^tel:/i.test(normalized) || /^\+?[\d()\-\s]{6,}$/.test(normalized)
+}
+
+const isStructuredUrlValue = (value: string) => {
+  const normalized = value.trim()
+  return /^(https?:\/\/|www\.)/i.test(normalized)
+}
+
+export const extractTaskNotesMetadata = (notes?: string) => {
+  const lines = (notes ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  let hasAttachment = false
+  let hasUrl = false
+  let hasPhone = false
+
+  for (const line of lines) {
+    if (line.startsWith(ATTACHMENT_PREFIX)) {
+      hasAttachment = true
+      continue
+    }
+
+    if (!isStructuredLinkValue(line)) {
+      continue
+    }
+
+    if (isStructuredPhoneValue(line)) {
+      hasPhone = true
+    }
+
+    if (isStructuredUrlValue(line)) {
+      hasUrl = true
+    }
+  }
+
+  return { hasAttachment, hasUrl, hasPhone }
+}
+
+const startOfLocalDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate())
+
+const addLocalDays = (date: Date, amount: number) => {
+  const nextDate = new Date(date)
+  nextDate.setDate(nextDate.getDate() + amount)
+  return nextDate
+}
+
+const startOfWeekMonday = (date: Date) => {
+  const day = date.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  return startOfLocalDay(addLocalDays(date, diff))
+}
+
+const endOfWeekSunday = (date: Date) => startOfLocalDay(addLocalDays(startOfWeekMonday(date), 6))
+
+const createdAtMatchesFilter = (createdAt: number, filter: TaskSearchDateAddedFilter, referenceDate: Date) => {
+  if (filter === "all") return true
+
+  const createdDate = startOfLocalDay(new Date(createdAt))
+  const today = startOfLocalDay(referenceDate)
+
+  switch (filter) {
+    case "today":
+      return createdDate.getTime() === today.getTime()
+    case "yesterday":
+      return createdDate.getTime() === addLocalDays(today, -1).getTime()
+    case "this-week": {
+      const weekStart = startOfWeekMonday(today)
+      return createdDate >= weekStart && createdDate <= endOfWeekSunday(today)
+    }
+    default:
+      return true
+  }
+}
+
+const taskDateMatchesFilter = (todo: Todo, filter: TaskSearchWhenFilter, referenceDate: Date) => {
+  if (filter === "all") return true
+  if (filter === "someday") return todo.date === null
+  if (!todo.date) return false
+
+  const today = startOfLocalDay(referenceDate)
+  const todayKey = formatLocalDateKey(today)
+  const tomorrowKey = formatLocalDateKey(addLocalDays(today, 1))
+
+  switch (filter) {
+    case "today":
+      return todo.date === todayKey
+    case "tomorrow":
+      return todo.date === tomorrowKey
+    case "this-week": {
+      const weekStart = startOfWeekMonday(today)
+      const weekEnd = endOfWeekSunday(today)
+      return todo.date >= formatLocalDateKey(weekStart) && todo.date <= formatLocalDateKey(weekEnd)
+    }
+    case "next-week": {
+      const nextWeekStart = addLocalDays(startOfWeekMonday(today), 7)
+      const nextWeekEnd = addLocalDays(nextWeekStart, 6)
+      return todo.date >= formatLocalDateKey(nextWeekStart) && todo.date <= formatLocalDateKey(nextWeekEnd)
+    }
+    case "this-month": {
+      const monthPrefix = `${today.getFullYear()}-${`${today.getMonth() + 1}`.padStart(2, "0")}`
+      return todo.date.startsWith(monthPrefix)
+    }
+    case "next-month": {
+      const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1)
+      const monthPrefix = `${nextMonth.getFullYear()}-${`${nextMonth.getMonth() + 1}`.padStart(2, "0")}`
+      return todo.date.startsWith(monthPrefix)
+    }
+    case "this-year":
+      return todo.date.startsWith(`${today.getFullYear()}-`)
+    default:
+      return true
+  }
+}
+
+const taskPriorityMatchesFilter = (todo: Todo, filter: TaskSearchPriorityFilter) => {
+  if (filter === "all") return true
+  const priority = normalizeTodoPriority(todo.priority)
+
+  switch (filter) {
+    case "high":
+      return priority === "urgent"
+    case "med":
+      return priority === "important"
+    case "low":
+      return priority === "normal"
+    case "none":
+      return todo.priority == null
+    default:
+      return true
+  }
+}
+
+const taskAlertMatchesFilter = (todo: Todo, filter: TaskSearchAlertFilter) => {
+  if (filter === "all") return true
+  const value = todo.reminderOffsetMinutes
+
+  switch (filter) {
+    case "none":
+      return value == null
+    case "5min":
+      return value === 5
+    case "10min":
+      return value === 10
+    case "15min":
+      return value === 15
+    case "30min":
+      return value === 30
+    case "1hr":
+      return value === 60
+    default:
+      return true
+  }
+}
+
+export const todoMatchesSearchFilters = (
+  todo: Todo,
+  options: {
+    searchQuery: string
+    searchModeActive?: boolean
+    taskSearchFilters?: TaskSearchFilters
+    labelFilterIds?: string[]
+    activeFilterColor?: string | null
+    showCompleted?: boolean
+    referenceDate?: Date
+  }
+) => {
+  const {
+    searchQuery,
+    searchModeActive = false,
+    taskSearchFilters = DEFAULT_TASK_SEARCH_FILTERS,
+    labelFilterIds = [],
+    activeFilterColor = null,
+    showCompleted = true,
+    referenceDate = new Date(),
+  } = options
+
+  if (searchModeActive) {
+    if (taskSearchFilters.status === "done" && !todo.completed) return false
+    if (taskSearchFilters.status === "todo" && todo.completed) return false
+  } else if (!showCompleted && todo.completed) {
+    return false
+  }
+
+  if (searchQuery && !todo.text.toLowerCase().includes(searchQuery.toLowerCase())) return false
+  if (labelFilterIds.length > 0 && !todo.labelIds.some((labelId) => labelFilterIds.includes(labelId))) return false
+  if (activeFilterColor && todo.color !== activeFilterColor) return false
+  if (!taskDateMatchesFilter(todo, taskSearchFilters.when, referenceDate)) return false
+  if (!taskPriorityMatchesFilter(todo, taskSearchFilters.priority)) return false
+  if (taskSearchFilters.recurring === "yes" && !todo.isRecurring) return false
+  if (taskSearchFilters.recurring === "no" && todo.isRecurring) return false
+  if (taskSearchFilters.icon && todo.icon !== taskSearchFilters.icon) return false
+
+  const notesMetadata = extractTaskNotesMetadata(todo.notes)
+  if (taskSearchFilters.attachment === "yes" && !notesMetadata.hasAttachment) return false
+  if (taskSearchFilters.attachment === "no" && notesMetadata.hasAttachment) return false
+  if (taskSearchFilters.url === "yes" && !notesMetadata.hasUrl) return false
+  if (taskSearchFilters.url === "no" && notesMetadata.hasUrl) return false
+  if (taskSearchFilters.phone === "yes" && !notesMetadata.hasPhone) return false
+  if (taskSearchFilters.phone === "no" && notesMetadata.hasPhone) return false
+  if (!taskAlertMatchesFilter(todo, taskSearchFilters.alert)) return false
+  if (!createdAtMatchesFilter(todo.createdAt, taskSearchFilters.dateAdded, referenceDate)) return false
+
+  return true
+}
 
 const normalizeSubtask = (
   subtask: Partial<SubTask> & { id?: string; title?: string; text?: string; completed?: boolean; parentId?: string },
@@ -322,6 +593,22 @@ const normalizeSubtask = (
 // 3. keep `normalizePersistedState` backward-safe for older payloads
 export const STORAGE_VERSION = 1
 export const LEMONADE_STORAGE_KEY = "lemonade-storage"
+
+export const normalizeTodoPriority = (value: unknown): TodoPriority => {
+  if (value === "urgent" || value === "important" || value === "normal") {
+    return value
+  }
+
+  if (value === "high") {
+    return "urgent"
+  }
+
+  if (value === "medium") {
+    return "important"
+  }
+
+  return "normal"
+}
 
 const normalizeTodo = (todo: Todo, fallbackCreatedAt: number): Todo => {
   const fallbackLabelIds = Array.isArray(todo.labelIds)
@@ -350,6 +637,7 @@ const normalizeTodo = (todo: Todo, fallbackCreatedAt: number): Todo => {
         : undefined,
     subtasks: Array.isArray(todo.subtasks) ? todo.subtasks.map((subtask) => normalizeSubtask(subtask, todo.id)) : [],
     labelIds: fallbackLabelIds,
+    priority: normalizeTodoPriority(todo.priority),
     storeName: typeof todo.storeName === "string" ? todo.storeName : undefined,
     returnDeadline: typeof todo.returnDeadline === "string" ? todo.returnDeadline : undefined,
     notes: typeof todo.notes === "string" ? todo.notes : undefined,
@@ -473,7 +761,7 @@ export const migratePersistedLemonadeState = (
 ): PersistedLemonadeStore => {
   const persisted = (persistedState && typeof persistedState === "object"
     ? persistedState
-    : {}) as PersistedLemonadeStore
+    : {}) as Partial<PersistedLemonadeStore>
 
   const fallbackPreferences = fallbackState?.preferences ?? {
     columns: 7,
@@ -488,7 +776,7 @@ export const migratePersistedLemonadeState = (
     theme: "light",
     accentColor: "#2563EB",
     showCelebrations: false,
-    colorPalette: DEFAULT_COLOR_PALETTE,
+    colorPalette: [...DEFAULT_COLOR_PALETTE],
     showDotGridBackground: true,
     defaultLabelId: null,
     displayName: "Lemonade User",
@@ -554,14 +842,6 @@ export const migratePersistedLemonadeState = (
         : fallbackState?.isCalendarExpanded ?? false,
   }
 }
-
-const DEFAULT_COLOR_PALETTE = [
-  '#fef08a',
-  '#bbf7d0',
-  '#bfdbfe',
-  '#fbcfe8',
-  '#fed7aa',
-]
 
 type TokenRange = {
   start: number
@@ -752,6 +1032,7 @@ const hasExplicitDateOverride = (fragment: string) => {
     /\b(?:today|tomorrow|tmr|next week)\b/.test(normalized) ||
     new RegExp(`\\b(?:on|by|this|next)\\s+${WEEKDAY_PATTERN.slice(2, -2)}\\b`, "i").test(normalized) ||
     new RegExp(`${WEEKDAY_PATTERN}\\s+at\\b`, "i").test(normalized) ||
+    shouldTreatBareWeekdayAsTaskDate(normalized) ||
     /\b\d{4}-\d{2}-\d{2}\b/.test(normalized) ||
     /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/.test(normalized)
   )
@@ -787,6 +1068,49 @@ const getNextWeekdayDate = (referenceDate: Date, weekday: number, includeNextWee
   return addDays(base, daysUntil)
 }
 
+const normalizeSchedulingPhrase = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(
+      /^(?:i need to|need to|please|don't forget to|dont forget to|remember to|make sure to)\s+/,
+      ""
+    )
+    .trim()
+
+const shouldTreatBareWeekdayAsTaskDate = (input: string) => {
+  const normalized = normalizeSchedulingPhrase(input)
+  const weekdayMatch = normalized.match(/\b(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/)
+
+  if (!weekdayMatch) {
+    return false
+  }
+
+  if (
+    /\b(?:on|by|this|next)\s+(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/.test(normalized) ||
+    /\b(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\s+at\b/.test(normalized)
+  ) {
+    return true
+  }
+
+  const before = normalized.slice(0, weekdayMatch.index).trim()
+  const after = normalized.slice((weekdayMatch.index ?? 0) + weekdayMatch[0].length).trim()
+
+  if (after.length > 0) {
+    return false
+  }
+
+  if (
+    /\b(?:is|are|was|were|be|been|being|coming|arriving|available|delivered|delivery|ship(?:ping|ped)?|message|email|text|tell|told|say|said|because|that)\b/.test(
+      before
+    )
+  ) {
+    return false
+  }
+
+  const wordCount = before.split(/\s+/).filter(Boolean).length
+  return wordCount <= 4
+}
+
 const detectFastPathScheduledDate = (input: string, referenceDate: Date) => {
   const normalized = input.toLowerCase()
 
@@ -813,9 +1137,19 @@ const detectFastPathScheduledDate = (input: string, referenceDate: Date) => {
     return toIsoDate(nextMonday)
   }
 
-  const weekdayMatch = normalized.match(/\b(?:on\s+)?(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/)
-  if (weekdayMatch) {
-    return toIsoDate(getNextWeekdayDate(referenceDate, WEEKDAY_INDEX_BY_NAME[weekdayMatch[1]]))
+  const explicitWeekdayMatch = normalized.match(/\b(?:on|by|this)\s+(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/)
+  if (explicitWeekdayMatch) {
+    return toIsoDate(getNextWeekdayDate(referenceDate, WEEKDAY_INDEX_BY_NAME[explicitWeekdayMatch[1]]))
+  }
+
+  const weekdayAtTimeMatch = normalized.match(/\b(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\s+at\b/)
+  if (weekdayAtTimeMatch) {
+    return toIsoDate(getNextWeekdayDate(referenceDate, WEEKDAY_INDEX_BY_NAME[weekdayAtTimeMatch[1]]))
+  }
+
+  const bareWeekdayMatch = normalized.match(/\b(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/)
+  if (bareWeekdayMatch && shouldTreatBareWeekdayAsTaskDate(normalized)) {
+    return toIsoDate(getNextWeekdayDate(referenceDate, WEEKDAY_INDEX_BY_NAME[bareWeekdayMatch[1]]))
   }
 
   return undefined
@@ -912,11 +1246,11 @@ export function parseNaturalLanguageTaskInput(
   for (const match of taskInput.matchAll(/\b(p1|p2|p3|high priority|medium priority|low priority|urgent|asap|important|normal priority|normal|whenever)\b/gi)) {
     const normalized = match[0].toLowerCase()
     const value =
-      normalized === "p1" || normalized === "urgent" || normalized === "asap" || normalized === "important" || normalized === "high priority"
-        ? "high"
-        : normalized === "p2" || normalized === "medium priority" || normalized === "normal priority" || normalized === "normal"
-          ? "medium"
-          : "low"
+      normalized === "p1" || normalized === "urgent" || normalized === "asap" || normalized === "high priority"
+        ? "urgent"
+        : normalized === "p2" || normalized === "important" || normalized === "medium priority"
+          ? "important"
+          : "normal"
     const preview = { key: `priority-${match.index}`, label: `❗ ${titleCase(value)}` }
 
     if (pushRange({ start: match.index!, end: match.index! + match[0].length, type: "priority", preview, payload: value })) {
@@ -1152,7 +1486,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
         theme: 'light',
         accentColor: '#2563EB',
         showCelebrations: false,
-        colorPalette: DEFAULT_COLOR_PALETTE,
+        colorPalette: [...DEFAULT_COLOR_PALETTE],
         showDotGridBackground: true,
         defaultLabelId: null,
         displayName: "Lemonade User",
@@ -1204,6 +1538,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
               isSyncing: todo.isSyncing ?? false,
               syncStatus: todo.syncStatus === "local" ? "local" : undefined,
               subtasks: resolvedSubtasks,
+              priority: normalizeTodoPriority(todo.priority),
             }],
             lastCreatedTodoId: id,
             quickAddSessionTodoIds: nextSessionIds,
@@ -1258,6 +1593,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
             ...targetTodo,
             ...updates,
             date: "date" in updates ? normalizeTodoDate(updates.date) : targetTodo.date,
+            priority: "priority" in updates ? normalizeTodoPriority(updates.priority) : targetTodo.priority,
             syncStatus:
               updates.syncStatus === "local"
                 ? "local"
@@ -1295,6 +1631,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
             ? {
                 ...todo,
                 ...updates,
+                priority: "priority" in updates ? normalizeTodoPriority(updates.priority) : todo.priority,
                 parentId: undefined,
                 isRecurring: false,
                 recurringFrequency: undefined,
@@ -1575,6 +1912,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
                     createdAt: Date.now(),
                     endOfDay: false,
                     subtasks: [],
+                    priority: "normal",
                     labelIds: defaultLabelId ? [defaultLabelId] : [],
                   }]
                 }
@@ -1589,7 +1927,13 @@ export const useLemonadeStore = create<LemonadeStore>()(
             ? {
                 ...list,
                 todos: list.todos.map((todo) =>
-                  todo.id === todoId ? { ...todo, ...updates } : todo
+                  todo.id === todoId
+                    ? {
+                        ...todo,
+                        ...updates,
+                        priority: "priority" in updates ? normalizeTodoPriority(updates.priority) : todo.priority,
+                      }
+                    : todo
                 ),
               }
             : list
@@ -1620,11 +1964,23 @@ export const useLemonadeStore = create<LemonadeStore>()(
       // Search
       searchQuery: '',
       setSearchQuery: (query) => set({ searchQuery: query }),
+      searchModeActive: false,
+      setSearchModeActive: (active) => set({ searchModeActive: active }),
+      taskSearchFilters: DEFAULT_TASK_SEARCH_FILTERS,
+      setTaskSearchFilters: (updates) =>
+        set((state) => ({
+          taskSearchFilters: {
+            ...state.taskSearchFilters,
+            ...updates,
+          },
+        })),
+      resetTaskSearchFilters: () => set({ taskSearchFilters: DEFAULT_TASK_SEARCH_FILTERS }),
       
       // Filter
       labelFilterIds: [],
       activeFilterColor: null,
       setActiveFilterColor: (color) => set({ activeFilterColor: color }),
+      setLabelFilterIds: (labelIds) => set({ labelFilterIds: [...new Set(labelIds)] }),
       toggleLabelFilter: (labelId) =>
         set((state) => ({
           labelFilterIds: state.labelFilterIds.includes(labelId)

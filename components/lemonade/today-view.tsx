@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
-import { formatLocalDateKey, useLemonadeStore, type Todo } from "@/lib/store"
+import { formatLocalDateKey, todoMatchesSearchFilters, useLemonadeStore, type Todo } from "@/lib/store"
 import { TodoItem } from "./todo-item"
 
 const parseTimeToMinutes = (value?: string) => {
@@ -68,17 +68,21 @@ export const getTodayViewBuckets = (todos: Todo[], showCompleted: boolean, today
 }
 
 export function TodayView() {
-  const { calendarTodos, preferences, labelFilterIds, activeFilterColor, searchQuery } = useLemonadeStore()
+  const { calendarTodos, preferences, labelFilterIds, activeFilterColor, searchQuery, searchModeActive, taskSearchFilters } = useLemonadeStore()
   const todayKey = formatLocalDateKey(new Date())
   const filteredTodos = useMemo(
     () =>
       calendarTodos.filter((todo) => {
-        if (searchQuery && !todo.text.toLowerCase().includes(searchQuery.toLowerCase())) return false
-        if (labelFilterIds.length > 0 && !todo.labelIds.some((labelId) => labelFilterIds.includes(labelId))) return false
-        if (activeFilterColor && todo.color !== activeFilterColor) return false
-        return true
+        return todoMatchesSearchFilters(todo, {
+          searchQuery,
+          searchModeActive,
+          taskSearchFilters,
+          labelFilterIds,
+          activeFilterColor,
+          showCompleted: preferences.showCompleted,
+        })
       }),
-    [activeFilterColor, calendarTodos, labelFilterIds, searchQuery]
+    [activeFilterColor, calendarTodos, labelFilterIds, preferences.showCompleted, searchModeActive, searchQuery, taskSearchFilters]
   )
   const { overdue, today } = useMemo(
     () => getTodayViewBuckets(filteredTodos, preferences.showCompleted, todayKey),

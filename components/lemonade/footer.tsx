@@ -16,6 +16,7 @@ import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { PrintPreviewDialog } from "./print-preview-dialog"
 
 interface FooterProps {
   onNavigate?: (direction: 'prev-week' | 'next-week' | 'prev-day' | 'next-day' | 'today') => void
@@ -205,9 +206,7 @@ export function Footer({ onNavigate, viewMode = "calendar", onViewModeChange }: 
       </div>
 
       <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
-        <div className="lemonade-footer-badge rounded-md bg-[#2c2c2c] px-4 py-2 text-[12px] font-semibold uppercase tracking-[0.04em] text-white">
-          Free Trial 5 Days Left
-        </div>
+        <PrintPreviewDialog selectedDate={selectedCalendarDate} />
         <Button
           asChild
           variant="ghost"
@@ -249,7 +248,7 @@ export function Footer({ onNavigate, viewMode = "calendar", onViewModeChange }: 
               <div className="mb-2 font-medium">Natural language tips</div>
               <ul className="space-y-1 text-muted-foreground">
                 <li>Dates: <span className="text-foreground">today</span>, <span className="text-foreground">tomorrow</span>, <span className="text-foreground">friday</span>, <span className="text-foreground">next friday</span>, <span className="text-foreground">june 5</span></li>
-                <li>Priority: <span className="text-foreground">!high</span>, <span className="text-foreground">!medium</span>, <span className="text-foreground">!low</span></li>
+                <li>Priority: <span className="text-foreground">urgent</span>, <span className="text-foreground">important</span>, <span className="text-foreground">normal</span>, <span className="text-foreground">p1</span>, <span className="text-foreground">p2</span>, <span className="text-foreground">p3</span></li>
                 <li>Tags: <span className="text-foreground">#work</span>, <span className="text-foreground">#home</span></li>
                 <li>Time: <span className="text-foreground">3pm</span>, <span className="text-foreground">9am</span>, <span className="text-foreground">morning</span>, <span className="text-foreground">evening</span></li>
               </ul>
