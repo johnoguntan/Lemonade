@@ -5,6 +5,10 @@ import { Switch } from "@/components/ui/switch"
 import { Sun, Moon, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTheme } from "next-themes"
+import { useState } from "react"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Button } from "@/components/ui/button"
+import { ColorPickerPanel } from "./color-picker-panel"
 
 const THEME_COLORS = [
   { label: "purple", hex: "#852CE6" },
@@ -21,6 +25,7 @@ const THEME_COLORS = [
 export function PreferencesPanel() {
   const { preferences, setPreferences, setSidebarOpen, sidebarOpen } = useLemonadeStore()
   const { setTheme } = useTheme()
+  const [openAccentPicker, setOpenAccentPicker] = useState(false)
 
   const handleThemeChange = (theme: "light" | "dark") => {
     setPreferences({ theme })
@@ -66,6 +71,34 @@ export function PreferencesPanel() {
                 aria-label={`Use ${hex} as the accent color`}
               />
             ))}
+
+            <Popover open={openAccentPicker} onOpenChange={setOpenAccentPicker}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 rounded-full border-white/15 bg-white/[0.03] px-3 text-[11px] text-gray-200 hover:bg-white/10"
+                >
+                  Custom…
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                side="right"
+                sideOffset={10}
+                className="z-50 max-h-[70vh] w-[360px] overflow-y-auto border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
+              >
+                <ColorPickerPanel
+                  value={preferences.accentColor}
+                  palette={preferences.colorPalette}
+                  onChange={(color) => setPreferences({ accentColor: color })}
+                  onPaletteChange={(palette) => setPreferences({ colorPalette: palette })}
+                  title="Accent color"
+                  description="Pick a color from the wheel or choose a saved swatch."
+                />
+              </PopoverContent>
+            </Popover>
           </div>
         </section>
 

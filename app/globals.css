@@ -170,6 +170,34 @@
   }
 }
 
+@layer utilities {
+  @keyframes celebration-pop {
+    0% { transform: scale(0.6); opacity: 0; }
+    35% { transform: scale(1); opacity: 1; }
+    100% { transform: scale(1.18); opacity: 0; }
+  }
+
+  .celebration-sparkle {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    transform: translate(-50%, -50%);
+    background: color-mix(in srgb, var(--accent-color) 70%, white 30%);
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--accent-color) 30%, transparent 70%),
+      0 10px 30px rgba(0,0,0,0.12);
+    animation: celebration-pop 650ms ease-out both;
+  }
+
+  .celebration-sparkle-1 { transform: translate(-50%, -50%) translate(0, -26px); }
+  .celebration-sparkle-2 { transform: translate(-50%, -50%) translate(24px, 0); }
+  .celebration-sparkle-3 { transform: translate(-50%, -50%) translate(0, 26px); }
+  .celebration-sparkle-4 { transform: translate(-50%, -50%) translate(-24px, 0); }
+}
+
 @layer base {
   html {
     font-size: 12px;

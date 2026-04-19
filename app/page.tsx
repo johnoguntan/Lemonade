@@ -10,6 +10,7 @@ import { RightPageView } from "@/components/lemonade/right-page-view"
 import { DualProjectList } from "@/components/lemonade/dual-project-list"
 import { Footer } from "@/components/lemonade/footer"
 import { DailyPlannerModal } from "@/components/lemonade/daily-planner-modal"
+import { CelebrationOverlay } from "@/components/lemonade/celebration-overlay"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -227,6 +228,7 @@ export default function Home() {
           zIndex: 1,
         }}
       >
+        <CelebrationOverlay />
         <div
           className="notebook-bg"
           style={{

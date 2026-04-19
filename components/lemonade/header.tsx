@@ -1394,7 +1394,7 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
                   side="bottom"
                   sideOffset={10}
                   data-quick-add-surface="true"
-                  className="z-50 w-[320px] border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
+                  className="z-50 max-h-[70vh] w-[320px] overflow-y-auto border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
                 >
                   <ColorPickerPanel
                     value={draftColor}
@@ -1406,7 +1406,7 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
                     onPaletteChange={(palette) => setPreferences({ colorPalette: palette })}
                     onClear={() => setDraftColor(undefined)}
                     title="Color"
-                    description="Choose a saved swatch or open the system color wheel for a custom task color."
+                    description="Pick a color from the wheel or choose a saved swatch."
                   />
                 </PopoverContent>
               </Popover>

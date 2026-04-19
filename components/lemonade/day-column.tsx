@@ -21,7 +21,6 @@ import { getPlannerTaskDragData, setPlannerTaskDragData } from "@/lib/task-dnd"
 import { format, isValid, parseISO } from "date-fns"
 import { Check } from "lucide-react"
 import { toast } from "sonner"
-import { IconPicker } from "./icon-picker"
 
 interface DayColumnProps {
   date: Date
@@ -85,6 +84,7 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
   const clearLastCreatedTodoId = useLemonadeStore((state) => state.clearLastCreatedTodoId)
   const ensureLabelIds = useLemonadeStore((state) => state.ensureLabelIds)
   const moveTodoToDate = useLemonadeStore((state) => state.moveTodoToDate)
+  const reorderCalendarTodo = useLemonadeStore((state) => state.reorderCalendarTodo)
   const searchQuery = useLemonadeStore((state) => state.searchQuery)
   const searchModeActive = useLemonadeStore((state) => state.searchModeActive)
   const taskSearchFilters = useLemonadeStore((state) => state.taskSearchFilters)
@@ -94,9 +94,9 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
   const labels = useLemonadeStore((state) => state.labels)
   const [newTodoText, setNewTodoText] = useState("")
   const [isAdding, setIsAdding] = useState(false)
-  const [newTodoIcon, setNewTodoIcon] = useState<string | undefined>(undefined)
   const [isDragOver, setIsDragOver] = useState(false)
   const [draggedTodoId, setDraggedTodoId] = useState<string | null>(null)
+  const [dropIndicator, setDropIndicator] = useState<{ targetId: string; position: "before" | "after" } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const dateStr = getDateString(date)
@@ -133,7 +133,6 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
 
   const handleStartAdding = () => {
     setIsAdding(true)
-    setNewTodoIcon(undefined)
     requestAnimationFrame(() => {
       inputRef.current?.focus()
     })
@@ -179,6 +178,7 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
 
     setIsDragOver(false)
     setDraggedTodoId(null)
+    setDropIndicator(null)
   }
 
   const handleCreateNaturalLanguageTodo = async () => {
@@ -213,7 +213,6 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
           priority: parsedTask.priority,
           labelIds,
           subtasks: parsedTask.subtaskTitles.map((subtaskTitle) => ({ title: subtaskTitle })),
-          icon: newTodoIcon,
           isSyncing: true,
           syncStatus: undefined,
         })
@@ -323,7 +322,6 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
       })
 
     setNewTodoText("")
-    setNewTodoIcon(undefined)
     clearLastCreatedTodoId()
     return true
   }
@@ -363,19 +361,59 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
         >
           <div className="flex flex-col">
             {todosForDay.map((todo) => (
-              <TodoItem
+              <div
                 key={todo.id}
-                todo={todo}
-                autoFocus={todo.id === lastCreatedTodoId}
-                textSizeClass={textSizeClass}
-                isDragging={todo.id === draggedTodoId}
-                draggable
-                onDragStart={(event) => handleTodoDragStart(event, todo.id)}
-                onDragEnd={() => {
-                  setIsDragOver(false)
+                className={cn(
+                  dropIndicator?.targetId === todo.id && dropIndicator.position === "before" && "relative before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:bg-[var(--accent-color)]",
+                  dropIndicator?.targetId === todo.id && dropIndicator.position === "after" && "relative after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-[var(--accent-color)]"
+                )}
+                onDragOver={(event) => {
+                  const dragData = getPlannerTaskDragData(event)
+                  if (!dragData || dragData.source !== "calendar") return
+                  const dragged = calendarTodos.find((item) => item.id === dragData.todoId)
+                  if (!dragged || dragged.date !== dateStr) return
+                  if (dragData.todoId === todo.id) return
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = "move"
+
+                  const rect = (event.currentTarget as HTMLDivElement).getBoundingClientRect()
+                  const position: "before" | "after" = event.clientY < rect.top + rect.height / 2 ? "before" : "after"
+                  setDropIndicator({ targetId: todo.id, position })
+                }}
+                onDragLeave={() => {
+                  setDropIndicator((current) => (current?.targetId === todo.id ? null : current))
+                }}
+                onDrop={(event) => {
+                  const dragData = getPlannerTaskDragData(event)
+                  if (!dragData || dragData.source !== "calendar") return
+                  const dragged = calendarTodos.find((item) => item.id === dragData.todoId)
+                  if (!dragged || dragged.date !== dateStr) return
+                  if (dragData.todoId === todo.id) return
+
+                  event.preventDefault()
+                  event.stopPropagation()
+
+                  const rect = (event.currentTarget as HTMLDivElement).getBoundingClientRect()
+                  const position: "before" | "after" = event.clientY < rect.top + rect.height / 2 ? "before" : "after"
+                  reorderCalendarTodo(dragData.todoId, todo.id, position)
+                  setDropIndicator(null)
                   setDraggedTodoId(null)
                 }}
-              />
+              >
+                <TodoItem
+                  todo={todo}
+                  autoFocus={todo.id === lastCreatedTodoId}
+                  textSizeClass={textSizeClass}
+                  isDragging={todo.id === draggedTodoId}
+                  draggable
+                  onDragStart={(event) => handleTodoDragStart(event, todo.id)}
+                  onDragEnd={() => {
+                    setIsDragOver(false)
+                    setDraggedTodoId(null)
+                    setDropIndicator(null)
+                  }}
+                />
+              </div>
             ))}
 
             {afterTodosContent ? (
@@ -418,7 +456,6 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
                         } else if (e.key === "Escape") {
                           setIsAdding(false)
                           setNewTodoText("")
-                          setNewTodoIcon(undefined)
                         }
                       }}
                       onBlur={async () => {
@@ -426,14 +463,11 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
                         setIsAdding(false)
                       }}
                       className={cn(
-                        "w-full bg-transparent px-0 pr-14 outline-none font-task",
+                        "w-full bg-transparent px-0 pr-7 outline-none font-task",
                         textSizeClass
                       )}
                       placeholder="Add a todo..."
                     />
-                    <div className="absolute right-7 top-1/2 -translate-y-1/2">
-                      <IconPicker value={newTodoIcon} onChange={setNewTodoIcon} className="size-7" />
-                    </div>
                     {newTodoText.trim() ? (
                       <button
                         type="button"

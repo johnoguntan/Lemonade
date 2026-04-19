@@ -3,7 +3,6 @@
 import { addDays, addMonths, format, isValid, parseISO } from 'date-fns'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { DEFAULT_COLOR_PALETTE } from './colors'
 
 export type ThemeColor = 
   | 'green' | 'lime' | 'teal' | 'cyan' | 'blue' | 'indigo' | 'violet' | 'purple'
@@ -24,8 +23,6 @@ export interface Label {
   color: string
 }
 
-export type TodoPriority = 'urgent' | 'important' | 'normal'
-
 export interface Todo {
   id: string
   text: string
@@ -37,23 +34,13 @@ export interface Todo {
   syncStatus?: 'local'
   time?: string
   reminderTime?: string
-  // Minutes before the task "event time" (todo.time) to alert.
-  // 0 = at time of event. Undefined/null = no reminder.
   reminderOffsetMinutes?: number | null
-  reminderConfig?: {
-    oneOffs: Array<{ id: string; date: string; time: string }>
-    intervals: Array<{
-      id: string
-      everyMinutes: number
-      startDate: string
-      startTime: string
-      endDate?: string
-      endTime?: string
-    }>
-  }
   durationMinutes?: number
   color?: string
   icon?: string
+  photoDataUrl?: string
+  url?: string
+  location?: string
   isHeading?: boolean
   subtasks: SubTask[]
   isRecurring?: boolean
@@ -62,7 +49,7 @@ export interface Todo {
   recurringInterval?: number
   recurringCustomText?: string
   parentId?: string | null // For recurring instances
-  priority?: TodoPriority
+  priority?: 'high' | 'medium' | 'low' | 'none' | 'urgent' | 'important' | 'normal'
   labelIds: string[]
   tags?: string[] // Legacy migrated tag IDs
   storeName?: string
@@ -70,14 +57,13 @@ export interface Todo {
   notes?: string
 }
 
-export type CalendarTimeframe = "week" | "next-week" | "this-month" | "this-year"
+export type CalendarTimeframe = "week" | "next-week" | "next-month" | "next-year" | "this-month" | "this-year"
 export type CalendarFilterMode = "all" | "ppl"
-export type RightPageViewMode = "project" | "calendar"
+export type RightPageViewMode = "default" | "project" | "calendar"
 export type ShortcutType = "NEXT_WEEK" | "NEXT_MONTH" | "NEXT_YEAR" | "PPL"
-
 export type MainViewMode = "standard" | "dual"
 export type DualViewRange = "NEXT_WEEK" | "THIS_MONTH" | "THIS_YEAR" | "PPL"
-
+export type TodoPriority = 'urgent' | 'important' | 'normal'
 export type TaskSearchStatusFilter = "all" | "done" | "todo"
 export type TaskSearchWhenFilter =
   | "all"
@@ -184,10 +170,33 @@ type CalendarTodoInput = Omit<Todo, 'id' | 'subtasks' | 'endOfDay' | 'createdAt'
   subtasks?: Array<Partial<SubTask> & { title?: string; text?: string }>
 }
 
+type SnoozeOption = "later-today" | "tomorrow" | "this-weekend" | "next-week"
+
+type TaskHistorySnapshot = {
+  calendarTodos: Todo[]
+  collapsedSubtasks: Record<string, boolean>
+  selectedTaskIds: string[]
+}
+
+type TaskHistoryEntry = {
+  label: string
+  snapshot: TaskHistorySnapshot
+}
+
+type CelebrationEvent = {
+  id: string
+  taskCompleted: boolean
+  dayCompleted: boolean
+  date: string | null
+  createdAt: number
+}
+
 interface LemonadeStore {
   // Preferences
   preferences: UserPreferences
   setPreferences: (prefs: Partial<UserPreferences>) => void
+  celebrationEvent: CelebrationEvent | null
+  clearCelebrationEvent: () => void
   
   // Calendar todos
   calendarTodos: Todo[]
@@ -212,6 +221,22 @@ interface LemonadeStore {
   setSubtasksCollapsed: (todoId: string, collapsed: boolean) => void
   toggleSubtasksCollapsed: (todoId: string) => void
   moveTodoToDate: (todoId: string, newDate: string) => void
+  snoozeCalendarTodo: (todoId: string, option: SnoozeOption) => void
+  duplicateCalendarTodo: (todoId: string) => void
+  reorderCalendarTodo: (todoId: string, targetId: string, position: "before" | "after") => void
+  skipRecurringOccurrence: (todoId: string) => void
+  splitCalendarTodo: (todoId: string, titles: string[]) => void
+  convertTodoToSubtask: (todoId: string, parentId: string) => void
+  selectedTaskIds: string[]
+  toggleTaskSelection: (todoId: string) => void
+  clearTaskSelection: () => void
+  mergeSelectedTasks: (mergedTitle: string) => void
+  taskHistoryPast: TaskHistoryEntry[]
+  taskHistoryFuture: TaskHistoryEntry[]
+  canUndoTaskAction: boolean
+  canRedoTaskAction: boolean
+  undoTaskAction: () => string | null
+  redoTaskAction: () => string | null
   
   // Lists
   listTabs: ListTab[]
@@ -269,31 +294,22 @@ interface LemonadeStore {
   setCalendarTimeframe: (timeframe: CalendarTimeframe) => void
   calendarFilterMode: CalendarFilterMode
   setCalendarFilterMode: (mode: CalendarFilterMode) => void
-
-  // Task input mode
   aiMode: boolean
   setAiMode: (next: boolean) => void
-
-  // Main (book) layout mode
-  mainViewMode: MainViewMode
-  setMainViewMode: (mode: MainViewMode) => void
-  dualViewRange: DualViewRange | null
-  setDualViewRange: (range: DualViewRange | null) => void
-
-  // Playground (undated inbox) note
-  playgroundNote: string
-  setPlaygroundNote: (note: string) => void
-
-  // Header quick-add session tracking (for showing recently added tasks)
-  quickAddSessionActive: boolean
-  quickAddSessionTodoIds: string[]
-  startQuickAddSession: () => void
-  endQuickAddSession: () => void
-
   rightPageViewMode: RightPageViewMode
   setRightPageViewMode: (mode: RightPageViewMode) => void
   selectedShortcut: ShortcutType | null
   setSelectedShortcut: (shortcut: ShortcutType | null) => void
+  mainViewMode: MainViewMode
+  setMainViewMode: (mode: MainViewMode) => void
+  dualViewRange: DualViewRange | null
+  setDualViewRange: (range: DualViewRange | null) => void
+  playgroundNote: string
+  setPlaygroundNote: (note: string) => void
+  quickAddSessionActive: boolean
+  quickAddSessionTodoIds: string[]
+  startQuickAddSession: () => void
+  endQuickAddSession: () => void
   weekCount: number
   lastSessionDate: string | null
   incrementWeekCount: () => void
@@ -310,28 +326,31 @@ interface LemonadeStore {
     autoRollover: () => void
 }
 
-type PersistedLemonadeStore = {
-  preferences: UserPreferences
-  calendarTodos: Todo[]
-  listTabs: ListTab[]
-  lists: List[]
-  labels: Label[]
-  searchQuery: string
-  labelFilterIds: string[]
-  collapsedSubtasks: Record<string, boolean>
-  sidebarOpen: boolean
-  aiMode?: boolean
-  mainViewMode?: MainViewMode
-  dualViewRange?: DualViewRange | null
-  playgroundNote?: string
-  weekCount: number
-  isCalendarExpanded: boolean
-  lastSessionDate: string | null
-}
+type PersistedLemonadeStore = Partial<
+  Pick<
+    LemonadeStore,
+    | 'preferences'
+    | 'calendarTodos'
+    | 'listTabs'
+    | 'lists'
+    | 'labels'
+    | 'searchQuery'
+    | 'labelFilterIds'
+    | 'collapsedSubtasks'
+    | 'sidebarOpen'
+    | 'weekCount'
+    | 'isCalendarExpanded'
+    | 'lastSessionDate'
+  >
+>
 
 const generateId = () => Math.random().toString(36).substring(2, 15)
 
 export const createOptimisticTodoId = (scope = "task") => `optimistic-${scope}-${generateId()}`
+
+const TASK_HISTORY_LIMIT = 50
+const LEGACY_ATTACHMENT_PREFIX = "Attachment: "
+const LEGACY_LINK_PATTERN = /^(https?:\/\/|www\.|tel:|\+?[\d()\-\s]{6,})/i
 
 export const DEFAULT_TASK_SEARCH_FILTERS: TaskSearchFilters = {
   status: "all",
@@ -345,6 +364,47 @@ export const DEFAULT_TASK_SEARCH_FILTERS: TaskSearchFilters = {
   alert: "all",
   dateAdded: "all",
 }
+
+const extractLegacyStructuredLink = (notes?: string) => {
+  const lines = (notes ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  for (const line of lines) {
+    if (line.startsWith(LEGACY_ATTACHMENT_PREFIX)) {
+      continue
+    }
+
+    if (LEGACY_LINK_PATTERN.test(line)) {
+      return line
+    }
+  }
+
+  return undefined
+}
+
+const cloneTaskHistorySnapshot = (state: Pick<LemonadeStore, "calendarTodos" | "collapsedSubtasks" | "selectedTaskIds">): TaskHistorySnapshot => ({
+  calendarTodos: state.calendarTodos.map((todo) => ({
+    ...todo,
+    subtasks: todo.subtasks.map((subtask) => ({ ...subtask })),
+  })),
+  collapsedSubtasks: { ...state.collapsedSubtasks },
+  selectedTaskIds: [...state.selectedTaskIds],
+})
+
+const pushTaskHistory = (
+  state: LemonadeStore,
+  label: string
+): Pick<LemonadeStore, "canUndoTaskAction" | "canRedoTaskAction"> & { taskHistoryPast: TaskHistoryEntry[]; taskHistoryFuture: TaskHistoryEntry[] } => ({
+  taskHistoryPast: [
+    ...state.taskHistoryPast.slice(-(TASK_HISTORY_LIMIT - 1)),
+    { label, snapshot: cloneTaskHistorySnapshot(state) },
+  ],
+  taskHistoryFuture: [],
+  canUndoTaskAction: true,
+  canRedoTaskAction: false,
+})
 
 const ATTACHMENT_PREFIX = "Attachment: "
 
@@ -437,6 +497,22 @@ const createdAtMatchesFilter = (createdAt: number, filter: TaskSearchDateAddedFi
   }
 }
 
+export const normalizeTodoPriority = (value: unknown): TodoPriority => {
+  if (value === "urgent" || value === "important" || value === "normal") {
+    return value
+  }
+
+  if (value === "high") {
+    return "urgent"
+  }
+
+  if (value === "medium") {
+    return "important"
+  }
+
+  return "normal"
+}
+
 const taskDateMatchesFilter = (todo: Todo, filter: TaskSearchWhenFilter, referenceDate: Date) => {
   if (filter === "all") return true
   if (filter === "someday") return todo.date === null
@@ -489,7 +565,7 @@ const taskPriorityMatchesFilter = (todo: Todo, filter: TaskSearchPriorityFilter)
     case "low":
       return priority === "normal"
     case "none":
-      return todo.priority == null
+      return todo.priority == null || todo.priority === "none"
     default:
       return true
   }
@@ -586,29 +662,14 @@ const normalizeSubtask = (
 // Persisted storage version history:
 // 0: legacy persisted state before explicit versioning/migrations
 // 1: normalized persisted preferences, todos, lists, weekCount, and calendar expansion
+// 2: normalized task metadata fields including reminders, duration, icons, photos, URLs, and locations
 //
 // When you add or rename persisted fields:
 // 1. bump STORAGE_VERSION
 // 2. add the migration branch in `migrate`
 // 3. keep `normalizePersistedState` backward-safe for older payloads
-export const STORAGE_VERSION = 1
+export const STORAGE_VERSION = 2
 export const LEMONADE_STORAGE_KEY = "lemonade-storage"
-
-export const normalizeTodoPriority = (value: unknown): TodoPriority => {
-  if (value === "urgent" || value === "important" || value === "normal") {
-    return value
-  }
-
-  if (value === "high") {
-    return "urgent"
-  }
-
-  if (value === "medium") {
-    return "important"
-  }
-
-  return "normal"
-}
 
 const normalizeTodo = (todo: Todo, fallbackCreatedAt: number): Todo => {
   const fallbackLabelIds = Array.isArray(todo.labelIds)
@@ -623,9 +684,28 @@ const normalizeTodo = (todo: Todo, fallbackCreatedAt: number): Todo => {
     endOfDay: typeof todo.endOfDay === "boolean" ? todo.endOfDay : false,
     isSyncing: typeof todo.isSyncing === "boolean" ? todo.isSyncing : false,
     syncStatus: todo.syncStatus === "local" ? "local" : undefined,
+    reminderOffsetMinutes:
+      typeof todo.reminderOffsetMinutes === "number" && Number.isFinite(todo.reminderOffsetMinutes)
+        ? todo.reminderOffsetMinutes
+        : todo.reminderOffsetMinutes === 0
+          ? 0
+          : null,
     durationMinutes:
       typeof todo.durationMinutes === "number" && Number.isFinite(todo.durationMinutes) && todo.durationMinutes > 0
         ? Math.floor(todo.durationMinutes)
+        : undefined,
+    icon: typeof todo.icon === "string" && todo.icon.trim().length > 0 ? todo.icon : undefined,
+    photoDataUrl:
+      typeof todo.photoDataUrl === "string" && todo.photoDataUrl.trim().length > 0
+        ? todo.photoDataUrl
+        : undefined,
+    url:
+      typeof todo.url === "string" && todo.url.trim().length > 0
+        ? todo.url.trim()
+        : extractLegacyStructuredLink(todo.notes),
+    location:
+      typeof todo.location === "string" && todo.location.trim().length > 0
+        ? todo.location.trim()
         : undefined,
     recurringInterval:
       typeof todo.recurringInterval === "number" && Number.isFinite(todo.recurringInterval) && todo.recurringInterval > 1
@@ -761,7 +841,7 @@ export const migratePersistedLemonadeState = (
 ): PersistedLemonadeStore => {
   const persisted = (persistedState && typeof persistedState === "object"
     ? persistedState
-    : {}) as Partial<PersistedLemonadeStore>
+    : {}) as PersistedLemonadeStore
 
   const fallbackPreferences = fallbackState?.preferences ?? {
     columns: 7,
@@ -776,7 +856,7 @@ export const migratePersistedLemonadeState = (
     theme: "light",
     accentColor: "#2563EB",
     showCelebrations: false,
-    colorPalette: [...DEFAULT_COLOR_PALETTE],
+    colorPalette: DEFAULT_COLOR_PALETTE,
     showDotGridBackground: true,
     defaultLabelId: null,
     displayName: "Lemonade User",
@@ -842,6 +922,14 @@ export const migratePersistedLemonadeState = (
         : fallbackState?.isCalendarExpanded ?? false,
   }
 }
+
+const DEFAULT_COLOR_PALETTE = [
+  '#fef08a',
+  '#bbf7d0',
+  '#bfdbfe',
+  '#fbcfe8',
+  '#fed7aa',
+]
 
 type TokenRange = {
   start: number
@@ -1032,7 +1120,6 @@ const hasExplicitDateOverride = (fragment: string) => {
     /\b(?:today|tomorrow|tmr|next week)\b/.test(normalized) ||
     new RegExp(`\\b(?:on|by|this|next)\\s+${WEEKDAY_PATTERN.slice(2, -2)}\\b`, "i").test(normalized) ||
     new RegExp(`${WEEKDAY_PATTERN}\\s+at\\b`, "i").test(normalized) ||
-    shouldTreatBareWeekdayAsTaskDate(normalized) ||
     /\b\d{4}-\d{2}-\d{2}\b/.test(normalized) ||
     /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/.test(normalized)
   )
@@ -1068,49 +1155,6 @@ const getNextWeekdayDate = (referenceDate: Date, weekday: number, includeNextWee
   return addDays(base, daysUntil)
 }
 
-const normalizeSchedulingPhrase = (value: string) =>
-  value
-    .toLowerCase()
-    .replace(
-      /^(?:i need to|need to|please|don't forget to|dont forget to|remember to|make sure to)\s+/,
-      ""
-    )
-    .trim()
-
-const shouldTreatBareWeekdayAsTaskDate = (input: string) => {
-  const normalized = normalizeSchedulingPhrase(input)
-  const weekdayMatch = normalized.match(/\b(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/)
-
-  if (!weekdayMatch) {
-    return false
-  }
-
-  if (
-    /\b(?:on|by|this|next)\s+(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/.test(normalized) ||
-    /\b(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\s+at\b/.test(normalized)
-  ) {
-    return true
-  }
-
-  const before = normalized.slice(0, weekdayMatch.index).trim()
-  const after = normalized.slice((weekdayMatch.index ?? 0) + weekdayMatch[0].length).trim()
-
-  if (after.length > 0) {
-    return false
-  }
-
-  if (
-    /\b(?:is|are|was|were|be|been|being|coming|arriving|available|delivered|delivery|ship(?:ping|ped)?|message|email|text|tell|told|say|said|because|that)\b/.test(
-      before
-    )
-  ) {
-    return false
-  }
-
-  const wordCount = before.split(/\s+/).filter(Boolean).length
-  return wordCount <= 4
-}
-
 const detectFastPathScheduledDate = (input: string, referenceDate: Date) => {
   const normalized = input.toLowerCase()
 
@@ -1137,19 +1181,9 @@ const detectFastPathScheduledDate = (input: string, referenceDate: Date) => {
     return toIsoDate(nextMonday)
   }
 
-  const explicitWeekdayMatch = normalized.match(/\b(?:on|by|this)\s+(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/)
-  if (explicitWeekdayMatch) {
-    return toIsoDate(getNextWeekdayDate(referenceDate, WEEKDAY_INDEX_BY_NAME[explicitWeekdayMatch[1]]))
-  }
-
-  const weekdayAtTimeMatch = normalized.match(/\b(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\s+at\b/)
-  if (weekdayAtTimeMatch) {
-    return toIsoDate(getNextWeekdayDate(referenceDate, WEEKDAY_INDEX_BY_NAME[weekdayAtTimeMatch[1]]))
-  }
-
-  const bareWeekdayMatch = normalized.match(/\b(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/)
-  if (bareWeekdayMatch && shouldTreatBareWeekdayAsTaskDate(normalized)) {
-    return toIsoDate(getNextWeekdayDate(referenceDate, WEEKDAY_INDEX_BY_NAME[bareWeekdayMatch[1]]))
+  const weekdayMatch = normalized.match(/\b(?:on\s+)?(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/)
+  if (weekdayMatch) {
+    return toIsoDate(getNextWeekdayDate(referenceDate, WEEKDAY_INDEX_BY_NAME[weekdayMatch[1]]))
   }
 
   return undefined
@@ -1246,9 +1280,9 @@ export function parseNaturalLanguageTaskInput(
   for (const match of taskInput.matchAll(/\b(p1|p2|p3|high priority|medium priority|low priority|urgent|asap|important|normal priority|normal|whenever)\b/gi)) {
     const normalized = match[0].toLowerCase()
     const value =
-      normalized === "p1" || normalized === "urgent" || normalized === "asap" || normalized === "high priority"
+      normalized === "p1" || normalized === "urgent" || normalized === "asap" || normalized === "important" || normalized === "high priority"
         ? "urgent"
-        : normalized === "p2" || normalized === "important" || normalized === "medium priority"
+        : normalized === "p2" || normalized === "medium priority" || normalized === "normal priority" || normalized === "normal"
           ? "important"
           : "normal"
     const preview = { key: `priority-${match.index}`, label: `❗ ${titleCase(value)}` }
@@ -1436,6 +1470,93 @@ const differenceInWholeWeeks = (left: Date, right: Date) => {
   return Math.floor((startOfDay(left).getTime() - startOfDay(right).getTime()) / (7 * MS_PER_DAY))
 }
 
+const insertTodoAfter = (todos: Todo[], targetId: string, nextTodo: Todo) => {
+  const index = todos.findIndex((todo) => todo.id === targetId)
+  if (index === -1) {
+    return [...todos, nextTodo]
+  }
+
+  const nextTodos = [...todos]
+  nextTodos.splice(index + 1, 0, nextTodo)
+  return nextTodos
+}
+
+const getTodoSortBucket = (todo: Todo) => {
+  if (!todo.completed && !todo.endOfDay) return 0
+  if (!todo.completed && todo.endOfDay) return 1
+  if (todo.completed && !todo.endOfDay) return 2
+  return 3
+}
+
+const getSnoozeDate = (option: SnoozeOption, referenceDate: Date) => {
+  const today = startOfDay(referenceDate)
+
+  switch (option) {
+    case "later-today":
+      return today
+    case "tomorrow":
+      return addDays(today, 1)
+    case "this-weekend": {
+      const day = today.getDay()
+      const daysUntilSaturday = ((6 - day + 7) % 7) || 7
+      return addDays(today, daysUntilSaturday)
+    }
+    case "next-week": {
+      const day = today.getDay()
+      const daysUntilNextMonday = ((8 - day) % 7) || 7
+      return addDays(today, daysUntilNextMonday)
+    }
+    default:
+      return today
+  }
+}
+
+const getNextRecurringOccurrenceDate = (todo: Todo, referenceDate: Date) => {
+  const interval = getRecurringInterval(todo)
+  const base = startOfDay(referenceDate)
+
+  if (todo.recurringFrequency === "daily") {
+    return addDays(base, interval)
+  }
+
+  if (todo.recurringFrequency === "weekday") {
+    let offset = 1
+    while (offset < 14 * interval) {
+      const candidate = addDays(base, offset)
+      if (candidate.getDay() !== 0 && candidate.getDay() !== 6) {
+        return candidate
+      }
+      offset += 1
+    }
+  }
+
+  if (todo.recurringFrequency === "monthly") {
+    return addMonths(base, interval)
+  }
+
+  const recurringDays = todo.recurringDays && todo.recurringDays.length > 0
+    ? new Set(todo.recurringDays)
+    : new Set([base.getDay()])
+
+  let offset = 1
+  while (offset <= 366) {
+    const candidate = addDays(base, offset)
+    if (recurringDays.has(candidate.getDay())) {
+      if (interval <= 1) {
+        return candidate
+      }
+
+      const weeksSinceReference = differenceInWholeWeeks(candidate, base)
+      if (weeksSinceReference % interval === 0) {
+        return candidate
+      }
+    }
+    offset += 1
+  }
+
+  return addDays(base, 7)
+}
+
 const mapTodosInStore = (
   state: Pick<LemonadeStore, "calendarTodos" | "lists">,
   todoId: string,
@@ -1486,7 +1607,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
         theme: 'light',
         accentColor: '#2563EB',
         showCelebrations: false,
-        colorPalette: [...DEFAULT_COLOR_PALETTE],
+        colorPalette: DEFAULT_COLOR_PALETTE,
         showDotGridBackground: true,
         defaultLabelId: null,
         displayName: "Lemonade User",
@@ -1495,6 +1616,9 @@ export const useLemonadeStore = create<LemonadeStore>()(
       setPreferences: (prefs) => set((state) => ({
         preferences: { ...state.preferences, ...prefs }
       })),
+
+      celebrationEvent: null,
+      clearCelebrationEvent: () => set({ celebrationEvent: null }),
       
       // Calendar todos
       calendarTodos: [],
@@ -1502,6 +1626,11 @@ export const useLemonadeStore = create<LemonadeStore>()(
       lastCreatedTodoId: null,
       lastDeleted: null,
       lastAutoMovedCount: 0,
+      selectedTaskIds: [],
+      taskHistoryPast: [],
+      taskHistoryFuture: [],
+      canUndoTaskAction: false,
+      canRedoTaskAction: false,
       
       addCalendarTodo: (todo) => {
         const existingIds = new Set(get().calendarTodos.map((item) => item.id))
@@ -1520,30 +1649,37 @@ export const useLemonadeStore = create<LemonadeStore>()(
               .map((subtask) => normalizeSubtask(subtask, id))
               .filter((subtask) => subtask.title.trim().length > 0)
           : []
-        set((state) => {
-          const shouldTrack = state.quickAddSessionActive
-          const nextSessionIds =
-            shouldTrack && !state.quickAddSessionTodoIds.includes(id)
+        set((state) => ({
+          ...pushTaskHistory(state, "add task"),
+          calendarTodos: [...state.calendarTodos, {
+            ...todo,
+            id,
+            date: resolvedDate,
+            labelIds: resolvedLabelIds,
+            createdAt: todo.createdAt ?? Date.now(),
+            endOfDay: todo.endOfDay ?? false,
+            isSyncing: todo.isSyncing ?? false,
+            syncStatus: todo.syncStatus === "local" ? "local" : undefined,
+            subtasks: resolvedSubtasks,
+            priority: normalizeTodoPriority(todo.priority),
+            reminderOffsetMinutes:
+              typeof todo.reminderOffsetMinutes === "number" && Number.isFinite(todo.reminderOffsetMinutes)
+                ? todo.reminderOffsetMinutes
+                : null,
+            icon: typeof todo.icon === "string" && todo.icon.trim().length > 0 ? todo.icon : undefined,
+            url: typeof todo.url === "string" && todo.url.trim().length > 0 ? todo.url.trim() : undefined,
+            location: typeof todo.location === "string" && todo.location.trim().length > 0 ? todo.location.trim() : undefined,
+            photoDataUrl:
+              typeof todo.photoDataUrl === "string" && todo.photoDataUrl.trim().length > 0
+                ? todo.photoDataUrl
+                : undefined,
+          }],
+          lastCreatedTodoId: id,
+          quickAddSessionTodoIds:
+            state.quickAddSessionActive && !state.quickAddSessionTodoIds.includes(id)
               ? [...state.quickAddSessionTodoIds, id]
-              : state.quickAddSessionTodoIds
-
-          return {
-            calendarTodos: [...state.calendarTodos, {
-              ...todo,
-              id,
-              date: resolvedDate,
-              labelIds: resolvedLabelIds,
-              createdAt: todo.createdAt ?? Date.now(),
-              endOfDay: todo.endOfDay ?? false,
-              isSyncing: todo.isSyncing ?? false,
-              syncStatus: todo.syncStatus === "local" ? "local" : undefined,
-              subtasks: resolvedSubtasks,
-              priority: normalizeTodoPriority(todo.priority),
-            }],
-            lastCreatedTodoId: id,
-            quickAddSessionTodoIds: nextSessionIds,
-          }
-        })
+              : state.quickAddSessionTodoIds,
+        }))
         if (todo.isRecurring && !todo.parentId) {
           get().generateRecurringInstances()
         }
@@ -1589,11 +1725,41 @@ export const useLemonadeStore = create<LemonadeStore>()(
             return state
           }
 
-        const updatedTodo = {
+          const updatedTodo = {
             ...targetTodo,
             ...updates,
             date: "date" in updates ? normalizeTodoDate(updates.date) : targetTodo.date,
             priority: "priority" in updates ? normalizeTodoPriority(updates.priority) : targetTodo.priority,
+            reminderOffsetMinutes:
+              "reminderOffsetMinutes" in updates
+                ? typeof updates.reminderOffsetMinutes === "number" && Number.isFinite(updates.reminderOffsetMinutes)
+                  ? updates.reminderOffsetMinutes
+                  : null
+                : targetTodo.reminderOffsetMinutes,
+            icon:
+              "icon" in updates
+                ? typeof updates.icon === "string" && updates.icon.trim().length > 0
+                  ? updates.icon
+                  : undefined
+                : targetTodo.icon,
+            url:
+              "url" in updates
+                ? typeof updates.url === "string" && updates.url.trim().length > 0
+                  ? updates.url.trim()
+                  : undefined
+                : targetTodo.url,
+            location:
+              "location" in updates
+                ? typeof updates.location === "string" && updates.location.trim().length > 0
+                  ? updates.location.trim()
+                  : undefined
+                : targetTodo.location,
+            photoDataUrl:
+              "photoDataUrl" in updates
+                ? typeof updates.photoDataUrl === "string" && updates.photoDataUrl.trim().length > 0
+                  ? updates.photoDataUrl
+                  : undefined
+                : targetTodo.photoDataUrl,
             syncStatus:
               updates.syncStatus === "local"
                 ? "local"
@@ -1615,6 +1781,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
             : state.calendarTodos
 
           return {
+            ...pushTaskHistory(state, "edit task"),
             calendarTodos: todosWithoutChildren.map((todo) =>
               todo.id === id ? updatedTodo : todo
             )
@@ -1626,12 +1793,43 @@ export const useLemonadeStore = create<LemonadeStore>()(
       },
 
       updateCalendarTodoInstance: (id, updates) => set((state) => ({
+        ...pushTaskHistory(state, "edit recurring task"),
         calendarTodos: state.calendarTodos.map((todo) =>
           todo.id === id
             ? {
                 ...todo,
                 ...updates,
                 priority: "priority" in updates ? normalizeTodoPriority(updates.priority) : todo.priority,
+                reminderOffsetMinutes:
+                  "reminderOffsetMinutes" in updates
+                    ? typeof updates.reminderOffsetMinutes === "number" && Number.isFinite(updates.reminderOffsetMinutes)
+                      ? updates.reminderOffsetMinutes
+                      : null
+                    : todo.reminderOffsetMinutes,
+                icon:
+                  "icon" in updates
+                    ? typeof updates.icon === "string" && updates.icon.trim().length > 0
+                      ? updates.icon
+                      : undefined
+                    : todo.icon,
+                url:
+                  "url" in updates
+                    ? typeof updates.url === "string" && updates.url.trim().length > 0
+                      ? updates.url.trim()
+                      : undefined
+                    : todo.url,
+                location:
+                  "location" in updates
+                    ? typeof updates.location === "string" && updates.location.trim().length > 0
+                      ? updates.location.trim()
+                      : undefined
+                    : todo.location,
+                photoDataUrl:
+                  "photoDataUrl" in updates
+                    ? typeof updates.photoDataUrl === "string" && updates.photoDataUrl.trim().length > 0
+                      ? updates.photoDataUrl
+                      : undefined
+                    : todo.photoDataUrl,
                 parentId: undefined,
                 isRecurring: false,
                 recurringFrequency: undefined,
@@ -1654,6 +1852,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
           }
 
           return {
+            ...pushTaskHistory(state, "delete task"),
             calendarTodos: removeRecurringChildren(
               state.calendarTodos.filter((todo) => todo.id !== id),
               id
@@ -1662,23 +1861,56 @@ export const useLemonadeStore = create<LemonadeStore>()(
               items: deletedItems,
               token: generateId(),
             },
+            selectedTaskIds: state.selectedTaskIds.filter((selectedId) => !deletedItems.some((item) => item.id === selectedId)),
           }
         }),
       
-      toggleCalendarTodo: (id) => set((state) => ({
-        calendarTodos: state.calendarTodos.map((todo) =>
-          todo.id === id ? { ...todo, completed: !todo.completed } : todo
+      toggleCalendarTodo: (id) => set((state) => {
+        const target = state.calendarTodos.find((todo) => todo.id === id)
+        if (!target) {
+          return state
+        }
+
+        const nextCompleted = !target.completed
+        const nextTodos = state.calendarTodos.map((todo) =>
+          todo.id === id ? { ...todo, completed: nextCompleted } : todo
         )
-      })),
+
+        let celebrationEvent = state.celebrationEvent
+        if (nextCompleted && state.preferences.showCelebrations) {
+          const dateKey = target.date ?? null
+          const dayTodos =
+            dateKey
+              ? nextTodos.filter((todo) => todo.date === dateKey && !todo.isHeading)
+              : []
+          const dayCompleted = dayTodos.length > 0 && dayTodos.every((todo) => todo.completed)
+
+          celebrationEvent = {
+            id: generateId(),
+            taskCompleted: true,
+            dayCompleted,
+            date: dateKey,
+            createdAt: Date.now(),
+          }
+        }
+
+        return {
+          ...pushTaskHistory(state, "complete task"),
+          calendarTodos: nextTodos,
+          celebrationEvent,
+        }
+      }),
 
       toggleEndOfDay: (id) => set((state) => ({
+        ...pushTaskHistory(state, "toggle end of day"),
         calendarTodos: state.calendarTodos.map((todo) =>
           todo.id === id ? { ...todo, endOfDay: !todo.endOfDay } : todo
         )
       })),
       
-      addSubtask: (todoId, text) => set((state) =>
-        mapTodosInStore(state, todoId, (todo) => ({
+      addSubtask: (todoId, text) => set((state) => ({
+        ...pushTaskHistory(state, "add subtask"),
+        ...mapTodosInStore(state, todoId, (todo) => ({
           ...todo,
           subtasks: [
             ...todo.subtasks,
@@ -1689,33 +1921,36 @@ export const useLemonadeStore = create<LemonadeStore>()(
               parentId: todo.id,
             },
           ],
-        }))
-      ),
+        })),
+      })),
 
-      editSubtask: (todoId, subtaskId, title) => set((state) =>
-        mapTodosInStore(state, todoId, (todo) => ({
+      editSubtask: (todoId, subtaskId, title) => set((state) => ({
+        ...pushTaskHistory(state, "edit subtask"),
+        ...mapTodosInStore(state, todoId, (todo) => ({
           ...todo,
           subtasks: todo.subtasks.map((subtask) =>
             subtask.id === subtaskId ? { ...subtask, title } : subtask
           ),
-        }))
-      ),
+        })),
+      })),
 
-      toggleSubtask: (todoId, subtaskId) => set((state) =>
-        mapTodosInStore(state, todoId, (todo) => ({
+      toggleSubtask: (todoId, subtaskId) => set((state) => ({
+        ...pushTaskHistory(state, "complete subtask"),
+        ...mapTodosInStore(state, todoId, (todo) => ({
           ...todo,
           subtasks: todo.subtasks.map((subtask) =>
             subtask.id === subtaskId ? { ...subtask, completed: !subtask.completed } : subtask
           ),
-        }))
-      ),
+        })),
+      })),
 
-      deleteSubtask: (todoId, subtaskId) => set((state) =>
-        mapTodosInStore(state, todoId, (todo) => ({
+      deleteSubtask: (todoId, subtaskId) => set((state) => ({
+        ...pushTaskHistory(state, "delete subtask"),
+        ...mapTodosInStore(state, todoId, (todo) => ({
           ...todo,
           subtasks: todo.subtasks.filter((subtask) => subtask.id !== subtaskId),
-        }))
-      ),
+        })),
+      })),
 
       setSubtasksCollapsed: (todoId, collapsed) =>
         set((state) => ({
@@ -1734,10 +1969,323 @@ export const useLemonadeStore = create<LemonadeStore>()(
         })),
       
       moveTodoToDate: (todoId, newDate) => set((state) => ({
+        ...pushTaskHistory(state, "move task"),
         calendarTodos: state.calendarTodos.map((todo) =>
           todo.id === todoId ? { ...todo, date: newDate } : todo
         )
       })),
+
+      snoozeCalendarTodo: (todoId, option) => set((state) => {
+        const target = state.calendarTodos.find((todo) => todo.id === todoId)
+        if (!target) {
+          return state
+        }
+
+        const snoozeDate = formatLocalDateKey(getSnoozeDate(option, new Date()))
+        const nextTime =
+          option === "later-today"
+            ? `${`${Math.min(new Date().getHours() + 2, 23)}`.padStart(2, "0")}:00`
+            : undefined
+
+        return {
+          ...pushTaskHistory(state, "snooze task"),
+          calendarTodos: state.calendarTodos.map((todo) =>
+            todo.id === todoId
+              ? { ...todo, date: snoozeDate, time: nextTime, completed: false }
+              : todo
+          ),
+        }
+      }),
+
+      duplicateCalendarTodo: (todoId) => set((state) => {
+        const target = state.calendarTodos.find((todo) => todo.id === todoId)
+        if (!target) {
+          return state
+        }
+
+        // Prevent creating phantom/blank duplicates.
+        if (!target.text || target.text.trim().length === 0) {
+          return state
+        }
+
+        const duplicateId = generateId()
+        const baseCreatedAt = typeof target.createdAt === "number" ? target.createdAt : Date.now()
+        const duplicate: Todo = {
+          ...target,
+          id: duplicateId,
+          // Duplicate should stay in the same list/date context as the original.
+          date: target.date,
+          // Exact copy of completion state (including subtasks).
+          completed: target.completed,
+          // Keep the duplicate directly under the original (DayColumn sorts by createdAt).
+          createdAt: baseCreatedAt + 1,
+          parentId: undefined,
+          // Ensure arrays are copied (no shared references).
+          labelIds: [...target.labelIds],
+          // This app is local-only: never show syncing indicators on duplicates.
+          isSyncing: false,
+          syncStatus: undefined,
+          subtasks: target.subtasks.map((subtask) => ({
+            ...subtask,
+            id: generateId(),
+            parentId: duplicateId,
+          })),
+        }
+
+        return {
+          ...pushTaskHistory(state, "duplicate task"),
+          calendarTodos: insertTodoAfter(state.calendarTodos, todoId, duplicate),
+          // Helps keep the duplicate immediately visible (autofocus / highlight behavior).
+          lastCreatedTodoId: duplicateId,
+        }
+      }),
+
+      reorderCalendarTodo: (todoId, targetId, position) => set((state) => {
+        if (todoId === targetId) return state
+        const source = state.calendarTodos.find((todo) => todo.id === todoId)
+        const target = state.calendarTodos.find((todo) => todo.id === targetId)
+        if (!source || !target) return state
+        if (!source.date || !target.date || source.date !== target.date) return state
+
+        const sourceBucket = getTodoSortBucket(source)
+        const targetBucket = getTodoSortBucket(target)
+        // Keep the app's existing section ordering (end-of-day / completed groups).
+        if (sourceBucket !== targetBucket) return state
+
+        const bucketTodos = state.calendarTodos
+          .map((todo, index) => ({ todo, index }))
+          .filter(({ todo }) => todo.date === source.date && getTodoSortBucket(todo) === sourceBucket)
+          .sort((a, b) => {
+            const createdAtDiff = (a.todo.createdAt ?? 0) - (b.todo.createdAt ?? 0)
+            if (createdAtDiff !== 0) return createdAtDiff
+            return a.index - b.index
+          })
+          .map(({ todo }) => todo)
+
+        const withoutSource = bucketTodos.filter((todo) => todo.id !== todoId)
+        const targetIndex = withoutSource.findIndex((todo) => todo.id === targetId)
+        if (targetIndex === -1) return state
+
+        const insertIndex = position === "before" ? targetIndex : targetIndex + 1
+        const nextBucket = [...withoutSource]
+        nextBucket.splice(insertIndex, 0, source)
+
+        const base =
+          nextBucket.reduce((min, todo) => Math.min(min, todo.createdAt ?? min), Number.POSITIVE_INFINITY) ??
+          Date.now()
+        const baseNumber = Number.isFinite(base) ? base : Date.now()
+
+        const createdAtById = new Map<string, number>()
+        nextBucket.forEach((todo, idx) => {
+          createdAtById.set(todo.id, baseNumber + idx)
+        })
+
+        return {
+          ...pushTaskHistory(state, "reorder tasks"),
+          calendarTodos: state.calendarTodos.map((todo) => {
+            const nextCreatedAt = createdAtById.get(todo.id)
+            return typeof nextCreatedAt === "number" ? { ...todo, createdAt: nextCreatedAt } : todo
+          }),
+        }
+      }),
+
+      skipRecurringOccurrence: (todoId) => set((state) => {
+        const target = state.calendarTodos.find((todo) => todo.id === todoId)
+        if (!target || !target.isRecurring) {
+          return state
+        }
+
+        const series = target.parentId
+          ? state.calendarTodos.find((todo) => todo.id === target.parentId) ?? target
+          : target
+        const referenceDate = parseLocalDateKey(target.date ?? formatLocalDateKey(new Date()))
+        const nextDate = formatLocalDateKey(getNextRecurringOccurrenceDate(series, referenceDate))
+        const nextDateTaken = state.calendarTodos.some((todo) => todo.parentId === series.id && todo.date === nextDate)
+
+        return {
+          ...pushTaskHistory(state, "skip recurrence"),
+          calendarTodos: state.calendarTodos
+            .filter((todo) => !(target.id === series.id && todo.parentId === series.id && todo.date === nextDate))
+            .map((todo) => {
+              if (todo.id !== todoId) {
+                return todo
+              }
+
+              if (todo.parentId && nextDateTaken) {
+                return null
+              }
+
+              return {
+                ...todo,
+                date: nextDate,
+                completed: false,
+                time: series.time,
+              }
+            })
+            .filter((todo): todo is Todo => Boolean(todo)),
+        }
+      }),
+
+      splitCalendarTodo: (todoId, titles) => set((state) => {
+        const target = state.calendarTodos.find((todo) => todo.id === todoId)
+        const nextTitles = titles.map((title) => title.trim()).filter(Boolean)
+        if (!target || nextTitles.length === 0) {
+          return state
+        }
+
+        const baseCreatedAt = Date.now()
+        const replacements = nextTitles.map((title, index) => {
+          const nextId = generateId()
+          return {
+            ...target,
+            id: nextId,
+            text: title,
+            createdAt: baseCreatedAt + index,
+            completed: false,
+            parentId: undefined,
+            subtasks: [],
+          }
+        })
+
+        const targetIndex = state.calendarTodos.findIndex((todo) => todo.id === todoId)
+        const nextTodos = [...state.calendarTodos]
+        nextTodos.splice(targetIndex, 1, ...replacements)
+
+        return {
+          ...pushTaskHistory(state, "split task"),
+          calendarTodos: nextTodos,
+          selectedTaskIds: state.selectedTaskIds.filter((id) => id !== todoId),
+        }
+      }),
+
+      convertTodoToSubtask: (todoId, parentId) => set((state) => {
+        if (todoId === parentId) {
+          return state
+        }
+
+        const source = state.calendarTodos.find((todo) => todo.id === todoId)
+        const parent = state.calendarTodos.find((todo) => todo.id === parentId)
+        if (!source || !parent) {
+          return state
+        }
+
+        return {
+          ...pushTaskHistory(state, "convert to subtask"),
+          calendarTodos: state.calendarTodos
+            .filter((todo) => todo.id !== todoId)
+            .map((todo) =>
+              todo.id === parentId
+                ? {
+                    ...todo,
+                    subtasks: [
+                      ...todo.subtasks,
+                      {
+                        id: generateId(),
+                        title: source.text,
+                        completed: source.completed,
+                        parentId,
+                      },
+                    ],
+                  }
+                : todo
+            ),
+          // Make sure the parent is expanded so the user can immediately see the new subtask.
+          collapsedSubtasks: {
+            ...state.collapsedSubtasks,
+            [parentId]: false,
+          },
+          selectedTaskIds: state.selectedTaskIds.filter((id) => id !== todoId),
+        }
+      }),
+
+      toggleTaskSelection: (todoId) => set((state) => ({
+        selectedTaskIds: state.selectedTaskIds.includes(todoId)
+          ? state.selectedTaskIds.filter((id) => id !== todoId)
+          : [...state.selectedTaskIds, todoId],
+      })),
+
+      clearTaskSelection: () => set({ selectedTaskIds: [] }),
+
+      mergeSelectedTasks: (mergedTitle) => set((state) => {
+        const selectedTodos = state.calendarTodos.filter((todo) => state.selectedTaskIds.includes(todo.id))
+        const title = mergedTitle.trim()
+
+        if (selectedTodos.length < 2 || !title) {
+          return state
+        }
+
+        const anchor = selectedTodos[0]
+        const mergedId = generateId()
+        const mergedTodo: Todo = {
+          ...anchor,
+          id: mergedId,
+          text: title,
+          createdAt: Date.now(),
+          completed: false,
+          subtasks: [],
+          labelIds: Array.from(new Set(selectedTodos.flatMap((todo) => todo.labelIds))),
+          notes: selectedTodos
+            .map((todo) => todo.notes?.trim())
+            .filter((value): value is string => Boolean(value))
+            .join("\n\n") || anchor.notes,
+        }
+
+        const anchorIndex = state.calendarTodos.findIndex((todo) => todo.id === anchor.id)
+        const remaining = state.calendarTodos.filter((todo) => !state.selectedTaskIds.includes(todo.id))
+        remaining.splice(anchorIndex >= 0 ? anchorIndex : remaining.length, 0, mergedTodo)
+
+        return {
+          ...pushTaskHistory(state, "merge tasks"),
+          calendarTodos: remaining,
+          selectedTaskIds: [],
+        }
+      }),
+
+      undoTaskAction: () => {
+        const state = get()
+        const previous = state.taskHistoryPast.at(-1)
+        if (!previous) {
+          return null
+        }
+
+        const currentSnapshot = cloneTaskHistorySnapshot(state)
+        const nextPast = state.taskHistoryPast.slice(0, -1)
+
+        set({
+          calendarTodos: previous.snapshot.calendarTodos,
+          collapsedSubtasks: previous.snapshot.collapsedSubtasks,
+          selectedTaskIds: previous.snapshot.selectedTaskIds,
+          taskHistoryPast: nextPast,
+          taskHistoryFuture: [{ label: previous.label, snapshot: currentSnapshot }, ...state.taskHistoryFuture].slice(0, TASK_HISTORY_LIMIT),
+          canUndoTaskAction: nextPast.length > 0,
+          canRedoTaskAction: true,
+        })
+
+        return previous.label
+      },
+
+      redoTaskAction: () => {
+        const state = get()
+        const next = state.taskHistoryFuture[0]
+        if (!next) {
+          return null
+        }
+
+        const currentSnapshot = cloneTaskHistorySnapshot(state)
+        const remainingFuture = state.taskHistoryFuture.slice(1)
+
+        set({
+          calendarTodos: next.snapshot.calendarTodos,
+          collapsedSubtasks: next.snapshot.collapsedSubtasks,
+          selectedTaskIds: next.snapshot.selectedTaskIds,
+          taskHistoryPast: [...state.taskHistoryPast.slice(-(TASK_HISTORY_LIMIT - 1)), { label: next.label, snapshot: currentSnapshot }],
+          taskHistoryFuture: remainingFuture,
+          canUndoTaskAction: true,
+          canRedoTaskAction: remainingFuture.length > 0,
+        })
+
+        return next.label
+      },
       
       // Lists
       listTabs: FIXED_LIST_TABS,
@@ -1912,7 +2460,6 @@ export const useLemonadeStore = create<LemonadeStore>()(
                     createdAt: Date.now(),
                     endOfDay: false,
                     subtasks: [],
-                    priority: "normal",
                     labelIds: defaultLabelId ? [defaultLabelId] : [],
                   }]
                 }
@@ -1927,13 +2474,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
             ? {
                 ...list,
                 todos: list.todos.map((todo) =>
-                  todo.id === todoId
-                    ? {
-                        ...todo,
-                        ...updates,
-                        priority: "priority" in updates ? normalizeTodoPriority(updates.priority) : todo.priority,
-                      }
-                    : todo
+                  todo.id === todoId ? { ...todo, ...updates } : todo
                 ),
               }
             : list
@@ -2092,10 +2633,12 @@ export const useLemonadeStore = create<LemonadeStore>()(
       setCalendarTimeframe: (timeframe) => set({ calendarTimeframe: timeframe }),
       calendarFilterMode: "all",
       setCalendarFilterMode: (mode) => set({ calendarFilterMode: mode }),
-
       aiMode: true,
       setAiMode: (next) => set({ aiMode: next }),
-
+      rightPageViewMode: "default",
+      setRightPageViewMode: (mode) => set({ rightPageViewMode: mode }),
+      selectedShortcut: null,
+      setSelectedShortcut: (shortcut) => set({ selectedShortcut: shortcut }),
       mainViewMode: "standard",
       setMainViewMode: (mode) => set({ mainViewMode: mode }),
       dualViewRange: null,
@@ -2106,11 +2649,6 @@ export const useLemonadeStore = create<LemonadeStore>()(
       quickAddSessionTodoIds: [],
       startQuickAddSession: () => set({ quickAddSessionActive: true, quickAddSessionTodoIds: [] }),
       endQuickAddSession: () => set({ quickAddSessionActive: false, quickAddSessionTodoIds: [] }),
-
-      rightPageViewMode: "project",
-      setRightPageViewMode: (mode) => set({ rightPageViewMode: mode }),
-      selectedShortcut: null,
-      setSelectedShortcut: (shortcut) => set({ selectedShortcut: shortcut }),
       weekCount: 1,
       lastSessionDate: null,
       incrementWeekCount: () => set({ weekCount: 1 }),
@@ -2336,7 +2874,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
       migrate: (persistedState, version) => {
         const normalized = migratePersistedLemonadeState(persistedState)
 
-        // Version 0 -> 1:
+    // Version 0 -> 2:
         // Older installs had no explicit persist version and could contain
         // partially shaped preferences/todos/lists. We normalize them here,
         // including defaulting legacy task `parentId` to null and `subtasks` to [].

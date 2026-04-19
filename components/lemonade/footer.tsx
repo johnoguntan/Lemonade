@@ -1,9 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { formatLocalDateKey, parseLocalDateKey, useLemonadeStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
-import { Calendar as CalendarPicker, CircleHelp, ChevronLeft, ChevronRight, Music2, Rows3, Smile, Sun, Moon, User } from "lucide-react"
+import { Calendar as CalendarPicker, CircleHelp, ChevronLeft, ChevronRight, Music2, Rows3, Smile, Sun, Moon, User, RotateCcw } from "lucide-react"
 import { useTheme } from "next-themes"
 import Link from "next/link"
 import {
@@ -32,6 +32,10 @@ export function Footer({ onNavigate, viewMode = "calendar", onViewModeChange }: 
     selectedCalendarDate,
     setSelectedCalendarDate,
     calendarTodos,
+    canUndoTaskAction,
+    canRedoTaskAction,
+    undoTaskAction,
+    redoTaskAction,
   } = useLemonadeStore()
   useTheme()
   const [showHelp, setShowHelp] = useState(false)
@@ -69,6 +73,43 @@ export function Footer({ onNavigate, viewMode = "calendar", onViewModeChange }: 
 
     setSelectedCalendarDate(formatLocalDateKey(newDate))
   }
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const activeElement = document.activeElement
+      if (
+        activeElement instanceof HTMLInputElement ||
+        activeElement instanceof HTMLTextAreaElement ||
+        activeElement instanceof HTMLSelectElement ||
+        activeElement?.getAttribute("contenteditable") === "true"
+      ) {
+        return
+      }
+
+      const isModifierPressed = event.metaKey || event.ctrlKey
+      if (!isModifierPressed || event.key.toLowerCase() !== "z") {
+        return
+      }
+
+      event.preventDefault()
+
+      if (event.shiftKey) {
+        const label = redoTaskAction()
+        if (label) {
+          toast(`Redid ${label}.`, { duration: 2000 })
+        }
+        return
+      }
+
+      const label = undoTaskAction()
+      if (label) {
+        toast(`Undid ${label}.`, { duration: 2000 })
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [redoTaskAction, undoTaskAction])
 
   return (
     <footer className="lemonade-footer sticky bottom-0 z-30 mt-auto flex h-11 items-center rounded-xl border border-border/35 bg-background/45 px-4 backdrop-blur-[14px] transition-all duration-300 dark:bg-[rgba(19,19,19,0.34)]">
@@ -202,6 +243,37 @@ export function Footer({ onNavigate, viewMode = "calendar", onViewModeChange }: 
           title="Dark mode coming soon"
         >
           {preferences.theme === 'light' ? <Moon className="size-4" /> : <Sun className="size-4" />}
+        </Button>
+        <span className="h-5 w-px bg-border/70" aria-hidden="true" />
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => {
+            const label = undoTaskAction()
+            if (label) {
+              toast(`Undid ${label}.`, { duration: 2000 })
+            }
+          }}
+          disabled={!canUndoTaskAction}
+          className="size-8 text-muted-foreground hover:text-foreground disabled:text-muted-foreground/40"
+          title="Undo"
+        >
+          <RotateCcw className="size-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => {
+            const label = redoTaskAction()
+            if (label) {
+              toast(`Redid ${label}.`, { duration: 2000 })
+            }
+          }}
+          disabled={!canRedoTaskAction}
+          className="size-8 text-muted-foreground hover:text-foreground disabled:text-muted-foreground/40"
+          title="Redo"
+        >
+          <RotateCcw className="size-4 rotate-180" />
         </Button>
       </div>
 
