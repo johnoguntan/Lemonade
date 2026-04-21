@@ -174,6 +174,30 @@ const parseDurationEstimate = (value: string) => {
   return Number.isFinite(plainNumber) && plainNumber > 0 ? plainNumber : null
 }
 
+const formatTimeLabel = (value?: string) => {
+  if (!value) return ""
+  const normalized = value.trim().toLowerCase()
+  if (!normalized) return ""
+
+  if (normalized === "morning") return "Morning"
+  if (normalized === "noon") return "Noon"
+  if (normalized === "evening") return "Evening"
+  if (normalized === "tonight") return "Tonight"
+
+  const match = normalized.match(/^(\d{1,2}):(\d{2})$/)
+  if (!match) return value.trim()
+
+  const hours = Number.parseInt(match[1], 10)
+  const minutes = Number.parseInt(match[2], 10)
+  if (Number.isNaN(hours) || Number.isNaN(minutes) || hours > 23 || minutes > 59) {
+    return value.trim()
+  }
+
+  const ampm = hours >= 12 ? "PM" : "AM"
+  const hours12 = hours % 12 === 0 ? 12 : hours % 12
+  return `${hours12}:${`${minutes}`.padStart(2, "0")} ${ampm}`
+}
+
 export function TodoItem({
   todo,
   autoFocus = false,
@@ -304,6 +328,7 @@ export function TodoItem({
     { label: "1 day before", value: 1440 },
   ] as const
   const durationLabel = formatDurationEstimate(todo.durationMinutes)
+  const timeLabel = formatTimeLabel(todo.time)
 
   const handleSave = () => {
     const trimmedText = editText.trim()
@@ -763,7 +788,7 @@ export function TodoItem({
               <span
                 onClick={() => setIsEditing(true)}
                 className={cn(
-                  "lemonade-task-text cursor-text block font-task font-normal text-[14px] leading-[1.15] text-[#000000]",
+                  "lemonade-task-text min-w-0 flex-1 cursor-text break-words font-task font-normal text-[14px] leading-[1.15] text-[#000000]",
                   !hasCustomColor && "dark:text-foreground",
                   todo.completed && "line-through opacity-40"
                 )}
@@ -812,8 +837,14 @@ export function TodoItem({
               })}
             </div>
           )}
-          {(effectiveUrl || todo.location || durationLabel || todo.photoDataUrl || isSelectedForMerge) ? (
+          {(effectiveUrl || todo.location || durationLabel || timeLabel || todo.photoDataUrl || isSelectedForMerge) ? (
             <div className="flex flex-wrap items-center gap-1.5">
+              {timeLabel ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-border/70 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  <AlarmClock className="size-3" />
+                  <span>{timeLabel}</span>
+                </span>
+              ) : null}
               {effectiveUrl ? (
                 <a
                   href={effectiveUrl.startsWith("http") || effectiveUrl.startsWith("tel:") ? effectiveUrl : `https://${effectiveUrl}`}

@@ -6,135 +6,143 @@ export const dynamic = "force-dynamic";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const WEEKDAY_PATTERN = "\\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\\b";
+const SYSTEM_PROMPT = `You are an expert task parser for a smart productivity app 
+called Alessandro. Your job is to deeply understand what the 
+user means — not just what they literally say.
 
-const formatDateKey = (date: Date) => date.toISOString().split("T")[0];
+You must extract structured task data from any natural language 
+input, no matter how casual, ambiguous, or complex.
 
-const addDays = (date: Date, amount: number) => {
-  const nextDate = new Date(date);
-  nextDate.setDate(nextDate.getDate() + amount);
-  return nextDate;
-};
+RULES FOR UNDERSTANDING INTENT:
+- Understand the CORE ACTION — what does the user actually 
+  need to DO?
+- Dates mentioned as CONTEXT are not due dates:
+  'Tell Ricardo the doors are coming Tuesday' = do today, 
+  Tuesday is just content
+  'Remind me to call John on Tuesday' = due Tuesday
+- Locations in task descriptions are task locations, not dates:
+  'Pick up grapes at Trader Joes on 72nd and Columbus in Manhattan'
+  = location is 'Trader Joes, 72nd & Columbus, Manhattan'
+- Location phrases often look like:
+  'at [place] on [street/address] in [city/neighborhood]'
+  In these cases, the word 'on' introduces the street/address,
+  not a scheduled date.
+- Urgency words imply priority:
+  'asap', 'urgent', 'critical', 'right away' = urgent
+  'important', 'don't forget', 'make sure' = important
+  deadline + blocker = urgent, even without the word urgent:
+  'send back before the 31st but I can't open attachment 2' = urgent
+  'due tomorrow and the file will not open' = urgent
+  everything else = normal
+- Time of day implies reminders:
+  'at 3pm' = schedule for 3pm AND set reminder for 3pm
+- Duration words:
+  'for 2 hours', 'takes about 30 mins' = duration
+- Recurring patterns:
+  'every Monday', 'daily', 'each week' = recurring
+- If no date mentioned = today
+- If no priority mentioned = normal
+- Clean up the title — remove date/time/location info 
+  from the title, keep only the core action
+- Never guess — if something is truly ambiguous leave it null
+- Always return ONLY valid JSON, no markdown, no explanation
 
-const splitInputFragments = (input: string) =>
-  input
-    .split(/\s*(?:,|and then|after that|also|plus|then)\s*/i)
-    .map((fragment) => fragment.trim())
-    .filter(Boolean);
+SMART EXAMPLES:
+- 'pick up grapes at trader joe on 72nd and columbus in manhattan'
+  title: "Pick up grapes"
+  date: today's YYYY-MM-DD from the user message
+  location: "Trader Joe's, 72nd & Columbus, Manhattan, NY"
+  priority: "normal"
+- 'lunch with sarah at nobu in tribeca on thursday at 1pm'
+  title: "Lunch with Sarah"
+  date: this Thursday as YYYY-MM-DD
+  time: "13:00"
+  reminder: 0
+  location: "Nobu, Tribeca, New York"
 
-const normalizeSchedulingPhrase = (value: string) =>
-  value
-    .toLowerCase()
-    .replace(
-      /^(?:i need to|need to|please|don't forget to|dont forget to|remember to|make sure to)\s+/,
-      ""
-    )
-    .trim();
+Return this exact JSON structure:
+{
+  title: string (clean core action only),
+  date: YYYY-MM-DD or null,
+  time: HH:MM or null,
+  priority: urgent | important | normal,
+  location: full place name and address or null,
+  duration: number in minutes or null,
+  reminder: number in minutes before or null,
+  recurring: daily | weekly | monthly | yearly | null,
+  recurringDay: day of week if weekly e.g. monday or null,
+  notes: any extra context that does not fit above or null,
+  url: any web address mentioned or null,
+  labels: array of relevant category strings or empty array
+}`;
 
-const shouldTreatBareWeekdayAsTaskDate = (input: string) => {
-  const normalized = normalizeSchedulingPhrase(input);
-  const weekdayMatch = normalized.match(/\b(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/);
+const formatDateKey = (date: Date) => format(date, "yyyy-MM-dd");
 
-  if (!weekdayMatch) {
-    return false;
-  }
-
-  if (
-    /\b(?:on|by|this|next)\s+(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/.test(normalized) ||
-    /\b(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\s+at\b/.test(normalized)
-  ) {
-    return true;
-  }
-
-  const before = normalized.slice(0, weekdayMatch.index).trim();
-  const after = normalized.slice((weekdayMatch.index ?? 0) + weekdayMatch[0].length).trim();
-
-  if (after.length > 0) {
-    return false;
-  }
-
-  if (
-    /\b(?:is|are|was|were|be|been|being|coming|arriving|available|delivered|delivery|ship(?:ping|ped)?|message|email|text|tell|told|say|said|because|that)\b/.test(
-      before
-    )
-  ) {
-    return false;
-  }
-
-  const wordCount = before.split(/\s+/).filter(Boolean).length;
-  return wordCount <= 4;
-};
-
-const isAmbiguousWeekdayReference = (input: string) => {
-  const normalized = input.toLowerCase();
-  const hasWeekday = new RegExp(WEEKDAY_PATTERN, "i").test(normalized);
-
-  if (!hasWeekday) {
-    return false;
-  }
-
-  if (
-    /\b(?:today|tomorrow|tmr|next week)\b/.test(normalized) ||
-    /\b(?:on|by|this|next)\s+(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/.test(normalized) ||
-    /\b(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\s+at\b/.test(normalized)
-  ) {
-    return false;
-  }
-
-  return !shouldTreatBareWeekdayAsTaskDate(normalized);
-};
-
-const detectSharedDate = (input: string, today: Date) => {
-  const firstFragment = splitInputFragments(input)[0]?.toLowerCase() ?? "";
-
-  if (/\b(?:tomorrow|tmr)\b/.test(firstFragment)) {
-    return formatDateKey(addDays(today, 1));
-  }
-
-  if (/\btoday\b/.test(firstFragment)) {
-    return formatDateKey(today);
-  }
-
-  if (/\bnext week\b/.test(firstFragment)) {
-    const nextMonday = new Date(today);
-    const day = nextMonday.getDay();
-    const daysUntilNextMonday = ((8 - day) % 7) || 7;
-    nextMonday.setDate(nextMonday.getDate() + daysUntilNextMonday);
-    return formatDateKey(nextMonday);
-  }
-
-  return null;
-};
-
-const hasExplicitDateOverride = (fragment: string) => {
-  const normalized = fragment.toLowerCase();
-
-  return (
-    /\b(?:today|tomorrow|tmr|next week)\b/.test(normalized) ||
-    new RegExp(`\\b(?:on|by|this|next)\\s+${WEEKDAY_PATTERN.slice(2, -2)}\\b`, "i").test(normalized) ||
-    new RegExp(`${WEEKDAY_PATTERN}\\s+at\\b`, "i").test(normalized) ||
-    shouldTreatBareWeekdayAsTaskDate(normalized) ||
-    /\b\d{4}-\d{2}-\d{2}\b/.test(normalized) ||
-    /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/.test(normalized)
-  );
-};
-
-const normalizeIsoDate = (value: unknown) => {
-  if (typeof value !== "string") {
-    return null;
-  }
-
+const normalizeDate = (value: unknown) => {
+  if (value === null) return null;
+  if (typeof value !== "string") return null;
   const trimmed = value.trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-    return null;
-  }
-
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
   const parsed = parseISO(trimmed);
-  if (!isValid(parsed)) {
+  return isValid(parsed) ? format(parsed, "yyyy-MM-dd") : null;
+};
+
+const normalizeTime = (value: unknown) => {
+  if (value === null) return null;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return /^\d{2}:\d{2}$/.test(trimmed) ? trimmed : null;
+};
+
+const normalizeString = (value: unknown) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+};
+
+const normalizeNumber = (value: unknown) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
+  return Math.floor(value);
+};
+
+const sanitizeParsedTask = (raw: unknown) => {
+  const task = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const title = normalizeString(task.title);
+
+  if (!title || title.toLowerCase() === "unclear task") {
     return null;
   }
 
-  return format(parsed, "yyyy-MM-dd");
+  return {
+    title,
+    date: normalizeDate(task.date),
+    time: normalizeTime(task.time),
+    priority:
+      task.priority === "urgent" || task.priority === "important" || task.priority === "normal"
+        ? task.priority
+        : "normal",
+    location: normalizeString(task.location),
+    duration: normalizeNumber(task.duration),
+    reminder: normalizeNumber(task.reminder),
+    recurring:
+      task.recurring === "daily" ||
+      task.recurring === "weekly" ||
+      task.recurring === "monthly" ||
+      task.recurring === "yearly"
+        ? task.recurring
+        : null,
+    recurringDay: normalizeString(task.recurringDay)?.toLowerCase() ?? null,
+    notes: normalizeString(task.notes),
+    url: normalizeString(task.url),
+    labels: Array.isArray(task.labels)
+      ? task.labels
+          .filter((label): label is string => typeof label === "string")
+          .map((label) => label.trim())
+          .filter(Boolean)
+      : [],
+  };
 };
 
 export async function POST(req: Request) {
@@ -142,196 +150,33 @@ export async function POST(req: Request) {
     const { input } = await req.json();
 
     if (!input || typeof input !== "string" || input.trim() === "") {
-      return NextResponse.json([], { status: 200 });
+      return NextResponse.json({ error: "Missing input" }, { status: 400 });
     }
 
-    const referenceDate = new Date();
-    const today = formatDateKey(referenceDate);
-
-    const SYSTEM_PROMPT = `
-You are a strict but forgiving task parser.
-Today's date is ${today}.
-Convert natural language into a JSON array of task objects.
-Handle typos, abbreviations, run-on sentences, and messy human writing gracefully.
-
-Each task must follow this exact schema:
-{
-  "title": string,
-  "date": string | null,
-  "time": string | null,
-  "labels": string[],
-  "priority": "low" | "medium" | "high" | null,
-  "isRecurring": boolean | null,
-  "recurringFrequency": "daily" | "weekday" | "weekly" | "monthly" | null,
-  "recurringDays": number[] | null,
-  "recurringInterval": number | null,
-  "recurringCustomText": string | null
-}
-
-RULES:
-
-1. MULTIPLE TASKS
-- Split into separate tasks when you detect more than one action
-- Split on: "then", "and then", "after that", "also", "plus", "and", commas
-- If one date applies to all tasks in the sentence, copy it to every task
-- If a shared date appears early in the sentence, keep using that shared date for later comma-separated tasks unless a later task has a clearly explicit replacement date
-- If a time applies to only one task, only assign it to that task
-- Example: "call Mike tmr, gym 6am, send invoice friday #finance urgent" should be treated as three tasks that all inherit tomorrow unless the last fragment clearly says "on Friday", "by Friday", "this Friday", or "next Friday"
-
-2. TITLE
-- Keep it short and clean
-- Remove date, time, label, and priority words from the title
-- Fix obvious typos (e.g. "thereapist" → "therapist", "resutunet" → "restaurant")
-- Expand abbreviations: tmr=tomorrow, eod=17:00, mtg=meeting, appt=appointment, w/=with
-- If a weekday is ambiguous and looks like part of the message content, keep the full original wording in the title
-- Example: "Tell Ricardo the doors are coming Tuesday" keeps "Tuesday" in the title and date stays null
-- Only treat a weekday as the task date when the task itself is clearly scheduled, such as "Call Ricardo on Tuesday", "Call Ricardo Tuesday", or "Pay bill Tuesday"
-
-3. DATE
-- Today is ${today}. Use this as the reference for all relative dates.
-- You must return the current year (2026) for all relative dates.
-- If the user says "Next Thursday", calculate the exact date based on today (${today}).
-- Convert:
-  - today → ${today}
-  - tomorrow / tmr → today + 1 day
-  - next week → next Monday
-  - monday/tuesday/etc → next occurrence of that weekday
-  - next monday/tuesday/etc → the monday/tuesday after next
-- Always output YYYY-MM-DD
-- Never output partial dates, month/day only, or dates without the full 4-digit year
-- If no date mentioned → null
-- If a weekday mention is ambiguous, return date: null
-- Date precedence rule:
-  - A leading shared date like "today", "tomorrow", "tmr", or "next week" should apply to all subsequent split tasks by default
-  - Do not override that shared date because of a bare weekday word inside a later task fragment unless it is clearly attached with date language like "on Friday", "by Friday", "this Friday", "next Friday", or "Friday at 2pm"
-  - If a weekday word is ambiguous after a shared date already exists, prefer keeping the shared date and leave the weekday word in the title if needed
-
-4. TIME
-- Convert to 24h HH:MM format:
-  - morning → 09:00
-  - afternoon → 13:00
-  - evening → 18:00
-  - night → 21:00
-  - noon → 12:00
-  - eod / end of day → 17:00
-  - "4pm" → 16:00
-  - "6:30am" → 06:30
-  - "by 2pm" → 14:00 (strip the word "by")
-- If no time → null
-
-5. LABELS
-- Extract #hashtags, strip the # symbol
-- Example: "#work meeting" → labels: ["work"]
-- If none → []
-
-6. PRIORITY
-- high / urgent / asap / important → "high"
-- medium / normal → "medium"
-- low / whenever → "low"
-- If none detected → null
-
-7. RECURRENCE
-- Detect phrases like:
-  - every day → { isRecurring: true, recurringFrequency: "daily", recurringDays: null }
-  - every weekday → { isRecurring: true, recurringFrequency: "weekday", recurringDays: null }
-  - weekly → { isRecurring: true, recurringFrequency: "weekly", recurringDays: null }
-  - monthly → { isRecurring: true, recurringFrequency: "monthly", recurringDays: null }
-  - every monday / every tue-thu style weekday list → { isRecurring: true, recurringFrequency: "weekly", recurringDays: [0-6...] }
-  - every Tuesday and Thursday → { isRecurring: true, recurringFrequency: "weekly", recurringDays: [2,4], recurringInterval: 1 }
-  - every 3 weeks → { isRecurring: true, recurringFrequency: "weekly", recurringDays: null, recurringInterval: 3 }
-  - every 2 months → { isRecurring: true, recurringFrequency: "monthly", recurringDays: null, recurringInterval: 2 }
-- Preserve the original custom recurrence phrase in recurringCustomText when recurrence is detected
-- If not recurring → isRecurring: null, recurringFrequency: null, recurringDays: null, recurringInterval: null, recurringCustomText: null
-
-8. MESSY INPUT HANDLING
-- Ignore filler words: "we are going to", "I need to", "don't forget to", "make sure to"
-- Handle run-on sentences with no punctuation
-- Handle ALL CAPS, no caps, mixed caps
-- Handle repeated words or half-finished sentences — use best judgment
-- If completely unintelligible → return { "title": "Unclear task", "date": null, "time": null, "labels": [], "priority": null, "isRecurring": null, "recurringFrequency": null, "recurringDays": null, "recurringInterval": null, "recurringCustomText": null }
-
-9. OUTPUT FORMAT
-- Return ONLY valid JSON array
-- No explanation, no markdown, no backticks
-- Always return an array even for a single task
-- Never return invalid JSON under any circumstance
-`;
-
+    const today = formatDateKey(new Date());
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      max_tokens: 300,
+      max_tokens: 350,
       temperature: 0,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: input }
+        {
+          role: "user",
+          content: `Today is ${today}. Parse this task input and return only the JSON object: ${input.trim()}`,
+        },
       ],
     });
 
-    const text = completion.choices[0].message.content ?? "[]";
+    const text = completion.choices[0]?.message?.content ?? "";
     const cleaned = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(cleaned);
+    const sanitized = sanitizeParsedTask(parsed);
 
-    if (!Array.isArray(parsed)) return NextResponse.json([], { status: 200 });
-
-    const sharedDate = detectSharedDate(input, referenceDate);
-    const fragments = splitInputFragments(input);
-    const normalized = sharedDate
-      ? parsed.map((task, index) => {
-          const fragment = fragments[index] ?? "";
-
-          if (hasExplicitDateOverride(fragment)) {
-            return task;
-          }
-
-          return {
-            ...task,
-            date: sharedDate,
-          };
-        })
-      : parsed;
-
-    const sanitized = normalized.map((task, index) => {
-      const fragment = fragments[index] ?? input.trim();
-      const ambiguousWeekday = isAmbiguousWeekdayReference(fragment);
-
-      return {
-        ...task,
-        title: ambiguousWeekday
-          ? fragment
-          : typeof task?.title === "string"
-            ? task.title
-            : "",
-        date: ambiguousWeekday ? null : normalizeIsoDate(task?.date),
-        time: typeof task?.time === "string" ? task.time : null,
-        labels: Array.isArray(task?.labels) ? task.labels.filter((label: unknown): label is string => typeof label === "string") : [],
-        priority:
-          task?.priority === "low" || task?.priority === "medium" || task?.priority === "high"
-            ? task.priority
-            : null,
-        isRecurring: task?.isRecurring === true ? true : null,
-        recurringFrequency:
-          task?.recurringFrequency === "daily" ||
-          task?.recurringFrequency === "weekday" ||
-          task?.recurringFrequency === "weekly" ||
-          task?.recurringFrequency === "monthly"
-            ? task.recurringFrequency
-            : null,
-        recurringDays: Array.isArray(task?.recurringDays)
-          ? task.recurringDays.filter((day: unknown): day is number => typeof day === "number")
-          : null,
-        recurringInterval:
-          typeof task?.recurringInterval === "number" && Number.isFinite(task.recurringInterval) && task.recurringInterval > 1
-            ? Math.floor(task.recurringInterval)
-            : null,
-        recurringCustomText:
-          typeof task?.recurringCustomText === "string" && task.recurringCustomText.trim()
-            ? task.recurringCustomText.trim()
-            : null,
-      };
-    });
+    if (!sanitized) {
+      return NextResponse.json({ error: "Unable to parse task" }, { status: 422 });
+    }
 
     return NextResponse.json(sanitized);
-
   } catch (err) {
     console.error("parse-task error:", err);
     return NextResponse.json(

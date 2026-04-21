@@ -91,6 +91,8 @@ export default function Home() {
     generateRecurringInstances,
     selectedCalendarDate,
     setSelectedCalendarDate,
+    setCalendarTimeframe,
+    setCalendarFilterMode,
     calendarTimeframe,
     mainViewMode,
   } = useLemonadeStore()
@@ -144,6 +146,13 @@ export default function Home() {
     autoRollover()
     generateRecurringInstances()
   }, [autoRollover, generateRecurringInstances])
+
+  // Always anchor calendar on today's date on app load.
+  useEffect(() => {
+    setCalendarFilterMode("all")
+    setCalendarTimeframe("week")
+    setSelectedCalendarDate(formatLocalDateKey(new Date()))
+  }, [setCalendarFilterMode, setCalendarTimeframe, setSelectedCalendarDate])
 
   useEffect(() => {
     if (lastAutoMovedCount <= 0) {
@@ -248,24 +257,41 @@ export default function Home() {
             left: "15.5%",
             width: "35.5%",
             height: "83.5%",
-            overflowY: "auto",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
             zIndex: 1,
             scrollbarWidth: "none",
             msOverflowStyle: "none",
           }}
         >
-          <div style={{ marginTop: "28px", marginBottom: "12px" }}>
+          <div style={{ flexShrink: 0, marginTop: "28px", marginBottom: "12px" }}>
             <Header onNavigate={handleNavigate} viewMode={viewMode} onViewModeChange={handleViewModeChange} />
           </div>
-          <ErrorBoundary>
-            {mainViewMode === "dual" ? (
-              <DualProjectList startDate={startDate} />
-            ) : viewMode === "calendar" ? (
-              <CalendarView startDate={startDate} onNavigate={handleNavigate} />
-            ) : (
-              <TodayView />
-            )}
-          </ErrorBoundary>
+          <div
+            className="notebook-left-scroll"
+            style={{
+              minHeight: 0,
+              flex: 1,
+              overflowY: "auto",
+              paddingBottom: "calc(var(--app-footer-height) + 76px)",
+              scrollbarWidth: "none",
+              msOverflowStyle: "none",
+              WebkitOverflowScrolling: "touch",
+              overscrollBehavior: "contain",
+              touchAction: "pan-y",
+            }}
+          >
+            <ErrorBoundary>
+              {mainViewMode === "dual" ? (
+                <DualProjectList startDate={startDate} />
+              ) : viewMode === "calendar" ? (
+                <CalendarView startDate={startDate} onNavigate={handleNavigate} />
+              ) : (
+                <TodayView />
+              )}
+            </ErrorBoundary>
+          </div>
         </div>
 
         <div

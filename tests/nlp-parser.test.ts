@@ -61,3 +61,18 @@ test("splits separate actions joined by and into multiple tasks", () => {
   assert.equal(result[0]?.scheduledDate, "2026-03-25")
   assert.equal(result[1]?.scheduledDate, "2026-03-27")
 })
+
+test("keeps contextual deadline blockers as one urgent task", () => {
+  const result = parseNaturalLanguageTaskEntries(
+    "tax return — my accountant sent something with 3 attachments and said sign the second one not the first dont touch the third and send back before the 31st but i cant open attachment 2 its a weird file type",
+    {
+      labels: [],
+      referenceDate: new Date("2026-03-24T09:00:00"),
+    }
+  )
+
+  assert.equal(result.length, 1)
+  assert.equal(result[0]?.priority, "urgent")
+  assert.match(result[0]?.cleanText ?? "", /tax return/i)
+  assert.match(result[0]?.cleanText ?? "", /send back before the 31st/i)
+})

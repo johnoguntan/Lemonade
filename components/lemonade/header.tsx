@@ -18,16 +18,13 @@ import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
 import { cn } from "@/lib/utils"
-import { aiParseTasks } from "@/lib/ai-task-parser"
+import { aiParseSingleTask, type AiParsedTask } from "@/lib/ai-task-parser"
 import { ColorPickerPanel } from "./color-picker-panel"
 import {
   DEFAULT_TASK_SEARCH_FILTERS,
   createOptimisticTodoId,
   formatLocalDateKey,
-  normalizeCalendarDateKey,
-  parseNaturalLanguageTaskEntries,
   parseLocalDateKey,
-  reconcileOptimisticTaskOrder,
   useLemonadeStore,
 } from "@/lib/store"
 import { format, isValid, parseISO } from "date-fns"
@@ -49,28 +46,15 @@ const addDays = (date: Date, amount: number) => {
   return nextDate
 }
 
-const getDateArray = (startDate: Date, count: number): Date[] =>
-  Array.from({ length: count }, (_, index) => addDays(startDate, index))
-
-const getVisibleDateKeys = (startDate: Date) =>
-  getDateArray(startDate, 7).map((date) => formatLocalDateKey(date))
-
-const splitNaturalTitleFallback = (input: string, index: number) =>
-  input
-    .split(/\s*(?:,|and then|after that|also|plus|then)\s*/i)
-    .map((fragment) => fragment.trim())
-    .filter(Boolean)[index] ?? input.trim()
-
 const optionRowClass = (active: boolean) =>
   cn(
     "flex w-full items-center justify-center rounded-lg px-3 py-2 text-center text-[12px] transition-colors",
     active ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
   )
 
-export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _onViewModeChange }: HeaderProps) {
+export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewModeChange: _onViewModeChange }: HeaderProps) {
   const {
     addCalendarTodo,
-    updateCalendarTodo,
     ensureLabelIds,
     labels,
     calendarTodos,
@@ -98,6 +82,7 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
   const [quickAddText, setQuickAddText] = useState("")
   const [quickAddExpanded, setQuickAddExpanded] = useState(false)
   const [draftDateKey, setDraftDateKey] = useState<string | null>(selectedCalendarDate)
+  const [draftDateTouched, setDraftDateTouched] = useState(false)
   const [draftTime, setDraftTime] = useState<string>("")
   const [showReminderPopover, setShowReminderPopover] = useState(false)
   const [draftReminderOffsetMinutes, setDraftReminderOffsetMinutes] = useState<number | null>(null)
@@ -116,18 +101,40 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
   const [showDraftColorPopover, setShowDraftColorPopover] = useState(false)
   const [draftColor, setDraftColor] = useState<string | undefined>(undefined)
   const [showShortcutDatePopover, setShowShortcutDatePopover] = useState(false)
+  const [parsedPreview, setParsedPreview] = useState<AiParsedTask | null>(null)
+  const [editingParsedTask, setEditingParsedTask] = useState<AiParsedTask | null>(null)
   const [searchFiltersExpanded, setSearchFiltersExpanded] = useState(false)
   const quickAddBoundaryRef = useRef<HTMLDivElement>(null)
+  const parseRequestIdRef = useRef(0)
   const currentDate = parseLocalDateKey(selectedCalendarDate)
   const [shortcutPickerMonth, setShortcutPickerMonth] = useState<Date>(currentDate)
 
-  const todayKey = formatLocalDateKey(new Date())
+  const selectDraftDate = useCallback((dateKey: string | null) => {
+    setDraftDateKey(dateKey)
+    setDraftDateTouched(true)
+  }, [])
 
-  const currentlyVisibleDateKeys =
-    viewMode === "today"
-      ? [todayKey]
-      : getVisibleDateKeys(currentDate)
-  const canScheduleDraft = quickAddText.trim().length > 0
+  const todayKey = formatLocalDateKey(new Date())
+  const draftDateShortcutOptions = useMemo(() => {
+    const base = new Date()
+    base.setHours(0, 0, 0, 0)
+    const nextWeekStart = (() => {
+      const day = base.getDay()
+      const daysUntilNextMonday = ((8 - day) % 7) || 7
+      return addDays(base, daysUntilNextMonday)
+    })()
+
+    return [
+      { label: "Today", dateKey: formatLocalDateKey(base) },
+      { label: "Tomorrow", dateKey: formatLocalDateKey(addDays(base, 1)) },
+      { label: "This Week", dateKey: formatLocalDateKey(base) },
+      { label: "Next Week", dateKey: formatLocalDateKey(nextWeekStart) },
+      { label: "This Month", dateKey: formatLocalDateKey(base) },
+      { label: "Next Month", dateKey: formatLocalDateKey(new Date(base.getFullYear(), base.getMonth() + 1, 1)) },
+      { label: "This Year", dateKey: formatLocalDateKey(base) },
+      { label: "Someday", dateKey: null },
+    ]
+  }, [])
 
   // Note: shortcuts in this header are for setting the *new task's* date (draftDateKey),
   // not for navigating the calendar.
@@ -209,6 +216,8 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
     setDraftLabelIds([])
     setShowDraftColorPopover(false)
     setDraftColor(undefined)
+    setParsedPreview(null)
+    setEditingParsedTask(null)
   }, [])
 
   const clearSearchMode = useCallback(() => {
@@ -234,15 +243,14 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
     setQuickAddText("")
     resetPerTaskDraft()
     setDraftDateKey(selectedCalendarDate)
+    setDraftDateTouched(false)
     setDraftTime("")
     setShowShortcutDatePopover(false)
   }, [resetPerTaskDraft, selectedCalendarDate])
 
   const openQuickAdd = useCallback(() => {
     setQuickAddExpanded(true)
-    setDraftDateKey(selectedCalendarDate)
-    setDraftTime("")
-  }, [selectedCalendarDate])
+  }, [])
 
   const openSearchMode = useCallback(() => {
     closeQuickAdd()
@@ -307,11 +315,147 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
     ))
   }
 
+  const getResolvedParsedDate = (task: AiParsedTask) =>
+    draftDateTouched ? draftDateKey : task.date
+
+  const getPreviewDateLabel = (dateKey: string | null) => {
+    if (!dateKey) return "Someday"
+    if (dateKey === todayKey) return "Today"
+
+    const tomorrowKey = formatLocalDateKey(addDays(new Date(), 1))
+    if (dateKey === tomorrowKey) return "Tomorrow"
+
+    const parsed = parseISO(dateKey)
+    return isValid(parsed) ? format(parsed, "EEE MMM d") : dateKey
+  }
+
+  const parsedPreviewDateLabel = parsedPreview
+    ? getPreviewDateLabel(getResolvedParsedDate(parsedPreview))
+    : ""
+
+  const createTaskFromParsedPreview = (task: AiParsedTask) => {
+    const title = task.title.trim()
+    if (!title) return
+
+    const parsedLabelIds = ensureLabelIds(task.labels)
+    const labelIds = Array.from(new Set([...parsedLabelIds, ...draftLabelIds]))
+    const notes = [task.notes, draftNotes].filter(Boolean).join("\n").trim()
+
+    addCalendarTodo({
+      id: createOptimisticTodoId("header"),
+      text: title,
+      completed: false,
+      date: getResolvedParsedDate(task),
+      time: task.time ?? (draftTime.trim() ? draftTime.trim() : undefined),
+      isHeading: title === title.toUpperCase() && title.length > 2,
+      priority: draftPriority !== "normal" ? draftPriority : task.priority,
+      labelIds,
+      subtasks: draftSubtasks.map((subtaskTitle) => ({ title: subtaskTitle })),
+      color: draftColor,
+      notes: notes || undefined,
+      url: task.url ?? undefined,
+      location: task.location ?? undefined,
+      durationMinutes: task.duration ?? undefined,
+      reminderOffsetMinutes: task.reminder ?? draftReminderOffsetMinutes,
+      isRecurring: task.recurring !== null,
+      recurringFrequency:
+        task.recurring === "daily" || task.recurring === "weekly" || task.recurring === "monthly"
+          ? task.recurring
+          : undefined,
+      recurringCustomText:
+        task.recurring === "yearly"
+          ? "yearly"
+          : task.recurringDay
+            ? `every ${task.recurringDay}`
+            : undefined,
+      isSyncing: false,
+      syncStatus: undefined,
+    })
+
+    setQuickAddText("")
+    resetPerTaskDraft()
+    setDraftDateTouched(false)
+    parseRequestIdRef.current += 1
+  }
+
+  const createTaskFromEditedParsedDraft = (task: AiParsedTask) => {
+    const title = quickAddText.trim()
+    if (!title) return
+
+    const parsedLabelIds = ensureLabelIds(task.labels)
+    const labelIds = Array.from(new Set([...parsedLabelIds, ...draftLabelIds]))
+    const notes = [task.notes, draftNotes].filter(Boolean).join("\n").trim()
+    const trimmedLink = draftLink.trim()
+
+    addCalendarTodo({
+      id: createOptimisticTodoId("header"),
+      text: title,
+      completed: false,
+      date: draftDateKey,
+      time: draftTime.trim() ? draftTime.trim() : undefined,
+      isHeading: title === title.toUpperCase() && title.length > 2,
+      priority: draftPriority,
+      labelIds,
+      subtasks: draftSubtasks.map((subtaskTitle) => ({ title: subtaskTitle })),
+      color: draftColor,
+      notes: notes || undefined,
+      url: trimmedLink || task.url || undefined,
+      location: task.location ?? undefined,
+      durationMinutes: task.duration ?? undefined,
+      reminderOffsetMinutes: draftReminderOffsetMinutes,
+      isRecurring: task.recurring !== null,
+      recurringFrequency:
+        task.recurring === "daily" || task.recurring === "weekly" || task.recurring === "monthly"
+          ? task.recurring
+          : undefined,
+      recurringCustomText:
+        task.recurring === "yearly"
+          ? "yearly"
+          : task.recurringDay
+            ? `every ${task.recurringDay}`
+            : undefined,
+      isSyncing: false,
+      syncStatus: undefined,
+    })
+
+    setQuickAddText("")
+    resetPerTaskDraft()
+    setDraftDateTouched(false)
+    parseRequestIdRef.current += 1
+  }
+
+  const handleEditParsedPreview = () => {
+    if (!parsedPreview) return
+
+    setQuickAddText(parsedPreview.title)
+    setDraftDateKey(getResolvedParsedDate(parsedPreview))
+    setDraftTime(parsedPreview.time ?? "")
+    setDraftPriority(parsedPreview.priority)
+    setDraftReminderOffsetMinutes(parsedPreview.reminder)
+    setDraftLink(parsedPreview.url ?? "")
+    setShowLinkInput(Boolean(parsedPreview.url))
+    setDraftLabelIds(ensureLabelIds(parsedPreview.labels))
+    setDraftDateTouched(true)
+    setEditingParsedTask(parsedPreview)
+    setQuickAddExpanded(true)
+    setParsedPreview(null)
+  }
+
   const handleQuickAddSubmit = async () => {
     const rawInputString = quickAddText
 
     if (!rawInputString.trim()) {
       setQuickAddText("")
+      return
+    }
+
+    if (parsedPreview) {
+      createTaskFromParsedPreview(parsedPreview)
+      return
+    }
+
+    if (editingParsedTask) {
+      createTaskFromEditedParsedDraft(editingParsedTask)
       return
     }
 
@@ -325,7 +469,7 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
         date: draftDateKey,
         time: draftTime.trim() ? draftTime.trim() : undefined,
         isHeading: title === title.toUpperCase() && title.length > 2,
-          priority: draftPriority,
+        priority: draftPriority,
         labelIds: draftLabelIds,
         subtasks: draftSubtasks.map((subtaskTitle) => ({ title: subtaskTitle })),
         color: draftColor,
@@ -340,115 +484,24 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
       return
     }
 
-    const today = formatLocalDateKey(new Date())
-    const parsedTasks = parseNaturalLanguageTaskEntries(rawInputString, { labels })
-    const optimisticTasks = parsedTasks
-      .map((parsedTask, index) => {
-        const title = parsedTask.cleanText.trim() || splitNaturalTitleFallback(rawInputString, index)
-        if (!title) {
-          return null
-        }
-
-        const labelIds = Array.from(new Set([
-          ...parsedTask.labelIds,
-          ...ensureLabelIds(parsedTask.newLabelNames),
-          ...draftLabelIds,
-        ]))
-        const tempId = createOptimisticTodoId("header")
-        const optimisticDate = parsedTask.scheduledDate ?? draftDateKey ?? today
-        const optimisticTime = parsedTask.time ?? (draftTime.trim() ? draftTime.trim() : undefined)
-
-        addCalendarTodo({
-          id: tempId,
-          text: title,
-          completed: false,
-          date: optimisticDate,
-          time: optimisticTime,
-          isHeading: title === title.toUpperCase() && title.length > 2,
-          priority: draftPriority !== "normal" ? draftPriority : parsedTask.priority,
-          labelIds,
-          subtasks: [...parsedTask.subtaskTitles, ...draftSubtasks].map((subtaskTitle) => ({ title: subtaskTitle })),
-          color: draftColor,
-          notes: draftNotes,
-          reminderOffsetMinutes: draftReminderOffsetMinutes,
-          isSyncing: true,
-          syncStatus: undefined,
-        })
-
-        return { tempId, parsedTask, labelIds, optimisticDate }
-      })
-      .filter((task): task is NonNullable<typeof task> => task !== null)
-
-    if (optimisticTasks.length === 0) {
-      setQuickAddText("")
-      closeQuickAdd()
-      return
-    }
-
     const controller = new AbortController()
     const timeoutId = window.setTimeout(() => controller.abort(), AI_PARSE_TIMEOUT_MS)
+    const requestId = parseRequestIdRef.current + 1
+    parseRequestIdRef.current = requestId
 
-    void aiParseTasks(rawInputString, controller.signal)
-      .then((aiTasks) => {
-        const matchedAiTasks = reconcileOptimisticTaskOrder(
-          optimisticTasks.map(({ parsedTask, optimisticDate }) => ({
-            text: parsedTask.cleanText.trim(),
-            optimisticDate,
-          })),
-          aiTasks
-        )
-
-        optimisticTasks.forEach(({ tempId, parsedTask, labelIds: _labelIds, optimisticDate }, index) => {
-          const primaryTask = matchedAiTasks[index]
-
-          if (!primaryTask) {
-            updateCalendarTodo(tempId, { isSyncing: false, syncStatus: "local" })
-            return
-          }
-
-          const normalizedDate = normalizeCalendarDateKey(
-            typeof primaryTask.date === "string" ? primaryTask.date : undefined
-          )
-          const resolvedDate = normalizedDate ?? parsedTask.scheduledDate ?? optimisticDate
-          const aiTitle =
-            typeof primaryTask.title === "string" && primaryTask.title.trim()
-              ? primaryTask.title.trim()
-              : splitNaturalTitleFallback(rawInputString, index)
-
-          updateCalendarTodo(tempId, {
-            text: aiTitle,
-            date: resolvedDate,
-            time:
-              typeof primaryTask.time === "string" && primaryTask.time.trim()
-                ? primaryTask.time.trim()
-                : parsedTask.time
-                  ? parsedTask.time
-                  : draftTime.trim()
-                    ? draftTime.trim()
-                    : undefined,
-            isHeading: aiTitle === aiTitle.toUpperCase() && aiTitle.length > 2,
-            isSyncing: false,
-            syncStatus: undefined,
-          })
-
-          if (resolvedDate && resolvedDate !== optimisticDate && !currentlyVisibleDateKeys.includes(resolvedDate)) {
-            const parsedMovedDate = parseISO(resolvedDate)
-            const movedLabel = isValid(parsedMovedDate) ? format(parsedMovedDate, "MMMM d") : resolvedDate
-            toast(`Task moved to ${movedLabel}`, { duration: 3000 })
-          }
-        })
+    void aiParseSingleTask(rawInputString, controller.signal)
+      .then((task) => {
+        if (parseRequestIdRef.current !== requestId) return
+        setParsedPreview(task)
+        setQuickAddExpanded(true)
       })
       .catch(() => {
-        optimisticTasks.forEach(({ tempId }) => {
-          updateCalendarTodo(tempId, { isSyncing: false, syncStatus: "local" })
-        })
+        if (parseRequestIdRef.current !== requestId) return
+        toast("Couldn't parse that — please try again or add manually", { duration: 3000 })
       })
       .finally(() => {
         window.clearTimeout(timeoutId)
       })
-
-    setQuickAddText("")
-    resetPerTaskDraft()
   }
 
   const activeFilterChips = useMemo(() => {
@@ -604,6 +657,8 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
                 setSearchQuery(event.target.value)
               } else {
                 setQuickAddText(event.target.value)
+                setParsedPreview(null)
+                parseRequestIdRef.current += 1
               }
             }}
             onFocus={() => {
@@ -689,8 +744,7 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
                     type="button"
                     variant="ghost"
                     size="icon"
-                    disabled={!canScheduleDraft}
-                    className="size-9 rounded-full text-muted-foreground hover:text-foreground"
+                    className={cn("size-9 rounded-full text-muted-foreground hover:text-foreground", draftDateKey !== selectedCalendarDate && "text-foreground")}
                     aria-label="Pick a date"
                     title="Pick a date"
                   >
@@ -712,17 +766,35 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
                       month={shortcutPickerMonth}
                       onMonthChange={setShortcutPickerMonth}
                       onSelect={(date) => {
-                        if (!canScheduleDraft || !date) return
-                        setDraftDateKey(formatLocalDateKey(date))
+                        if (!date) return
+                        selectDraftDate(formatLocalDateKey(date))
                       }}
                       initialFocus
                     />
+
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      {draftDateShortcutOptions.map((option) => {
+                        const active = draftDateKey === option.dateKey
+                        return (
+                          <button
+                            key={option.label}
+                            type="button"
+                            onClick={() => selectDraftDate(option.dateKey)}
+                            className={cn(
+                              "rounded-lg border border-border/70 px-2 py-2 text-[12px] transition-colors hover:bg-muted",
+                              active && "border-transparent bg-foreground text-background hover:bg-foreground"
+                            )}
+                          >
+                            {option.label}
+                          </button>
+                        )
+                      })}
+                    </div>
 
                     <div className="mt-3 flex items-center gap-2">
                       <Input
                         type="time"
                         value={draftTime}
-                        disabled={!canScheduleDraft}
                         onChange={(event) => setDraftTime(event.target.value)}
                         className="h-9"
                       />
@@ -734,7 +806,6 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
                         aria-label="Clear time"
                         title="Clear time"
                         onClick={() => setDraftTime("")}
-                        disabled={!canScheduleDraft}
                       >
                         <X className="size-4" />
                       </Button>
@@ -746,10 +817,9 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
                         variant="ghost"
                         size="sm"
                         className="h-8"
-                        disabled={!canScheduleDraft}
-                        onClick={() => setDraftDateKey(null)}
+                        onClick={() => selectDraftDate(null)}
                       >
-                        No date
+                        Someday
                       </Button>
                       <Button
                         type="button"
@@ -766,6 +836,47 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
             </>
           )}
         </div>
+
+        {parsedPreview && !searchModeActive ? (
+          <div
+            data-quick-add-surface="true"
+            className={cn(
+              "absolute left-0 right-0 top-full z-50 mt-2",
+              "rounded-2xl border border-border/45 bg-background/95 p-4 text-foreground shadow-[0_14px_40px_rgba(0,0,0,0.14)] backdrop-blur-[14px]",
+              "dark:bg-[rgba(19,19,19,0.92)]"
+            )}
+          >
+            <div className="space-y-1 text-[13px] leading-5">
+              <div className="font-medium">📋 {parsedPreview.title}</div>
+              {parsedPreview.location ? (
+                <div className="text-muted-foreground">📍 {parsedPreview.location}</div>
+              ) : null}
+              <div className="text-muted-foreground">📅 {parsedPreviewDateLabel}</div>
+              <div className="text-muted-foreground">
+                ⚡ {parsedPreview.priority.charAt(0).toUpperCase() + parsedPreview.priority.slice(1)} priority
+              </div>
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 rounded-full px-3 text-[12px]"
+                onClick={() => createTaskFromParsedPreview(parsedPreview)}
+              >
+                ✓ Add task
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-full px-3 text-[12px]"
+                onClick={handleEditParsedPreview}
+              >
+                ✗ Edit
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
         {searchModeActive ? (
           <div className="mt-2">
@@ -1040,7 +1151,7 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
         ) : null}
 
         {/* Expanded panel */}
-        {!searchModeActive && quickAddExpanded ? (
+        {!searchModeActive && quickAddExpanded && !parsedPreview ? (
           <div
             className={cn(
               "absolute left-0 right-0 top-full z-50 mt-2",
@@ -1084,73 +1195,21 @@ export function Header({ onNavigate: _onNavigate, viewMode, onViewModeChange: _o
 
               {/* Shortcuts */}
               <div className="w-[120px] shrink-0">
-                {(() => {
-                  const base = new Date()
-                  base.setHours(0, 0, 0, 0)
-                  const tomorrow = addDays(base, 1)
-                  const dayAfterTomorrow = addDays(base, 2)
-                  const twoDaysAfter = addDays(base, 3)
-
-                  const nextWeekStart = (() => {
-                    const day = base.getDay()
-                    const daysUntilNextMonday = ((8 - day) % 7) || 7
-                    return addDays(base, daysUntilNextMonday)
-                  })()
-
-                  const nextMonthStart = new Date(base.getFullYear(), base.getMonth() + 1, 1)
-
-                  const itemClass =
-                    "inline-flex w-auto items-center justify-end whitespace-nowrap rounded-lg px-2 py-1.5 text-right text-[12px] transition-colors hover:bg-muted"
-
-                  return (
-                    <div className="flex flex-col items-end gap-1 text-muted-foreground">
-                      {!canScheduleDraft ? (
-                        <div className="rounded-lg px-2 py-1.5 text-right text-[12px] text-muted-foreground">
-                          Add a task title first
-                        </div>
-                      ) : null}
-                      <button
-                        type="button"
-                        className={cn(itemClass, "self-end")}
-                        disabled={!canScheduleDraft}
-                        onClick={() => setDraftDateKey(formatLocalDateKey(tomorrow))}
-                      >
-                        <span className="text-foreground">Tomorrow</span>
-                      </button>
-                      <button
-                        type="button"
-                        className={cn(itemClass, "self-end")}
-                        disabled={!canScheduleDraft}
-                        onClick={() => setDraftDateKey(formatLocalDateKey(dayAfterTomorrow))}
-                      >
-                        <span className="text-foreground">Day After Tomorrow</span>
-                      </button>
-                      <button
-                        type="button"
-                        className={cn(itemClass, "self-end")}
-                        disabled={!canScheduleDraft}
-                        onClick={() => setDraftDateKey(formatLocalDateKey(twoDaysAfter))}
-                      >
-                        <span className="text-foreground">2 Days After</span>
-                      </button>
-
-                      <div className="my-1 h-px w-full bg-border/50" />
-
-                      <button type="button" className={cn(itemClass, "self-end")} disabled={!canScheduleDraft} onClick={() => setDraftDateKey(selectedCalendarDate)}>
-                        <span className="text-foreground">This Week</span>
-                      </button>
-                      <button type="button" className={cn(itemClass, "self-end")} disabled={!canScheduleDraft} onClick={() => setDraftDateKey(formatLocalDateKey(nextWeekStart))}>
-                        <span className="text-foreground">Next Week</span>
-                      </button>
-                      <button type="button" className={cn(itemClass, "self-end")} disabled={!canScheduleDraft} onClick={() => setDraftDateKey(formatLocalDateKey(nextMonthStart))}>
-                        <span className="text-foreground">Next Month</span>
-                      </button>
-                      <button type="button" className={cn(itemClass, "self-end")} disabled={!canScheduleDraft} onClick={() => setDraftDateKey(null)}>
-                        <span className="text-foreground">No Date</span>
-                      </button>
-                    </div>
-                  )
-                })()}
+                <div className="flex flex-col items-end gap-1 text-muted-foreground">
+                  {draftDateShortcutOptions.map((option) => (
+                    <button
+                      key={option.label}
+                      type="button"
+                      className={cn(
+                        "inline-flex w-auto items-center justify-end whitespace-nowrap rounded-lg px-2 py-1.5 text-right text-[12px] transition-colors hover:bg-muted",
+                        draftDateKey === option.dateKey && "bg-muted"
+                      )}
+                      onClick={() => selectDraftDate(option.dateKey)}
+                    >
+                      <span className="text-foreground">{option.label}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 

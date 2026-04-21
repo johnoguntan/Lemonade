@@ -573,7 +573,11 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
         }
 
         const tasks = await response.json()
-        const aiTasks = Array.isArray(tasks) ? (tasks as Array<Record<string, unknown>>) : []
+        const aiTasks = Array.isArray(tasks)
+          ? (tasks as Array<Record<string, unknown>>)
+          : tasks && typeof tasks === "object"
+            ? [tasks as Record<string, unknown>]
+            : []
         const matchedAiTasks = reconcileOptimisticTaskOrder(
           optimisticTasks.map(({ parsedTask, optimisticDate }) => ({
             text: parsedTask.cleanText.trim(),
@@ -622,6 +626,26 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
             time: typeof primaryTask.time === "string" && primaryTask.time ? primaryTask.time : fallbackTime,
             priority: aiPriority,
             labelIds: aiLabelIds.length > 0 ? aiLabelIds : labelIds,
+            location:
+              typeof primaryTask.location === "string" && primaryTask.location.trim()
+                ? primaryTask.location.trim()
+                : undefined,
+            url:
+              typeof primaryTask.url === "string" && primaryTask.url.trim()
+                ? primaryTask.url.trim()
+                : undefined,
+            notes:
+              typeof primaryTask.notes === "string" && primaryTask.notes.trim()
+                ? primaryTask.notes.trim()
+                : undefined,
+            durationMinutes:
+              typeof primaryTask.duration === "number" && Number.isFinite(primaryTask.duration) && primaryTask.duration > 0
+                ? Math.floor(primaryTask.duration)
+                : undefined,
+            reminderOffsetMinutes:
+              typeof primaryTask.reminder === "number" && Number.isFinite(primaryTask.reminder) && primaryTask.reminder >= 0
+                ? Math.floor(primaryTask.reminder)
+                : undefined,
             isRecurring: primaryTask.isRecurring === true,
             recurringFrequency: aiRecurringFrequency,
             recurringDays: Array.isArray(primaryTask.recurringDays)

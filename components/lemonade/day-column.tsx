@@ -25,6 +25,7 @@ import { toast } from "sonner"
 interface DayColumnProps {
   date: Date
   isToday: boolean
+  anchorId?: string
   afterTodosContent?: ReactNode
 }
 
@@ -75,12 +76,29 @@ const sortEndOfDayTodos = (todos: Todo[]) => {
     .map(({ todo }) => todo)
 }
 
-export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) {
+const priorityRank: Record<NonNullable<Todo["priority"]>, number> = {
+  none: 0,
+  low: 0,
+  normal: 1,
+  medium: 2,
+  important: 2,
+  high: 3,
+  urgent: 3,
+}
+
+const maxTodoPriority = (left: Todo["priority"], right: Todo["priority"]): Todo["priority"] => {
+  if (!left) return right
+  if (!right) return left
+  return priorityRank[right] > priorityRank[left] ? right : left
+}
+
+export function DayColumn({ date, isToday, anchorId, afterTodosContent }: DayColumnProps) {
   const preferences = useLemonadeStore((state) => state.preferences)
   const calendarTodos = useLemonadeStore((state) => state.calendarTodos)
   const lastCreatedTodoId = useLemonadeStore((state) => state.lastCreatedTodoId)
   const addCalendarTodo = useLemonadeStore((state) => state.addCalendarTodo)
   const updateCalendarTodo = useLemonadeStore((state) => state.updateCalendarTodo)
+  const setSelectedCalendarDate = useLemonadeStore((state) => state.setSelectedCalendarDate)
   const clearLastCreatedTodoId = useLemonadeStore((state) => state.clearLastCreatedTodoId)
   const ensureLabelIds = useLemonadeStore((state) => state.ensureLabelIds)
   const moveTodoToDate = useLemonadeStore((state) => state.moveTodoToDate)
@@ -241,7 +259,11 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
         }
 
         const tasks = await response.json()
-        const aiTasks = Array.isArray(tasks) ? (tasks as Array<Record<string, unknown>>) : []
+        const aiTasks = Array.isArray(tasks)
+          ? (tasks as Array<Record<string, unknown>>)
+          : tasks && typeof tasks === "object"
+            ? [tasks as Record<string, unknown>]
+            : []
         const matchedAiTasks = reconcileOptimisticTaskOrder(
           optimisticTasks.map(({ parsedTask, optimisticDate }) => ({
             text: parsedTask.cleanText.trim(),
@@ -271,7 +293,9 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
               ? primaryTask.labels.filter((label): label is string => typeof label === "string")
               : []
           )
-          const aiPriority: Todo["priority"] = normalizeTodoPriority(primaryTask.priority ?? parsedTask.priority)
+          const aiPriority: Todo["priority"] = normalizeTodoPriority(
+            maxTodoPriority(parsedTask.priority, primaryTask.priority as Todo["priority"])
+          )
           const aiRecurringFrequency =
             primaryTask.recurringFrequency === "daily" ||
             primaryTask.recurringFrequency === "weekday" ||
@@ -290,6 +314,26 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
             time: typeof primaryTask.time === "string" && primaryTask.time ? primaryTask.time : undefined,
             priority: aiPriority,
             labelIds: aiLabelIds.length > 0 ? aiLabelIds : labelIds,
+            location:
+              typeof primaryTask.location === "string" && primaryTask.location.trim()
+                ? primaryTask.location.trim()
+                : undefined,
+            url:
+              typeof primaryTask.url === "string" && primaryTask.url.trim()
+                ? primaryTask.url.trim()
+                : undefined,
+            notes:
+              typeof primaryTask.notes === "string" && primaryTask.notes.trim()
+                ? primaryTask.notes.trim()
+                : undefined,
+            durationMinutes:
+              typeof primaryTask.duration === "number" && Number.isFinite(primaryTask.duration) && primaryTask.duration > 0
+                ? Math.floor(primaryTask.duration)
+                : undefined,
+            reminderOffsetMinutes:
+              typeof primaryTask.reminder === "number" && Number.isFinite(primaryTask.reminder) && primaryTask.reminder >= 0
+                ? Math.floor(primaryTask.reminder)
+                : undefined,
             isRecurring: primaryTask.isRecurring === true,
             recurringFrequency: aiRecurringFrequency,
             recurringDays: Array.isArray(primaryTask.recurringDays)
@@ -309,6 +353,17 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
             const parsedMovedDate = parseISO(resolvedDate)
             const movedLabel = isValid(parsedMovedDate) ? format(parsedMovedDate, "MMMM d") : resolvedDate
             toast(`Task moved to ${movedLabel}`, { duration: 3000 })
+
+            // Ensure the user can immediately see the task (avoid "it disappeared").
+            window.requestAnimationFrame(() => {
+              const anchor = document.getElementById(`calendar-day-${resolvedDate}`)
+              if (anchor) {
+                anchor.scrollIntoView({ behavior: "smooth", block: "start" })
+              } else {
+                // Fallback: navigate the calendar anchor to the moved date.
+                setSelectedCalendarDate(resolvedDate)
+              }
+            })
           }
         })
       })
@@ -327,7 +382,7 @@ export function DayColumn({ date, isToday, afterTodosContent }: DayColumnProps) 
   }
 
   return (
-    <div className="w-full">
+    <div id={anchorId} className="w-full">
       <div className="w-full px-2">
         <div className="lemonade-day-header pb-3 pt-3">
           <div

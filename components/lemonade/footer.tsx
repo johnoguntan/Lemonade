@@ -31,6 +31,7 @@ export function Footer({ onNavigate, viewMode = "calendar", onViewModeChange }: 
     setSidebarOpen,
     selectedCalendarDate,
     setSelectedCalendarDate,
+    calendarPastTodayScroll,
     calendarTodos,
     canUndoTaskAction,
     canRedoTaskAction,
@@ -43,6 +44,27 @@ export function Footer({ onNavigate, viewMode = "calendar", onViewModeChange }: 
   const currentStartDate = parseLocalDateKey(selectedCalendarDate)
   const [pickerMonth, setPickerMonth] = useState(currentStartDate)
   const completedTodayCount = calendarTodos.filter((todo) => todo.date === formatLocalDateKey(new Date()) && todo.completed).length
+  const todayKey = formatLocalDateKey(new Date())
+  const showTodayJump = viewMode === "calendar" && (selectedCalendarDate !== todayKey || calendarPastTodayScroll)
+
+  const getScrollParent = (node: HTMLElement | null): HTMLElement | null => {
+    let current = node?.parentElement ?? null
+    while (current) {
+      const { overflowY } = window.getComputedStyle(current)
+      if (overflowY === "auto" || overflowY === "scroll") {
+        return current
+      }
+      current = current.parentElement
+    }
+    return null
+  }
+
+  const scrollCalendarToTop = () => {
+    const root = document.getElementById("calendar-left-page-root")
+    if (!root) return
+    const scrollParent = getScrollParent(root) ?? root
+    scrollParent.scrollTo({ top: 0, behavior: "smooth" })
+  }
 
   const handleNavigate = (direction: 'prev-week' | 'next-week' | 'prev-day' | 'next-day' | 'today') => {
     if (onNavigate) {
@@ -233,6 +255,23 @@ export function Footer({ onNavigate, viewMode = "calendar", onViewModeChange }: 
           >
             <ChevronRight className="size-4" />
           </Button>
+          {showTodayJump ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="ml-1 h-8 rounded-full border border-[var(--accent-color)] bg-[color-mix(in_srgb,var(--accent-color)_10%,transparent)] px-3 text-[12px] font-semibold text-[var(--accent-color)] hover:bg-[color-mix(in_srgb,var(--accent-color)_16%,transparent)]"
+              onClick={() => {
+                handleNavigate("today")
+                window.requestAnimationFrame(() => {
+                  scrollCalendarToTop()
+                })
+              }}
+              title="Jump back to today"
+            >
+              Today
+            </Button>
+          ) : null}
         </div>
         <span className="h-5 w-px bg-border/70" aria-hidden="true" />
         <Button

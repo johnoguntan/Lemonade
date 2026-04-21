@@ -237,6 +237,10 @@
   display: none;
 }
 
+.notebook-left-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 @media print {
   html,
   body {
@@ -409,7 +413,7 @@
 }
 
 .lemonade-app-root .lemonade-task-row {
-  height: var(--app-task-row-height) !important;
+  height: auto !important;
   min-height: var(--app-task-row-height) !important;
 }
 
@@ -421,7 +425,7 @@
 }
 
 .lemonade-app-root .lemonade-subtask-row {
-  height: var(--app-subtask-row-height) !important;
+  height: auto !important;
   min-height: var(--app-subtask-row-height) !important;
 }
 

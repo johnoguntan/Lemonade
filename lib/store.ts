@@ -294,6 +294,9 @@ interface LemonadeStore {
   setCalendarTimeframe: (timeframe: CalendarTimeframe) => void
   calendarFilterMode: CalendarFilterMode
   setCalendarFilterMode: (mode: CalendarFilterMode) => void
+  // UI-only: whether the user has scrolled away from today's anchor in the calendar view.
+  calendarPastTodayScroll: boolean
+  setCalendarPastTodayScroll: (value: boolean) => void
   aiMode: boolean
   setAiMode: (next: boolean) => void
   rightPageViewMode: RightPageViewMode
@@ -1049,6 +1052,12 @@ const DATE_TIME_STOP_WORDS = new Set([
 const STRONG_TASK_SEPARATOR = /\s*(?:,|and then|after that|also|plus|then)\s*/i
 const ACTION_START_PATTERN =
   /^(?:call|run|send|email|text|buy|book|schedule|plan|review|write|read|clean|organize|pick|drop|submit|prepare|get|make|go|meet|pay|finish|start|stop|take|bring|file|draft|return|visit|exercise|work|check|update|follow|talk|message|shop)\b/i
+const DEPENDENT_ACTION_PATTERN = /^(?:send|email|text|message|submit|return)\s+(?:it|this|that|them|back|over|in|out)\b/i
+const CONTEXTUAL_INSTRUCTION_PATTERN = /\b(?:said|asked|told|needs?|need|wants?|want|requires?|require)\b/i
+const BLOCKED_TASK_PATTERN =
+  /\b(?:can't|cant|cannot|unable|blocked|stuck|problem|issue|error|broken|won't|wont|doesn't|doesnt|not\s+(?:working|opening|loading|available)|weird\s+file\s+type)\b/i
+const DEADLINE_TASK_PATTERN =
+  /\b(?:asap|urgent|critical|right away|due|deadline|before|by|no later than|end of day|eod|close of business|cob)\b/i
 
 const splitNaturalLanguageTaskFragments = (input: string) => {
   const strongFragments = input
@@ -1070,8 +1079,13 @@ const splitNaturalLanguageTaskFragments = (input: string) => {
       const matchIndex = match.index ?? -1
       const nextStart = matchIndex + match[0].length
       const nextFragment = fragment.slice(nextStart).trim()
+      const previousFragment = fragment.slice(0, matchIndex).trim()
 
       if (!ACTION_START_PATTERN.test(nextFragment)) {
+        continue
+      }
+
+      if (DEPENDENT_ACTION_PATTERN.test(nextFragment) && CONTEXTUAL_INSTRUCTION_PATTERN.test(previousFragment)) {
         continue
       }
 
@@ -1184,6 +1198,14 @@ const detectFastPathScheduledDate = (input: string, referenceDate: Date) => {
   const weekdayMatch = normalized.match(/\b(?:on\s+)?(monday|tuesday|tuesay|wednesday|thursday|friday|saturday|sunday)\b/)
   if (weekdayMatch) {
     return toIsoDate(getNextWeekdayDate(referenceDate, WEEKDAY_INDEX_BY_NAME[weekdayMatch[1]]))
+  }
+
+  return undefined
+}
+
+const detectImplicitPriority = (input: string): Todo["priority"] | undefined => {
+  if (BLOCKED_TASK_PATTERN.test(input) && DEADLINE_TASK_PATTERN.test(input)) {
+    return "urgent"
   }
 
   return undefined
@@ -1342,7 +1364,7 @@ export function parseNaturalLanguageTaskInput(
     scheduledDate: detectFastPathScheduledDate(taskInput, referenceDate),
     subtaskTitles: subtaskParts,
     recurrence: undefined,
-    priority: prioritySelection,
+    priority: prioritySelection ?? detectImplicitPriority(taskInput),
     labelIds,
     newLabelNames,
     time: undefined,
@@ -2633,6 +2655,8 @@ export const useLemonadeStore = create<LemonadeStore>()(
       setCalendarTimeframe: (timeframe) => set({ calendarTimeframe: timeframe }),
       calendarFilterMode: "all",
       setCalendarFilterMode: (mode) => set({ calendarFilterMode: mode }),
+      calendarPastTodayScroll: false,
+      setCalendarPastTodayScroll: (value) => set({ calendarPastTodayScroll: value }),
       aiMode: true,
       setAiMode: (next) => set({ aiMode: next }),
       rightPageViewMode: "default",
