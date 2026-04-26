@@ -564,7 +564,7 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
     void fetch("/api/parse-task", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ input: rawInputString }),
+      body: JSON.stringify({ input: rawInputString, now: new Date().toISOString() }),
       signal: controller.signal,
     })
       .then(async (response) => {

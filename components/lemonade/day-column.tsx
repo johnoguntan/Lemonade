@@ -116,6 +116,7 @@ export function DayColumn({ date, isToday, anchorId, afterTodosContent }: DayCol
   const [draggedTodoId, setDraggedTodoId] = useState<string | null>(null)
   const [dropIndicator, setDropIndicator] = useState<{ targetId: string; position: "before" | "after" } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const newTodoTextRef = useRef("")
 
   const dateStr = getDateString(date)
   const { month, day, year, dayName } = formatDate(date)
@@ -154,6 +155,11 @@ export function DayColumn({ date, isToday, anchorId, afterTodosContent }: DayCol
     requestAnimationFrame(() => {
       inputRef.current?.focus()
     })
+  }
+
+  const updateDraftText = (value: string) => {
+    newTodoTextRef.current = value
+    setNewTodoText(value)
   }
 
   const getResponsiveFontSizes = () => {
@@ -200,12 +206,14 @@ export function DayColumn({ date, isToday, anchorId, afterTodosContent }: DayCol
   }
 
   const handleCreateNaturalLanguageTodo = async () => {
-    const rawInputString = newTodoText
+    const rawInputString = newTodoTextRef.current
 
     if (!rawInputString.trim()) {
-      setNewTodoText("")
+      updateDraftText("")
       return false
     }
+
+    updateDraftText("")
 
     const parsedTasks = parseNaturalLanguageTaskEntries(rawInputString, { labels })
     const optimisticTasks = parsedTasks
@@ -240,7 +248,7 @@ export function DayColumn({ date, isToday, anchorId, afterTodosContent }: DayCol
       .filter((task): task is NonNullable<typeof task> => task !== null)
 
     if (optimisticTasks.length === 0) {
-      setNewTodoText("")
+      updateDraftText("")
       return false
     }
 
@@ -250,7 +258,7 @@ export function DayColumn({ date, isToday, anchorId, afterTodosContent }: DayCol
     void fetch("/api/parse-task", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ input: rawInputString }),
+      body: JSON.stringify({ input: rawInputString, now: new Date().toISOString() }),
       signal: controller.signal,
     })
       .then(async (response) => {
@@ -376,7 +384,6 @@ export function DayColumn({ date, isToday, anchorId, afterTodosContent }: DayCol
         window.clearTimeout(timeoutId)
       })
 
-    setNewTodoText("")
     clearLastCreatedTodoId()
     return true
   }
@@ -498,7 +505,7 @@ export function DayColumn({ date, isToday, anchorId, afterTodosContent }: DayCol
                       autoCorrect="on"
                       autoCapitalize="sentences"
                       value={newTodoText}
-                      onChange={(e) => setNewTodoText(e.target.value)}
+                      onChange={(e) => updateDraftText(e.target.value)}
                       onKeyDown={async (e) => {
                         if (e.key === "Enter") {
                           e.preventDefault()
@@ -510,7 +517,7 @@ export function DayColumn({ date, isToday, anchorId, afterTodosContent }: DayCol
                           }
                         } else if (e.key === "Escape") {
                           setIsAdding(false)
-                          setNewTodoText("")
+                          updateDraftText("")
                         }
                       }}
                       onBlur={async () => {

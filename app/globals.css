@@ -410,6 +410,11 @@
   font-size: 14px !important;
   line-height: 1.2 !important;
   font-weight: 500 !important;
+  /* Force horizontal text layout; only the margin strip should be vertical. */
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+  word-break: normal !important;
+  overflow-wrap: break-word !important;
 }
 
 .lemonade-app-root .lemonade-task-row {

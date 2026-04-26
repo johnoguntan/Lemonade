@@ -3,7 +3,7 @@ import nextTypescript from "eslint-config-next/typescript"
 
 const config = [
   {
-    ignores: ["public/sw.js", "public/workbox-*.js"],
+    ignores: ["public/sw.js", "public/workbox-*.js", "public/worker-*.js"],
   },
   ...nextCoreWebVitals,
   ...nextTypescript,

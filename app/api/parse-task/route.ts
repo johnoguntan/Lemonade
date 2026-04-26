@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
-import { format, isValid, parseISO } from "date-fns";
+import { addMinutes, format, isValid, parseISO } from "date-fns";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +36,9 @@ RULES FOR UNDERSTANDING INTENT:
   everything else = normal
 - Time of day implies reminders:
   'at 3pm' = schedule for 3pm AND set reminder for 3pm
+- Relative times must be treated as scheduled times, not clock times:
+  'in 10 min' = schedule 10 minutes from NOW and set reminder to 0
+  'in 2 hours' = schedule 2 hours from NOW and set reminder to 0
 - Duration words:
   'for 2 hours', 'takes about 30 mins' = duration
 - Recurring patterns:
@@ -77,6 +80,23 @@ Return this exact JSON structure:
 }`;
 
 const formatDateKey = (date: Date) => format(date, "yyyy-MM-dd");
+const formatTimeKey = (date: Date) => format(date, "HH:mm");
+
+const extractRelativeTimeMinutes = (rawInput: string) => {
+  const input = rawInput.toLowerCase();
+  // Support "in 10 min", "in 10 minutes", "after 2 hours", "in 45m", "in 1h"
+  const match = input.match(/\b(?:in|after)\s+(\d+)\s*(minutes?|mins?|m|hours?|hrs?|h)\b/);
+  if (!match) return null;
+
+  const amount = Number.parseInt(match[1], 10);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+
+  const unit = match[2];
+  const minutes =
+    unit.startsWith("h") ? amount * 60 : amount;
+
+  return { minutes, matchText: match[0] };
+};
 
 const normalizeDate = (value: unknown) => {
   if (value === null) return null;
@@ -146,14 +166,71 @@ const sanitizeParsedTask = (raw: unknown) => {
 };
 
 export async function POST(req: Request) {
+const hasExplicitClockTime = (rawInput: string) => {
+  // "10am", "10 am", "10:30pm", "14:20", "at 3pm"
+  return /\b(\d{1,2}:\d{2})\b|\b\d{1,2}\s*(am|pm)\b|\b\d{1,2}:\d{2}\s*(am|pm)\b/i.test(rawInput);
+};
+
+const hasExplicitDatePhrase = (rawInput: string) => {
+  // Very light heuristic; if we see these we defer to OpenAI to avoid incorrect dates.
+  return /\b(tomorrow|tonight|next\s+(week|month|year)|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(
+    rawInput
+  );
+};
+
+const cleanTitleFallback = (rawInput: string) => {
+  return rawInput
+    .replace(/\s+/g, " ")
+    .replace(/[.,;:!?]+$/g, "")
+    .trim();
+};
+
   try {
-    const { input } = await req.json();
+    const body = await req.json();
+    const input = body?.input;
+    const nowIso = typeof body?.now === "string" ? body.now : null;
+
 
     if (!input || typeof input !== "string" || input.trim() === "") {
       return NextResponse.json({ error: "Missing input" }, { status: 400 });
     }
 
-    const today = formatDateKey(new Date());
+    const now = nowIso ? new Date(nowIso) : new Date();
+    const safeNow = isValid(now) ? now : new Date();
+    const today = formatDateKey(safeNow);
+
+    const relative = extractRelativeTimeMinutes(input.trim());
+    const relativeScheduledAt = relative ? addMinutes(safeNow, relative.minutes) : null;
+    const relativeDate = relativeScheduledAt ? formatDateKey(relativeScheduledAt) : null;
+    const relativeTime = relativeScheduledAt ? formatTimeKey(relativeScheduledAt) : null;
+
+    // Remove relative time phrase from the model input so the title stays clean.
+    const inputForModel = relative?.matchText
+      ? input.trim().replace(new RegExp(`\\b${relative.matchText.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}\\b`, "i"), "").replace(/\s+/g, " ").trim()
+      : input.trim();
+
+    // Fast path: relative-time tasks are deterministic and don't need OpenAI.
+    // This removes the lag for common cases like "call john in 10 min".
+    if (relativeDate && relativeTime && !hasExplicitClockTime(inputForModel) && !hasExplicitDatePhrase(inputForModel)) {
+      const title = cleanTitleFallback(inputForModel);
+      if (title) {
+        return NextResponse.json({
+          title,
+          date: relativeDate,
+          time: relativeTime,
+          priority: "normal",
+          location: null,
+          duration: null,
+          reminder: 0,
+          recurring: null,
+          recurringDay: null,
+          notes: null,
+          url: null,
+          labels: [],
+        });
+      }
+    }
+
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       max_tokens: 350,
@@ -162,7 +239,7 @@ export async function POST(req: Request) {
         { role: "system", content: SYSTEM_PROMPT },
         {
           role: "user",
-          content: `Today is ${today}. Parse this task input and return only the JSON object: ${input.trim()}`,
+          content: `Now is ${today} ${format(safeNow, "HH:mm")}. Today is ${today}. Parse this task input and return only the JSON object: ${inputForModel}`,
         },
       ],
     });
@@ -174,6 +251,13 @@ export async function POST(req: Request) {
 
     if (!sanitized) {
       return NextResponse.json({ error: "Unable to parse task" }, { status: 422 });
+    }
+
+    // Deterministic override for relative-time phrases (prevents "10 min" being interpreted as "10:00").
+    if (relativeDate && relativeTime) {
+      sanitized.date = relativeDate;
+      sanitized.time = relativeTime;
+      sanitized.reminder = 0;
     }
 
     return NextResponse.json(sanitized);

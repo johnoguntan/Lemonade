@@ -4,6 +4,11 @@ import { ThemeProvider } from '@/components/theme-provider'
 import { AccentColorSync } from '@/components/accent-color-sync'
 import { PwaUpdateBanner } from '@/components/pwa-update-banner'
 import { Toaster } from '@/components/ui/sonner'
+import { CloudSyncManager } from '@/components/lemonade/cloud-sync-manager'
+import { SessionManager } from '@/components/lemonade/session-manager'
+import { NotificationManager } from '@/components/lemonade/notification-manager'
+import { DevNotificationDispatcher } from '@/components/lemonade/dev-notification-dispatcher'
+import { ServiceWorkerManager } from '@/components/lemonade/service-worker-manager'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -79,6 +84,11 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <AccentColorSync />
+          <SessionManager />
+          <CloudSyncManager />
+          <ServiceWorkerManager />
+          <NotificationManager />
+          <DevNotificationDispatcher />
           {children}
           <PwaUpdateBanner />
           <Toaster richColors closeButton />

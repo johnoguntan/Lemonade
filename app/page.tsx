@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useSyncExternalStore, type CSSProperties } from "react"
+import { useEffect, useState, useSyncExternalStore, useCallback, useRef, type CSSProperties } from "react"
 import { parseLocalDateKey, formatLocalDateKey, useLemonadeStore } from "@/lib/store"
 import { Header } from "@/components/lemonade/header"
 import { PreferencesPanel } from "@/components/lemonade/preferences-panel"
@@ -87,8 +87,10 @@ export default function Home() {
     sidebarOpen,
     autoRollover,
     lastAutoMovedCount,
+    lastSessionDate,
     clearLastAutoMovedCount,
     generateRecurringInstances,
+    calendarTodos,
     selectedCalendarDate,
     setSelectedCalendarDate,
     setCalendarTimeframe,
@@ -97,6 +99,7 @@ export default function Home() {
     mainViewMode,
   } = useLemonadeStore()
   const [viewMode, setViewMode] = useState<"calendar" | "today">("calendar")
+  const pendingTaskOpenRef = useRef<{ taskId: string; date: string | null } | null>(null)
   const resolvedCalendarAnchorKey = (() => {
     if (calendarTimeframe === "next-week") {
       const today = new Date()
@@ -147,12 +150,43 @@ export default function Home() {
     generateRecurringInstances()
   }, [autoRollover, generateRecurringInstances])
 
+  const syncToTodayIfNeeded = useCallback(() => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      return
+    }
+
+    const todayKey = formatLocalDateKey(new Date())
+    if (lastSessionDate === todayKey) {
+      return
+    }
+
+    autoRollover()
+    generateRecurringInstances()
+    setSelectedCalendarDate(todayKey)
+  }, [autoRollover, generateRecurringInstances, lastSessionDate, setSelectedCalendarDate])
+
   // Always anchor calendar on today's date on app load.
   useEffect(() => {
     setCalendarFilterMode("all")
     setCalendarTimeframe("week")
     setSelectedCalendarDate(formatLocalDateKey(new Date()))
   }, [setCalendarFilterMode, setCalendarTimeframe, setSelectedCalendarDate])
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        syncToTodayIfNeeded()
+      }
+    }
+
+    window.addEventListener("focus", syncToTodayIfNeeded)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+
+    return () => {
+      window.removeEventListener("focus", syncToTodayIfNeeded)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+    }
+  }, [syncToTodayIfNeeded])
 
   useEffect(() => {
     if (lastAutoMovedCount <= 0) {
@@ -167,6 +201,63 @@ export default function Home() {
     )
     clearLastAutoMovedCount()
   }, [clearLastAutoMovedCount, lastAutoMovedCount])
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return
+    }
+
+    const params = new URLSearchParams(window.location.search)
+    const taskId = params.get("task")
+    if (!taskId) {
+      pendingTaskOpenRef.current = null
+      return
+    }
+
+    pendingTaskOpenRef.current = {
+      taskId,
+      date: params.get("date"),
+    }
+  }, [])
+
+  useEffect(() => {
+    const pending = pendingTaskOpenRef.current
+    if (!pending) {
+      return
+    }
+
+    const matchingTask = calendarTodos.find((todo) => todo.id === pending.taskId)
+    const targetDate = matchingTask?.date ?? pending.date
+
+    if (!matchingTask && !targetDate) {
+      return
+    }
+
+    if (targetDate && selectedCalendarDate !== targetDate) {
+      setCalendarFilterMode("all")
+      setCalendarTimeframe("week")
+      setSelectedCalendarDate(targetDate)
+      setViewMode("calendar")
+      return
+    }
+
+    const taskElement = document.getElementById(`task-${pending.taskId}`)
+    if (!taskElement) {
+      return
+    }
+
+    taskElement.scrollIntoView({ behavior: "smooth", block: "center" })
+    taskElement.classList.add("ring-2", "ring-[var(--accent-color)]", "ring-offset-2", "ring-offset-background")
+    window.setTimeout(() => {
+      taskElement.classList.remove("ring-2", "ring-[var(--accent-color)]", "ring-offset-2", "ring-offset-background")
+    }, 2500)
+
+    const nextUrl = new URL(window.location.href)
+    nextUrl.searchParams.delete("task")
+    nextUrl.searchParams.delete("date")
+    window.history.replaceState({}, "", nextUrl.toString())
+    pendingTaskOpenRef.current = null
+  }, [calendarTodos, selectedCalendarDate, setCalendarFilterMode, setCalendarTimeframe, setSelectedCalendarDate])
 
   const handleNavigate = (direction: 'prev-week' | 'next-week' | 'prev-day' | 'next-day' | 'today') => {
     const newDate = new Date(startDate)
@@ -204,7 +295,7 @@ export default function Home() {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-2xl font-bold">
-          LEMONADE<span className="text-yellow-500">*</span>
+          Alessandro
         </div>
       </div>
     )

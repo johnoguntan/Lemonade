@@ -3,10 +3,12 @@ import nextPWA from "next-pwa"
 const withPWA = nextPWA({
   dest: "public",
   disable: process.env.NODE_ENV === "development",
-  register: true,
+  // Register /sw.js manually in production (see ServiceWorkerManager).
+  register: false,
   skipWaiting: true,
   clientsClaim: true,
   cleanupOutdatedCaches: true,
+  customWorkerDir: "worker",
   runtimeCaching: [
     {
       urlPattern: ({ url }) => url.origin === self.location.origin && url.pathname.startsWith("/_next/static/"),

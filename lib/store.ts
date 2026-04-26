@@ -35,6 +35,8 @@ export interface Todo {
   time?: string
   reminderTime?: string
   reminderOffsetMinutes?: number | null
+  reminderLoopRule?: string | null
+  scheduledNotificationId?: string | null
   durationMinutes?: number
   color?: string
   icon?: string
@@ -237,6 +239,7 @@ interface LemonadeStore {
   canRedoTaskAction: boolean
   undoTaskAction: () => string | null
   redoTaskAction: () => string | null
+  applyTaskIdMap: (idMap: Record<string, string>) => void
   
   // Lists
   listTabs: ListTab[]
@@ -349,11 +352,62 @@ type PersistedLemonadeStore = Partial<
 
 const generateId = () => Math.random().toString(36).substring(2, 15)
 
-export const createOptimisticTodoId = (scope = "task") => `optimistic-${scope}-${generateId()}`
+export const createOptimisticTodoId = (_scope = "task") => globalThis.crypto.randomUUID()
 
 const TASK_HISTORY_LIMIT = 50
 const LEGACY_ATTACHMENT_PREFIX = "Attachment: "
 const LEGACY_LINK_PATTERN = /^(https?:\/\/|www\.|tel:|\+?[\d()\-\s]{6,})/i
+
+const buildLocalDateTime = (dateKey: string, timeValue: string) => {
+  const [year, month, day] = dateKey.split("-").map((part) => Number(part))
+  const [hour, minute] = timeValue.split(":").map((part) => Number(part))
+  if (!year || !month || !day) return null
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return null
+  return new Date(year, month - 1, day, hour, minute, 0, 0)
+}
+
+const computeReminderScheduleIso = (todo: Pick<Todo, "date" | "time" | "reminderOffsetMinutes" | "completed">) => {
+  if (!todo.date) return null
+  if (!todo.time) return null
+  if (typeof todo.reminderOffsetMinutes !== "number" || !Number.isFinite(todo.reminderOffsetMinutes)) return null
+  if (todo.completed) return null
+
+  const base = buildLocalDateTime(todo.date, todo.time)
+  if (!base) return null
+  const scheduled = new Date(base.getTime() - todo.reminderOffsetMinutes * 60 * 1000)
+  return scheduled.toISOString()
+}
+
+const scheduleReminderForTodo = async (todo: Todo) => {
+  if (typeof window === "undefined") return
+  const scheduledFor = computeReminderScheduleIso(todo)
+  if (!scheduledFor) return
+
+  try {
+    const response = await fetch("/api/notifications/schedule", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        taskId: todo.id,
+        title: todo.text,
+        scheduledFor,
+        loopRule:
+          typeof todo.reminderLoopRule === "string" && todo.reminderLoopRule.trim()
+            ? todo.reminderLoopRule.trim()
+            : null,
+      }),
+    })
+    if (!response.ok) return
+    const data = (await response.json()) as { scheduledNotificationId?: string }
+    if (typeof data.scheduledNotificationId === "string" && data.scheduledNotificationId) {
+      useLemonadeStore.getState().updateCalendarTodo(todo.id, {
+        scheduledNotificationId: data.scheduledNotificationId,
+      })
+    }
+  } catch {
+    // ignore (offline / permission denied / etc.)
+  }
+}
 
 export const DEFAULT_TASK_SEARCH_FILTERS: TaskSearchFilters = {
   status: "all",
@@ -768,13 +822,13 @@ const normalizePersistedPreferences = (
 
 const clampWeekCount = () => 1
 
-const FIXED_LIST_TABS: ListTab[] = [
+export const FIXED_LIST_TABS: ListTab[] = [
   { id: 'planning-tab', name: 'PLANNING' },
   { id: 'my-lists-tab', name: 'MY LISTS' },
   { id: 'shopping-returns-tab', name: 'SHOPPING RETURNS' },
 ]
 
-const FIXED_LISTS: List[] = [
+export const FIXED_LISTS: List[] = [
   { id: 'brain-dump', name: 'BRAIN DUMP', todos: [], type: 'list', tabId: 'my-lists-tab' },
   { id: 'grocery', name: 'GROCERY LIST', todos: [], type: 'list', tabId: 'my-lists-tab' },
   { id: 'to-buy', name: 'TO BUY', todos: [], type: 'list', tabId: 'my-lists-tab' },
@@ -785,14 +839,14 @@ const FIXED_LISTS: List[] = [
   { id: 'ideas', name: 'IDEAS', todos: [], type: 'planning', tabId: 'planning-tab' },
 ]
 
-const ensureFixedTabs = (tabs: ListTab[]): ListTab[] => {
+export const ensureFixedTabs = (tabs: ListTab[]): ListTab[] => {
   const byId = new Map(tabs.map((tab) => [tab.id, tab]))
   return FIXED_LIST_TABS.map((tab) => byId.get(tab.id) ?? tab).concat(
     tabs.filter((tab) => !FIXED_LIST_TABS.some((fixedTab) => fixedTab.id === tab.id))
   )
 }
 
-const ensureFixedLists = (lists: List[]): List[] => {
+export const ensureFixedLists = (lists: List[]): List[] => {
   const existing = new Map(lists.map((list) => [list.id, list]))
   const normalizedExisting = lists.map((list) =>
     list.id === "shopping-returns"
@@ -862,7 +916,7 @@ export const migratePersistedLemonadeState = (
     colorPalette: DEFAULT_COLOR_PALETTE,
     showDotGridBackground: true,
     defaultLabelId: null,
-    displayName: "Lemonade User",
+    displayName: "Alessandro User",
   }
 
   const isLegacyVersion = typeof fallbackState === "undefined"
@@ -1632,7 +1686,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
         colorPalette: DEFAULT_COLOR_PALETTE,
         showDotGridBackground: true,
         defaultLabelId: null,
-        displayName: "Lemonade User",
+        displayName: "Alessandro User",
       },
       
       setPreferences: (prefs) => set((state) => ({
@@ -1653,11 +1707,65 @@ export const useLemonadeStore = create<LemonadeStore>()(
       taskHistoryFuture: [],
       canUndoTaskAction: false,
       canRedoTaskAction: false,
+      applyTaskIdMap: (idMap) =>
+        set((state) => {
+          const mapId = (id: string | null | undefined) => (id ? idMap[id] ?? id : id)
+
+          const remapSubtasks = (subtasks: SubTask[], parentId: string) =>
+            subtasks.map((subtask) => ({
+              ...subtask,
+              parentId,
+            }))
+
+          const remapTodos = (todos: Todo[]) =>
+            todos.map((todo) => {
+              const nextId = mapId(todo.id) as string
+              const nextParentId = mapId(todo.parentId ?? null) ?? null
+              return {
+                ...todo,
+                id: nextId,
+                parentId: nextParentId,
+                subtasks: remapSubtasks(todo.subtasks, nextId),
+              }
+            })
+
+          const remapCollapsed = (collapsed: Record<string, boolean>) => {
+            const entries = Object.entries(collapsed).map(([key, value]) => [mapId(key) as string, value] as const)
+            return Object.fromEntries(entries)
+          }
+
+          const remapHistory = (entry: TaskHistoryEntry): TaskHistoryEntry => ({
+            ...entry,
+            snapshot: {
+              calendarTodos: remapTodos(entry.snapshot.calendarTodos),
+              collapsedSubtasks: remapCollapsed(entry.snapshot.collapsedSubtasks),
+              selectedTaskIds: entry.snapshot.selectedTaskIds.map((id) => mapId(id) as string),
+            },
+          })
+
+          return {
+            calendarTodos: remapTodos(state.calendarTodos),
+            collapsedSubtasks: remapCollapsed(state.collapsedSubtasks),
+            selectedTaskIds: state.selectedTaskIds.map((id) => mapId(id) as string),
+            lastCreatedTodoId: mapId(state.lastCreatedTodoId) ?? null,
+            lastDeleted: state.lastDeleted
+              ? {
+                  ...state.lastDeleted,
+                  items: remapTodos(state.lastDeleted.items),
+                }
+              : null,
+            taskHistoryPast: state.taskHistoryPast.map(remapHistory),
+            taskHistoryFuture: state.taskHistoryFuture.map(remapHistory),
+          }
+        }),
       
       addCalendarTodo: (todo) => {
         const existingIds = new Set(get().calendarTodos.map((item) => item.id))
         const requestedId = todo.id
-        const id = requestedId && !existingIds.has(requestedId) ? requestedId : generateId()
+        const id =
+          requestedId && !existingIds.has(requestedId)
+            ? requestedId
+            : globalThis.crypto.randomUUID()
         const resolvedDate = normalizeTodoDate(todo.date)
         const defaultLabelId = get().preferences.defaultLabelId
         const resolvedLabelIds =
@@ -1671,31 +1779,35 @@ export const useLemonadeStore = create<LemonadeStore>()(
               .map((subtask) => normalizeSubtask(subtask, id))
               .filter((subtask) => subtask.title.trim().length > 0)
           : []
+        const createdTodo: Todo = {
+          ...todo,
+          id,
+          date: resolvedDate,
+          labelIds: resolvedLabelIds,
+          createdAt: todo.createdAt ?? Date.now(),
+          endOfDay: todo.endOfDay ?? false,
+          isSyncing: todo.isSyncing ?? false,
+          syncStatus: todo.syncStatus === "local" ? "local" : undefined,
+          subtasks: resolvedSubtasks,
+          priority: normalizeTodoPriority(todo.priority),
+          reminderOffsetMinutes:
+            typeof todo.reminderOffsetMinutes === "number" && Number.isFinite(todo.reminderOffsetMinutes)
+              ? todo.reminderOffsetMinutes
+              : null,
+          scheduledNotificationId:
+            typeof todo.scheduledNotificationId === "string" ? todo.scheduledNotificationId : null,
+          icon: typeof todo.icon === "string" && todo.icon.trim().length > 0 ? todo.icon : undefined,
+          url: typeof todo.url === "string" && todo.url.trim().length > 0 ? todo.url.trim() : undefined,
+          location: typeof todo.location === "string" && todo.location.trim().length > 0 ? todo.location.trim() : undefined,
+          photoDataUrl:
+            typeof todo.photoDataUrl === "string" && todo.photoDataUrl.trim().length > 0
+              ? todo.photoDataUrl
+              : undefined,
+        }
+
         set((state) => ({
           ...pushTaskHistory(state, "add task"),
-          calendarTodos: [...state.calendarTodos, {
-            ...todo,
-            id,
-            date: resolvedDate,
-            labelIds: resolvedLabelIds,
-            createdAt: todo.createdAt ?? Date.now(),
-            endOfDay: todo.endOfDay ?? false,
-            isSyncing: todo.isSyncing ?? false,
-            syncStatus: todo.syncStatus === "local" ? "local" : undefined,
-            subtasks: resolvedSubtasks,
-            priority: normalizeTodoPriority(todo.priority),
-            reminderOffsetMinutes:
-              typeof todo.reminderOffsetMinutes === "number" && Number.isFinite(todo.reminderOffsetMinutes)
-                ? todo.reminderOffsetMinutes
-                : null,
-            icon: typeof todo.icon === "string" && todo.icon.trim().length > 0 ? todo.icon : undefined,
-            url: typeof todo.url === "string" && todo.url.trim().length > 0 ? todo.url.trim() : undefined,
-            location: typeof todo.location === "string" && todo.location.trim().length > 0 ? todo.location.trim() : undefined,
-            photoDataUrl:
-              typeof todo.photoDataUrl === "string" && todo.photoDataUrl.trim().length > 0
-                ? todo.photoDataUrl
-                : undefined,
-          }],
+          calendarTodos: [...state.calendarTodos, createdTodo],
           lastCreatedTodoId: id,
           quickAddSessionTodoIds:
             state.quickAddSessionActive && !state.quickAddSessionTodoIds.includes(id)
@@ -1705,6 +1817,9 @@ export const useLemonadeStore = create<LemonadeStore>()(
         if (todo.isRecurring && !todo.parentId) {
           get().generateRecurringInstances()
         }
+
+        // Background schedule if reminder is set.
+        void scheduleReminderForTodo(createdTodo)
         return id
       },
       clearLastCreatedTodoId: () => set({ lastCreatedTodoId: null }),
@@ -1776,6 +1891,12 @@ export const useLemonadeStore = create<LemonadeStore>()(
                   ? updates.location.trim()
                   : undefined
                 : targetTodo.location,
+            scheduledNotificationId:
+              "scheduledNotificationId" in updates
+                ? typeof updates.scheduledNotificationId === "string" && updates.scheduledNotificationId.trim().length > 0
+                  ? updates.scheduledNotificationId.trim()
+                  : null
+                : (targetTodo as Todo).scheduledNotificationId ?? null,
             photoDataUrl:
               "photoDataUrl" in updates
                 ? typeof updates.photoDataUrl === "string" && updates.photoDataUrl.trim().length > 0
@@ -1811,6 +1932,27 @@ export const useLemonadeStore = create<LemonadeStore>()(
         })
         if ("isRecurring" in updates || "recurringFrequency" in updates || "recurringDays" in updates || "recurringInterval" in updates || "date" in updates) {
           get().generateRecurringInstances()
+        }
+
+        // Background schedule/cancel if reminder-relevant fields changed.
+        if (
+          "reminderOffsetMinutes" in updates ||
+          "date" in updates ||
+          "time" in updates ||
+          "completed" in updates
+        ) {
+          const todo = get().calendarTodos.find((item) => item.id === id)
+          if (todo) {
+            if (todo.completed || typeof todo.reminderOffsetMinutes !== "number" || !todo.date || !todo.time) {
+              void fetch("/api/notifications/cancel", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ taskId: todo.id }),
+              }).catch(() => {})
+            } else {
+              void scheduleReminderForTodo(todo)
+            }
+          }
         }
       },
 
@@ -1887,41 +2029,57 @@ export const useLemonadeStore = create<LemonadeStore>()(
           }
         }),
       
-      toggleCalendarTodo: (id) => set((state) => {
-        const target = state.calendarTodos.find((todo) => todo.id === id)
+      toggleCalendarTodo: (id) => {
+        const target = get().calendarTodos.find((todo) => todo.id === id)
         if (!target) {
-          return state
+          return
         }
 
         const nextCompleted = !target.completed
-        const nextTodos = state.calendarTodos.map((todo) =>
-          todo.id === id ? { ...todo, completed: nextCompleted } : todo
-        )
 
-        let celebrationEvent = state.celebrationEvent
-        if (nextCompleted && state.preferences.showCelebrations) {
-          const dateKey = target.date ?? null
-          const dayTodos =
-            dateKey
-              ? nextTodos.filter((todo) => todo.date === dateKey && !todo.isHeading)
-              : []
-          const dayCompleted = dayTodos.length > 0 && dayTodos.every((todo) => todo.completed)
+        set((state) => {
+          const nextTodos = state.calendarTodos.map((todo) =>
+            todo.id === id ? { ...todo, completed: nextCompleted } : todo
+          )
 
-          celebrationEvent = {
-            id: generateId(),
-            taskCompleted: true,
-            dayCompleted,
-            date: dateKey,
-            createdAt: Date.now(),
+          let celebrationEvent = state.celebrationEvent
+          if (nextCompleted && state.preferences.showCelebrations) {
+            const dateKey = target.date ?? null
+            const dayTodos =
+              dateKey
+                ? nextTodos.filter((todo) => todo.date === dateKey && !todo.isHeading)
+                : []
+            const dayCompleted = dayTodos.length > 0 && dayTodos.every((todo) => todo.completed)
+
+            celebrationEvent = {
+              id: generateId(),
+              taskCompleted: true,
+              dayCompleted,
+              date: dateKey,
+              createdAt: Date.now(),
+            }
           }
-        }
 
-        return {
-          ...pushTaskHistory(state, "complete task"),
-          calendarTodos: nextTodos,
-          celebrationEvent,
+          return {
+            ...pushTaskHistory(state, "complete task"),
+            calendarTodos: nextTodos,
+            celebrationEvent,
+          }
+        })
+
+        // Cancel reminders when a task is marked complete; reschedule when uncompleted.
+        const updated = get().calendarTodos.find((todo) => todo.id === id)
+        if (!updated) return
+        if (updated.completed) {
+          void fetch("/api/notifications/cancel", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ taskId: updated.id }),
+          }).catch(() => {})
+        } else {
+          void scheduleReminderForTodo(updated)
         }
-      }),
+      },
 
       toggleEndOfDay: (id) => set((state) => ({
         ...pushTaskHistory(state, "toggle end of day"),

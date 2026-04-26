@@ -727,6 +727,8 @@ export function TodoItem({
 
   return (
     <div
+      id={`task-${todo.id}`}
+      data-task-id={todo.id}
       className={cn("group relative transition-opacity", isDragging && "opacity-40")}
       draggable={draggable}
       onDragStart={onDragStart}
@@ -788,7 +790,8 @@ export function TodoItem({
               <span
                 onClick={() => setIsEditing(true)}
                 className={cn(
-                  "lemonade-task-text min-w-0 flex-1 cursor-text break-words font-task font-normal text-[14px] leading-[1.15] text-[#000000]",
+                  // Avoid letter-by-letter wrapping in narrow layouts.
+                  "lemonade-task-text min-w-0 flex-1 cursor-text whitespace-normal break-normal font-task font-normal text-[14px] leading-[1.15] text-[#000000]",
                   !hasCustomColor && "dark:text-foreground",
                   todo.completed && "line-through opacity-40"
                 )}
