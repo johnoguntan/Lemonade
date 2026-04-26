@@ -26,6 +26,13 @@ const coerceNumberOrNull = (value: unknown) => (typeof value === "number" && Num
 const coercePriority = (value: unknown): AiParsedTask["priority"] =>
   value === "urgent" || value === "important" || value === "normal" ? value : "normal"
 
+const getClientTimezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone
+const buildParseBody = (input: string) => ({
+  input,
+  now: new Date().toISOString(),
+  userTimezone: getClientTimezone(),
+})
+
 export async function aiParseSingleTask(input: string, signal?: AbortSignal): Promise<AiParsedTask> {
   const raw = input.trim()
   if (!raw) {
@@ -35,7 +42,7 @@ export async function aiParseSingleTask(input: string, signal?: AbortSignal): Pr
   const response = await fetch("/api/parse-task", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ input: raw }),
+    body: JSON.stringify(buildParseBody(raw)),
     signal,
   })
 
@@ -81,7 +88,7 @@ export async function aiParseTasks(input: string, signal?: AbortSignal): Promise
   const response = await fetch("/api/parse-task", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ input: raw }),
+    body: JSON.stringify(buildParseBody(raw)),
     signal,
   })
 

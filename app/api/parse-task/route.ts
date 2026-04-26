@@ -82,6 +82,32 @@ Return this exact JSON structure:
 const formatDateKey = (date: Date) => format(date, "yyyy-MM-dd");
 const formatTimeKey = (date: Date) => format(date, "HH:mm");
 
+const resolveTimezone = (value: unknown) => {
+  if (typeof value !== "string") return "UTC";
+  const trimmed = value.trim();
+  return trimmed || "UTC";
+};
+
+const getZonedParts = (date: Date, timeZone: string) => {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+
+  const parts = formatter.formatToParts(date);
+  const getPart = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+
+  return {
+    dateKey: `${getPart("year")}-${getPart("month")}-${getPart("day")}`,
+    timeKey: `${getPart("hour")}:${getPart("minute")}`,
+  };
+};
+
 const extractRelativeTimeMinutes = (rawInput: string) => {
   const input = rawInput.toLowerCase();
   // Support "in 10 min", "in 10 minutes", "after 2 hours", "in 45m", "in 1h"
@@ -189,6 +215,7 @@ const cleanTitleFallback = (rawInput: string) => {
     const body = await req.json();
     const input = body?.input;
     const nowIso = typeof body?.now === "string" ? body.now : null;
+    const userTimezone = resolveTimezone(body?.userTimezone);
 
 
     if (!input || typeof input !== "string" || input.trim() === "") {
@@ -197,12 +224,15 @@ const cleanTitleFallback = (rawInput: string) => {
 
     const now = nowIso ? new Date(nowIso) : new Date();
     const safeNow = isValid(now) ? now : new Date();
-    const today = formatDateKey(safeNow);
+    const currentZoned = getZonedParts(safeNow, userTimezone);
+    const today = currentZoned.dateKey;
+    const currentTime = currentZoned.timeKey;
 
     const relative = extractRelativeTimeMinutes(input.trim());
     const relativeScheduledAt = relative ? addMinutes(safeNow, relative.minutes) : null;
-    const relativeDate = relativeScheduledAt ? formatDateKey(relativeScheduledAt) : null;
-    const relativeTime = relativeScheduledAt ? formatTimeKey(relativeScheduledAt) : null;
+    const relativeZoned = relativeScheduledAt ? getZonedParts(relativeScheduledAt, userTimezone) : null;
+    const relativeDate = relativeZoned ? relativeZoned.dateKey : null;
+    const relativeTime = relativeZoned ? relativeZoned.timeKey : null;
 
     // Remove relative time phrase from the model input so the title stays clean.
     const inputForModel = relative?.matchText
@@ -239,7 +269,7 @@ const cleanTitleFallback = (rawInput: string) => {
         { role: "system", content: SYSTEM_PROMPT },
         {
           role: "user",
-          content: `Now is ${today} ${format(safeNow, "HH:mm")}. Today is ${today}. Parse this task input and return only the JSON object: ${inputForModel}`,
+          content: `The user's timezone is ${userTimezone}. Now is ${today} ${currentTime}. Today is ${today} in the user's timezone. Parse this task input and return only the JSON object: ${inputForModel}`,
         },
       ],
     });

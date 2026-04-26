@@ -434,22 +434,41 @@ export function applyCloudSnapshotToStore(snapshot: CloudSnapshot) {
     return nextListsById.get(list.id) ?? list
   })
 
-  useLemonadeStore.setState((state) => ({
-    ...state,
-    calendarTodos: nextCalendarTodos,
-    labels: nextLabels,
-    listTabs: nextListTabs,
-    lists: nextLists,
-    preferences: {
-      ...state.preferences,
-      displayName: snapshot.profile.displayName || state.preferences.displayName,
-    },
-    taskHistoryPast: [],
-    taskHistoryFuture: [],
-    canUndoTaskAction: false,
-    canRedoTaskAction: false,
-    lastCreatedTodoId: null,
-  }))
+  useLemonadeStore.setState((state) => {
+    const nextDisplayName = snapshot.profile.displayName || state.preferences.displayName
+    const noDataChanges =
+      JSON.stringify(state.calendarTodos) === JSON.stringify(nextCalendarTodos) &&
+      JSON.stringify(state.labels) === JSON.stringify(nextLabels) &&
+      JSON.stringify(state.listTabs) === JSON.stringify(nextListTabs) &&
+      JSON.stringify(state.lists) === JSON.stringify(nextLists) &&
+      state.preferences.displayName === nextDisplayName &&
+      state.lastCreatedTodoId === null &&
+      state.taskHistoryPast.length === 0 &&
+      state.taskHistoryFuture.length === 0 &&
+      state.canUndoTaskAction === false &&
+      state.canRedoTaskAction === false
+
+    if (noDataChanges) {
+      return state
+    }
+
+    return {
+      ...state,
+      calendarTodos: nextCalendarTodos,
+      labels: nextLabels,
+      listTabs: nextListTabs,
+      lists: nextLists,
+      preferences: {
+        ...state.preferences,
+        displayName: nextDisplayName,
+      },
+      taskHistoryPast: [],
+      taskHistoryFuture: [],
+      canUndoTaskAction: false,
+      canRedoTaskAction: false,
+      lastCreatedTodoId: null,
+    }
+  })
 }
 
 export function readPendingCloudQueue(): PendingCloudQueue | null {

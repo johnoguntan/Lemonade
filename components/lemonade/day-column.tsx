@@ -258,7 +258,11 @@ export function DayColumn({ date, isToday, anchorId, afterTodosContent }: DayCol
     void fetch("/api/parse-task", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ input: rawInputString, now: new Date().toISOString() }),
+      body: JSON.stringify({
+        input: rawInputString,
+        now: new Date().toISOString(),
+        userTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      }),
       signal: controller.signal,
     })
       .then(async (response) => {
