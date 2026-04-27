@@ -62,7 +62,8 @@ export function DefaultRightPage({ startDate, onNavigate: _onNavigate }: Default
     calendarFilterMode,
     setCalendarPastTodayScroll,
   } = useLemonadeStore()
-  const anchorDate = useMemo(() => startOfDay(startDate), [startDate])
+  const anchorDateKey = formatLocalDateKey(startDate)
+  const anchorDate = useMemo(() => startOfDay(startDate), [anchorDateKey])
   const today = useMemo(() => startOfDay(new Date()), [])
   const isAnchoredToToday = useMemo(() => isSameDay(anchorDate, today), [anchorDate, today])
   const [renderedDayCount, setRenderedDayCount] = useState(INITIAL_RENDERED_DAYS)
@@ -97,7 +98,7 @@ export function DefaultRightPage({ startDate, onNavigate: _onNavigate }: Default
     const scrollParent = getScrollParent(pageRef.current)
     if (!scrollParent) return
     scrollParent.scrollTo({ top: 0, behavior: "auto" })
-  }, [anchorDate])
+  }, [anchorDateKey])
 
   // Phase 1 (safest): forward-only infinite scroll triggered by scrolling near the bottom.
   useEffect(() => {
