@@ -99,6 +99,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
   const [draftPriority, setDraftPriority] = useState<"urgent" | "important" | "normal">("normal")
   const [showLabelPopover, setShowLabelPopover] = useState(false)
   const [draftLabelIds, setDraftLabelIds] = useState<string[]>([])
+  const [draftNewLabelName, setDraftNewLabelName] = useState("")
   const [showDraftColorPopover, setShowDraftColorPopover] = useState(false)
   const [draftColor, setDraftColor] = useState<string | undefined>(undefined)
   const [showShortcutDatePopover, setShowShortcutDatePopover] = useState(false)
@@ -215,6 +216,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     setDraftPriority("normal")
     setShowLabelPopover(false)
     setDraftLabelIds([])
+    setDraftNewLabelName("")
     setShowDraftColorPopover(false)
     setDraftColor(undefined)
     setParsedPreview(null)
@@ -314,6 +316,16 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     setDraftLabelIds((current) => (
       current.includes(labelId) ? current.filter((id) => id !== labelId) : [...current, labelId]
     ))
+  }
+
+  const handleCreateDraftLabel = () => {
+    const trimmed = draftNewLabelName.trim()
+    if (!trimmed) return
+    const [labelId] = ensureLabelIds([trimmed])
+    if (labelId) {
+      setDraftLabelIds((current) => (current.includes(labelId) ? current : [...current, labelId]))
+    }
+    setDraftNewLabelName("")
   }
 
   const getResolvedParsedDate = (task: AiParsedTask) =>
@@ -1450,6 +1462,30 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                         )
                       })
                     )}
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <Input
+                      placeholder="New label"
+                      value={draftNewLabelName}
+                      onChange={(event) => setDraftNewLabelName(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault()
+                          handleCreateDraftLabel()
+                        }
+                      }}
+                      className="h-8 text-[12px]"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 px-3 text-[11px]"
+                      onClick={handleCreateDraftLabel}
+                      disabled={!draftNewLabelName.trim()}
+                    >
+                      Add
+                    </Button>
                   </div>
                 </PopoverContent>
               </Popover>

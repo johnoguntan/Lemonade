@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
 import { normalizeTodoPriority, useLemonadeStore, type Todo } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { RotateCcw, Plus, Minus, X, Moon, ArrowUp, Trash2, ChevronRight, ChevronDown, NotebookPen, Link2, Paperclip, Bell, ListChecks, AlertTriangle, Tag, Palette, Shapes, Clock3, Image as ImageIcon, MapPin, AlarmClock } from "lucide-react"
 import { toast } from "sonner"
 import { TASK_ICON_LIBRARY, TaskIcon } from "@/lib/task-icons"
@@ -229,6 +230,7 @@ export function TodoItem({
     calendarTodos,
     addLabelToTask,
     removeLabelFromTask,
+    ensureLabelIds,
     setPreferences,
     snoozeCalendarTodo,
     duplicateCalendarTodo,
@@ -266,6 +268,7 @@ export function TodoItem({
   const [customRecurrenceText, setCustomRecurrenceText] = useState(todo.recurringCustomText ?? "")
   const [splitDraft, setSplitDraft] = useState(todo.text)
   const [mergeTitleDraft, setMergeTitleDraft] = useState("")
+  const [newLabelDraft, setNewLabelDraft] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
   const subtaskInputRef = useRef<HTMLInputElement>(null)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
@@ -435,6 +438,16 @@ export function TodoItem({
     }
 
     addLabelToTask(todo.id, labelId)
+  }
+
+  const handleCreateLabel = () => {
+    const trimmed = newLabelDraft.trim()
+    if (!trimmed) return
+    const [labelId] = ensureLabelIds([trimmed])
+    if (labelId) {
+      addLabelToTask(todo.id, labelId)
+    }
+    setNewLabelDraft("")
   }
 
   const handleRecurringChange = (updates: Partial<Todo>) => {
@@ -1408,6 +1421,30 @@ export function TodoItem({
                     ) : (
                       <div className="text-[10px] italic text-muted-foreground">No labels created yet</div>
                     )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      placeholder="New label"
+                      value={newLabelDraft}
+                      onChange={(event) => setNewLabelDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault()
+                          handleCreateLabel()
+                        }
+                      }}
+                      className="h-8 text-[12px]"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 px-3 text-[11px]"
+                      onClick={handleCreateLabel}
+                      disabled={!newLabelDraft.trim()}
+                    >
+                      Add
+                    </Button>
                   </div>
                 </div>
               ) : null}
