@@ -4,6 +4,7 @@ import {
   X,
   ChevronDown,
   Bell,
+  Check,
   Link2,
   Paperclip,
   ListChecks,
@@ -717,6 +718,21 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                 variant="ghost"
                 size="icon"
                 onClick={() => {
+                  void handleQuickAddSubmit()
+                }}
+                disabled={!quickAddText.trim()}
+                className="size-9 rounded-full text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Add task"
+                title="Add task"
+              >
+                <Check className="size-4" />
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => {
                   if (quickAddExpanded) {
                     closeQuickAdd()
                   } else {
@@ -914,7 +930,10 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
             </div>
 
             {searchFiltersExpanded ? (
-              <div className="mt-2 space-y-3 rounded-[24px] border border-border/35 bg-background/50 px-4 py-4 backdrop-blur-[8px] dark:bg-[rgba(19,19,19,0.34)]">
+              <div
+                className="mt-2 space-y-3 rounded-[24px] border border-border/35 bg-background/50 px-4 py-4 backdrop-blur-[8px] dark:bg-[rgba(19,19,19,0.34)]"
+                style={{ maxHeight: "min(360px, calc(100vh - 220px))", overflowY: "auto", scrollbarWidth: "thin" }}
+              >
                 {hasActiveSearchFilters ? (
                   <div className="flex items-center justify-end">
                     <button
@@ -932,8 +951,8 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                   </div>
                 ) : null}
 
-                <div className="grid gap-3 md:grid-cols-3">
-                  <div className="max-h-[360px] space-y-4 overflow-y-auto rounded-[22px] border border-border/55 bg-[rgba(255,255,255,0.56)] p-4 backdrop-blur-[10px] dark:bg-[rgba(19,19,19,0.34)]" style={{ scrollbarWidth: "thin" }}>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <div className="max-h-[220px] space-y-4 overflow-y-auto rounded-[22px] border border-border/55 bg-[rgba(255,255,255,0.56)] p-3 backdrop-blur-[10px] dark:bg-[rgba(19,19,19,0.34)]" style={{ scrollbarWidth: "thin" }}>
                     <section>
                       <div className="mb-2 text-center text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground">When?</div>
                       <div className="space-y-1">
@@ -988,7 +1007,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                     </section>
                   </div>
 
-                  <div className="max-h-[360px] space-y-4 overflow-y-auto rounded-[22px] border border-border/55 bg-[rgba(255,255,255,0.56)] p-4 backdrop-blur-[10px] dark:bg-[rgba(19,19,19,0.34)]" style={{ scrollbarWidth: "thin" }}>
+                  <div className="max-h-[220px] space-y-4 overflow-y-auto rounded-[22px] border border-border/55 bg-[rgba(255,255,255,0.56)] p-3 backdrop-blur-[10px] dark:bg-[rgba(19,19,19,0.34)]" style={{ scrollbarWidth: "thin" }}>
                     <section>
                       <div className="mb-2 text-center text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground">Priority?</div>
                       <div className="space-y-1">
@@ -1059,7 +1078,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                     </section>
                   </div>
 
-                  <div className="max-h-[360px] space-y-4 overflow-y-auto rounded-[22px] border border-border/55 bg-[rgba(255,255,255,0.56)] p-4 backdrop-blur-[10px] dark:bg-[rgba(19,19,19,0.34)]" style={{ scrollbarWidth: "thin" }}>
+                  <div className="max-h-[220px] space-y-4 overflow-y-auto rounded-[22px] border border-border/55 bg-[rgba(255,255,255,0.56)] p-3 backdrop-blur-[10px] dark:bg-[rgba(19,19,19,0.34)]" style={{ scrollbarWidth: "thin" }}>
                     <section>
                       <div className="mb-2 text-center text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground">Phone?</div>
                       <div className="space-y-1">
