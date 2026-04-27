@@ -690,6 +690,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
               }
 
               if (event.key === "Enter") {
+                event.preventDefault()
                 handleQuickAddSubmit()
               } else if (event.key === "Escape") {
                 closeQuickAdd()
@@ -725,20 +726,21 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
             </>
           ) : (
             <>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => {
-                  void handleQuickAddSubmit()
-                }}
-                disabled={!quickAddText.trim()}
-                className="size-9 rounded-full text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-                aria-label="Add task"
-                title="Add task"
-              >
-                <Check className="size-4" />
-              </Button>
+              {quickAddText.trim() ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    void handleQuickAddSubmit()
+                  }}
+                  className="size-9 rounded-full text-muted-foreground hover:text-foreground"
+                  aria-label="Add task"
+                  title="Add task"
+                >
+                  <Check className="size-4" />
+                </Button>
+              ) : null}
 
               <Button
                 type="button"
