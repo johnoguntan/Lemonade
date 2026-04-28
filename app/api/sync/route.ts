@@ -466,9 +466,12 @@ export async function POST(request: Request) {
 
     const existingTaskIds = (existingTasks ?? []).map((task) => task.id)
     const existingListIds = (existingLists ?? []).map((list) => list.id)
+    const payloadTaskIds = new Set(payload.tasks.map((task) => task.id))
+    const removedTaskIds = existingTaskIds.filter((taskId) => !payloadTaskIds.has(taskId))
     logStep("POST existing ids loaded", {
       existingTaskCount: existingTaskIds.length,
       existingListCount: existingListIds.length,
+      removedTaskCount: removedTaskIds.length,
     })
 
     if (existingTaskIds.length > 0) {
@@ -572,6 +575,32 @@ export async function POST(request: Request) {
       if (error) {
         console.error("/api/sync query tasks.insert failed:", error)
         throw error
+      }
+    }
+
+    if (removedTaskIds.length > 0) {
+      logQuery("scheduled_notifications.detach removed tasks", { userId: user.id, count: removedTaskIds.length })
+      const detachResult = await admin
+        .from("scheduled_notifications")
+        .update({ task_id: null })
+        .eq("user_id", user.id)
+        .in("task_id", removedTaskIds)
+
+      if (detachResult.error) {
+        console.error("/api/sync query scheduled_notifications.detach removed tasks failed:", detachResult.error)
+        throw detachResult.error
+      }
+
+      logQuery("tasks.delete removed", { userId: user.id, count: removedTaskIds.length })
+      const deleteResult = await admin
+        .from("tasks")
+        .delete()
+        .eq("user_id", user.id)
+        .in("id", removedTaskIds)
+
+      if (deleteResult.error) {
+        console.error("/api/sync query tasks.delete removed failed:", deleteResult.error)
+        throw deleteResult.error
       }
     }
 

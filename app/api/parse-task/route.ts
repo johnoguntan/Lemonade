@@ -1,6 +1,15 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
-import { addMinutes, format, isValid, parseISO } from "date-fns";
+import { addMinutes, format, isValid } from "date-fns";
+import {
+  buildHeuristicParsedTask,
+  cleanShortcutTitle,
+  detectFallbackDate,
+  detectFallbackTime,
+  extractExplicitSignals,
+  hasShortcutFields,
+  normalizeIsoDate,
+} from "@/lib/task-shortcuts";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +48,11 @@ RULES FOR UNDERSTANDING INTENT:
 - Relative times must be treated as scheduled times, not clock times:
   'in 10 min' = schedule 10 minutes from NOW and set reminder to 0
   'in 2 hours' = schedule 2 hours from NOW and set reminder to 0
+- Additional field detection rules:
+  - Phone numbers (any format: 212-555-1234, +1 212 555 1234, (212) 555-1234) → phone field, remove from title
+  - URLs and domains (google.com, https://..., www...) → url field, remove from title
+  - If user uses explicit signals like 'call:', 'link:', 'at:', 'duration:', 'remind:' extract to correct field
+  - Return phone as a string in the json response
 - Duration words:
   'for 2 hours', 'takes about 30 mins' = duration
 - Recurring patterns:
@@ -76,11 +90,12 @@ Return this exact JSON structure:
   recurringDay: day of week if weekly e.g. monday or null,
   notes: any extra context that does not fit above or null,
   url: any web address mentioned or null,
+  phone: string or null,
   labels: array of relevant category strings or empty array
 }`;
 
-const formatDateKey = (date: Date) => format(date, "yyyy-MM-dd");
 const formatTimeKey = (date: Date) => format(date, "HH:mm");
+const formatDateKey = (date: Date) => format(date, "yyyy-MM-dd");
 
 const resolveTimezone = (value: unknown) => {
   if (typeof value !== "string") return "UTC";
@@ -124,14 +139,7 @@ const extractRelativeTimeMinutes = (rawInput: string) => {
   return { minutes, matchText: match[0] };
 };
 
-const normalizeDate = (value: unknown) => {
-  if (value === null) return null;
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
-  const parsed = parseISO(trimmed);
-  return isValid(parsed) ? format(parsed, "yyyy-MM-dd") : null;
-};
+const normalizeDate = (value: unknown) => normalizeIsoDate(value);
 
 const normalizeTime = (value: unknown) => {
   if (value === null) return null;
@@ -151,6 +159,16 @@ const normalizeNumber = (value: unknown) => {
   if (value === null || value === undefined) return null;
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
   return Math.floor(value);
+};
+
+const normalizePhone = (value: unknown) => {
+  const phone = normalizeString(value);
+  return phone ? phone : null;
+};
+
+const normalizeAttachment = (value: unknown) => {
+  const attachment = normalizeString(value);
+  return attachment ? attachment : null;
 };
 
 const sanitizeParsedTask = (raw: unknown) => {
@@ -182,6 +200,8 @@ const sanitizeParsedTask = (raw: unknown) => {
     recurringDay: normalizeString(task.recurringDay)?.toLowerCase() ?? null,
     notes: normalizeString(task.notes),
     url: normalizeString(task.url),
+    phone: normalizePhone(task.phone),
+    attachment: normalizeAttachment(task.attachment),
     labels: Array.isArray(task.labels)
       ? task.labels
           .filter((label): label is string => typeof label === "string")
@@ -192,27 +212,27 @@ const sanitizeParsedTask = (raw: unknown) => {
 };
 
 export async function POST(req: Request) {
-const hasExplicitClockTime = (rawInput: string) => {
-  // "10am", "10 am", "10:30pm", "14:20", "at 3pm"
-  return /\b(\d{1,2}:\d{2})\b|\b\d{1,2}\s*(am|pm)\b|\b\d{1,2}:\d{2}\s*(am|pm)\b/i.test(rawInput);
-};
+  const hasExplicitClockTime = (rawInput: string) => {
+    return /\b(\d{1,2}:\d{2})\b|\b\d{1,2}\s*(am|pm)\b|\b\d{1,2}:\d{2}\s*(am|pm)\b/i.test(rawInput);
+  };
 
-const hasExplicitDatePhrase = (rawInput: string) => {
-  // Very light heuristic; if we see these we defer to OpenAI to avoid incorrect dates.
-  return /\b(tomorrow|tonight|next\s+(week|month|year)|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(
-    rawInput
-  );
-};
+  const hasExplicitDatePhrase = (rawInput: string) => {
+    return /\b(tomorrow|tonight|next\s+(week|month|year)|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(
+      rawInput
+    );
+  };
 
-const cleanTitleFallback = (rawInput: string) => {
-  return rawInput
-    .replace(/\s+/g, " ")
-    .replace(/[.,;:!?]+$/g, "")
-    .trim();
-};
+  const cleanTitleFallback = (rawInput: string) => {
+    return rawInput
+      .replace(/\s+/g, " ")
+      .replace(/[.,;:!?]+$/g, "")
+      .trim();
+  };
+
+  let body: Record<string, unknown> | null = null;
 
   try {
-    const body = await req.json();
+    body = await req.json();
     const input = body?.input;
     const nowIso = typeof body?.now === "string" ? body.now : null;
     const userTimezone = resolveTimezone(body?.userTimezone);
@@ -239,26 +259,39 @@ const cleanTitleFallback = (rawInput: string) => {
       ? input.trim().replace(new RegExp(`\\b${relative.matchText.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}\\b`, "i"), "").replace(/\s+/g, " ").trim()
       : input.trim();
 
+    const { explicit, inputForModel: cleanedModelInput } = extractExplicitSignals(inputForModel);
+    const finalModelInput = cleanedModelInput || inputForModel;
+    const shortcutHeuristicTask = buildHeuristicParsedTask(finalModelInput || input.trim(), today, explicit);
+    const hasExplicitShortcutSignals = finalModelInput !== inputForModel || hasShortcutFields(explicit);
+
     // Fast path: relative-time tasks are deterministic and don't need OpenAI.
     // This removes the lag for common cases like "call john in 10 min".
-    if (relativeDate && relativeTime && !hasExplicitClockTime(inputForModel) && !hasExplicitDatePhrase(inputForModel)) {
-      const title = cleanTitleFallback(inputForModel);
+    if (relativeDate && relativeTime && !hasExplicitClockTime(finalModelInput) && !hasExplicitDatePhrase(finalModelInput)) {
+      const title = cleanShortcutTitle(cleanTitleFallback(finalModelInput), explicit);
       if (title) {
         return NextResponse.json({
           title,
           date: relativeDate,
           time: relativeTime,
           priority: "normal",
-          location: null,
-          duration: null,
-          reminder: 0,
+          location: explicit.location,
+          duration: explicit.duration,
+          reminder: explicit.reminder ?? 0,
           recurring: null,
           recurringDay: null,
-          notes: null,
-          url: null,
+          notes: explicit.notes,
+          url: explicit.url,
+          phone: explicit.phone,
+          attachment: explicit.attachment,
           labels: [],
         });
       }
+    }
+
+    // Fast path: explicit shortcut inputs are already structured enough for a
+    // deterministic parse and should feel instant in the quick-add bar.
+    if (hasExplicitShortcutSignals && shortcutHeuristicTask) {
+      return NextResponse.json(shortcutHeuristicTask);
     }
 
     const completion = await openai.chat.completions.create({
@@ -269,7 +302,7 @@ const cleanTitleFallback = (rawInput: string) => {
         { role: "system", content: SYSTEM_PROMPT },
         {
           role: "user",
-          content: `The user's timezone is ${userTimezone}. Now is ${today} ${currentTime}. Today is ${today} in the user's timezone. Parse this task input and return only the JSON object: ${inputForModel}`,
+          content: `The user's timezone is ${userTimezone}. Now is ${today} ${currentTime}. Today is ${today} in the user's timezone. Parse this task input and return only the JSON object: ${finalModelInput}`,
         },
       ],
     });
@@ -290,9 +323,40 @@ const cleanTitleFallback = (rawInput: string) => {
       sanitized.reminder = 0;
     }
 
+    if (!sanitized.date) {
+      sanitized.date = detectFallbackDate(input.trim(), today);
+    }
+
+    if (!sanitized.time) {
+      sanitized.time = detectFallbackTime(input.trim());
+    }
+
+    sanitized.phone = explicit.phone ?? sanitized.phone;
+    sanitized.url = explicit.url ?? sanitized.url;
+    sanitized.location = explicit.location ?? sanitized.location;
+    sanitized.duration = explicit.duration ?? sanitized.duration;
+    sanitized.reminder = explicit.reminder ?? sanitized.reminder;
+    sanitized.notes = explicit.notes ?? sanitized.notes;
+    sanitized.attachment = explicit.attachment ?? sanitized.attachment;
+    sanitized.title = cleanShortcutTitle(sanitized.title, explicit);
+
     return NextResponse.json(sanitized);
   } catch (err) {
     console.error("parse-task error:", err);
+    const fallbackInput = typeof body?.input === "string" ? body.input.trim() : "";
+    const fallbackTimezone = resolveTimezone(body?.userTimezone);
+    const fallbackNow = typeof body?.now === "string" ? new Date(body.now) : new Date();
+    const safeFallbackNow = isValid(fallbackNow) ? fallbackNow : new Date();
+    const fallbackToday = getZonedParts(safeFallbackNow, fallbackTimezone).dateKey;
+
+    if (fallbackInput) {
+      const { explicit, inputForModel: cleanedModelInput } = extractExplicitSignals(fallbackInput);
+      const heuristicTask = buildHeuristicParsedTask(cleanedModelInput || fallbackInput, fallbackToday, explicit);
+      if (heuristicTask) {
+        return NextResponse.json(heuristicTask);
+      }
+    }
+
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Unknown error" },
       { status: 500 }

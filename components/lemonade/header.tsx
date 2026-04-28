@@ -5,6 +5,7 @@ import {
   ChevronDown,
   Bell,
   Check,
+  CircleHelp,
   Link2,
   Paperclip,
   ListChecks,
@@ -61,6 +62,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     calendarTodos,
     lists,
     selectedCalendarDate,
+    setSelectedCalendarDate,
     aiMode,
     preferences,
     setPreferences,
@@ -103,6 +105,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
   const [showDraftColorPopover, setShowDraftColorPopover] = useState(false)
   const [draftColor, setDraftColor] = useState<string | undefined>(undefined)
   const [showShortcutDatePopover, setShowShortcutDatePopover] = useState(false)
+  const [showQuickAddTips, setShowQuickAddTips] = useState(false)
   const [parsedPreview, setParsedPreview] = useState<AiParsedTask | null>(null)
   const [editingParsedTask, setEditingParsedTask] = useState<AiParsedTask | null>(null)
   const [searchFiltersExpanded, setSearchFiltersExpanded] = useState(false)
@@ -346,19 +349,32 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     ? getPreviewDateLabel(getResolvedParsedDate(parsedPreview))
     : ""
 
+  const parsedPreviewReminderLabel = parsedPreview?.reminder != null
+    ? parsedPreview.reminder === 0
+      ? "At time of event"
+      : `${parsedPreview.reminder} min before`
+    : null
+
+  const parsedPreviewDurationLabel = parsedPreview?.duration != null
+    ? parsedPreview.duration >= 60 && parsedPreview.duration % 60 === 0
+      ? `${parsedPreview.duration / 60} hr${parsedPreview.duration === 60 ? "" : "s"}`
+      : `${parsedPreview.duration} min`
+    : null
+
   const createTaskFromParsedPreview = (task: AiParsedTask) => {
     const title = task.title.trim()
     if (!title) return
 
     const parsedLabelIds = ensureLabelIds(task.labels)
     const labelIds = Array.from(new Set([...parsedLabelIds, ...draftLabelIds]))
-    const notes = [task.notes, draftNotes].filter(Boolean).join("\n").trim()
+    const notes = [task.notes, task.attachment ? `Attachment: ${task.attachment}` : null, draftNotes].filter(Boolean).join("\n").trim()
+    const resolvedDate = getResolvedParsedDate(task)
 
     addCalendarTodo({
       id: createOptimisticTodoId("header"),
       text: title,
       completed: false,
-      date: getResolvedParsedDate(task),
+      date: resolvedDate,
       time: task.time ?? (draftTime.trim() ? draftTime.trim() : undefined),
       isHeading: title === title.toUpperCase() && title.length > 2,
       priority: draftPriority !== "normal" ? draftPriority : task.priority,
@@ -366,7 +382,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       subtasks: draftSubtasks.map((subtaskTitle) => ({ title: subtaskTitle })),
       color: draftColor,
       notes: notes || undefined,
-      url: task.url ?? undefined,
+      url: task.url ?? (task.phone ? `tel:${task.phone}` : undefined),
       location: task.location ?? undefined,
       durationMinutes: task.duration ?? undefined,
       reminderOffsetMinutes: task.reminder ?? draftReminderOffsetMinutes,
@@ -389,6 +405,11 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     resetPerTaskDraft()
     setDraftDateTouched(false)
     parseRequestIdRef.current += 1
+
+    if (resolvedDate && resolvedDate !== selectedCalendarDate) {
+      setSelectedCalendarDate(resolvedDate)
+      toast(`Task added to ${getPreviewDateLabel(resolvedDate)}`, { duration: 2500 })
+    }
   }
 
   const createTaskFromEditedParsedDraft = (task: AiParsedTask) => {
@@ -397,14 +418,15 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
 
     const parsedLabelIds = ensureLabelIds(task.labels)
     const labelIds = Array.from(new Set([...parsedLabelIds, ...draftLabelIds]))
-    const notes = [task.notes, draftNotes].filter(Boolean).join("\n").trim()
+    const notes = [task.notes, task.attachment ? `Attachment: ${task.attachment}` : null, draftNotes].filter(Boolean).join("\n").trim()
     const trimmedLink = draftLink.trim()
+    const resolvedDate = draftDateKey
 
     addCalendarTodo({
       id: createOptimisticTodoId("header"),
       text: title,
       completed: false,
-      date: draftDateKey,
+      date: resolvedDate,
       time: draftTime.trim() ? draftTime.trim() : undefined,
       isHeading: title === title.toUpperCase() && title.length > 2,
       priority: draftPriority,
@@ -412,7 +434,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       subtasks: draftSubtasks.map((subtaskTitle) => ({ title: subtaskTitle })),
       color: draftColor,
       notes: notes || undefined,
-      url: trimmedLink || task.url || undefined,
+      url: trimmedLink || task.url || (task.phone ? `tel:${task.phone}` : undefined),
       location: task.location ?? undefined,
       durationMinutes: task.duration ?? undefined,
       reminderOffsetMinutes: draftReminderOffsetMinutes,
@@ -435,6 +457,11 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     resetPerTaskDraft()
     setDraftDateTouched(false)
     parseRequestIdRef.current += 1
+
+    if (resolvedDate && resolvedDate !== selectedCalendarDate) {
+      setSelectedCalendarDate(resolvedDate)
+      toast(`Task added to ${getPreviewDateLabel(resolvedDate)}`, { duration: 2500 })
+    }
   }
 
   const handleEditParsedPreview = () => {
@@ -699,6 +726,40 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
             className="h-auto w-full min-w-0 flex-1 rounded-full border-0 bg-transparent px-0 py-0 text-[14px] text-foreground shadow-none focus-visible:ring-0"
           />
 
+          {!searchModeActive ? (
+            <Popover open={showQuickAddTips} onOpenChange={setShowQuickAddTips}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 rounded-full text-muted-foreground hover:text-foreground"
+                  aria-label="Task entry tips"
+                  title="Task entry tips"
+                >
+                  <CircleHelp className="size-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                side="bottom"
+                sideOffset={10}
+                data-quick-add-surface="true"
+                className="z-50 w-[280px] rounded-2xl border border-border/60 p-3 shadow-md"
+              >
+                <div className="space-y-2 text-[12px] leading-5 text-foreground">
+                  <div className="font-medium">Tips for adding details:</div>
+                  <div>📞 <span className="font-medium">call:</span> [number] — phone number</div>
+                  <div>🔗 <span className="font-medium">link:</span> [url] — web address</div>
+                  <div>📍 <span className="font-medium">at:</span> [place] — location</div>
+                  <div>⏱ <span className="font-medium">for:</span> [time] — duration</div>
+                  <div>🔔 <span className="font-medium">remind:</span> [time] — reminder</div>
+                  <div>📝 <span className="font-medium">note:</span> [text] — add a note</div>
+                </div>
+              </PopoverContent>
+            </Popover>
+          ) : null}
+
           {searchModeActive ? (
             <>
               <Button
@@ -878,10 +939,31 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
           >
             <div className="space-y-1 text-[13px] leading-5">
               <div className="font-medium">📋 {parsedPreview.title}</div>
+              {parsedPreview.phone ? (
+                <div className="text-muted-foreground">📞 {parsedPreview.phone}</div>
+              ) : null}
+              {parsedPreview.url ? (
+                <div className="text-muted-foreground">🔗 {parsedPreview.url}</div>
+              ) : null}
               {parsedPreview.location ? (
                 <div className="text-muted-foreground">📍 {parsedPreview.location}</div>
               ) : null}
               <div className="text-muted-foreground">📅 {parsedPreviewDateLabel}</div>
+              {parsedPreview.time ? (
+                <div className="text-muted-foreground">🕒 {parsedPreview.time}</div>
+              ) : null}
+              {parsedPreviewDurationLabel ? (
+                <div className="text-muted-foreground">⏱ {parsedPreviewDurationLabel}</div>
+              ) : null}
+              {parsedPreviewReminderLabel ? (
+                <div className="text-muted-foreground">🔔 {parsedPreviewReminderLabel}</div>
+              ) : null}
+              {parsedPreview.notes ? (
+                <div className="text-muted-foreground">📝 {parsedPreview.notes}</div>
+              ) : null}
+              {parsedPreview.attachment ? (
+                <div className="text-muted-foreground">📎 {parsedPreview.attachment}</div>
+              ) : null}
               <div className="text-muted-foreground">
                 ⚡ {parsedPreview.priority.charAt(0).toUpperCase() + parsedPreview.priority.slice(1)} priority
               </div>
