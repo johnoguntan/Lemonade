@@ -63,7 +63,7 @@ export function DefaultRightPage({ startDate, onNavigate: _onNavigate }: Default
     setCalendarPastTodayScroll,
   } = useLemonadeStore()
   const anchorDateKey = formatLocalDateKey(startDate)
-  const anchorDate = useMemo(() => startOfDay(startDate), [anchorDateKey])
+  const anchorDate = useMemo(() => startOfDay(startDate), [startDate])
   const today = useMemo(() => startOfDay(new Date()), [])
   const isAnchoredToToday = useMemo(() => isSameDay(anchorDate, today), [anchorDate, today])
   const [renderedDayCount, setRenderedDayCount] = useState(INITIAL_RENDERED_DAYS)

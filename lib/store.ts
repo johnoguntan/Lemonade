@@ -834,6 +834,10 @@ export const FIXED_LISTS: List[] = [
   { id: 'to-buy', name: 'TO BUY', todos: [], type: 'list', tabId: 'my-lists-tab' },
   { id: 'shopping-returns', name: 'SHOPPING RETURNS', todos: [], type: 'shopping-returns', tabId: 'shopping-returns-tab' },
   { id: 'to-read', name: 'TO READ', todos: [], type: 'list', tabId: 'my-lists-tab' },
+  { id: 'next-week', name: 'NEXT WEEK', todos: [], type: 'planning', tabId: 'planning-tab' },
+  { id: 'this-month', name: 'THIS MONTH', todos: [], type: 'planning', tabId: 'planning-tab' },
+  { id: 'next-month', name: 'NEXT MONTH', todos: [], type: 'planning', tabId: 'planning-tab' },
+  { id: 'next-year', name: 'NEXT YEAR', todos: [], type: 'planning', tabId: 'planning-tab' },
   { id: 'goals', name: 'GOALS', todos: [], type: 'planning', tabId: 'planning-tab' },
   { id: 'someday', name: 'SOMEDAY', todos: [], type: 'planning', tabId: 'planning-tab' },
   { id: 'ideas', name: 'IDEAS', todos: [], type: 'planning', tabId: 'planning-tab' },
@@ -872,9 +876,34 @@ export const ensureFixedLists = (lists: List[]): List[] => {
     return current
   })
 
-  return fixedLists.concat(
+  const combined = fixedLists.concat(
     normalizedExisting.filter((list) => !FIXED_LISTS.some((fixedList) => fixedList.id === list.id))
   )
+
+  // Reduce duplicate planning lists with the same display name (common when older sessions
+  // created custom lists named like our fixed planning buckets).
+  //
+  // Rule: if a list's name matches a fixed planning list name exactly, we only keep the
+  // canonical fixed list id(s) for that name and drop any non-canonical duplicates.
+  const canonicalPlanningByName = new Map<string, Set<string>>()
+  FIXED_LISTS.filter((list) => list.tabId === "planning-tab").forEach((list) => {
+    const key = list.name.trim().toUpperCase()
+    const current = canonicalPlanningByName.get(key) ?? new Set<string>()
+    current.add(list.id)
+    canonicalPlanningByName.set(key, current)
+  })
+
+  return combined.filter((list) => {
+    const normalizedName = list.name.trim().toUpperCase()
+    const inPlanning = (list.tabId ?? (list.type === "planning" ? "planning-tab" : "")) === "planning-tab"
+    if (!inPlanning) return true
+
+    const canonicalIds = canonicalPlanningByName.get(normalizedName)
+    if (!canonicalIds) return true
+
+    // If it shares a name with a fixed planning list, only keep the canonical fixed one.
+    return canonicalIds.has(list.id)
+  })
 }
 
 const ensureUniqueTodoIds = (todos: Todo[]) => {
@@ -2626,6 +2655,42 @@ export const useLemonadeStore = create<LemonadeStore>()(
       
       addListTodo: (listId, text) => set((state) => {
         const defaultLabelId = state.preferences.defaultLabelId
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        const formatKey = (date: Date) => formatLocalDateKey(date)
+        const addDaysLocal = (base: Date, amount: number) => {
+          const next = new Date(base)
+          next.setDate(next.getDate() + amount)
+          return next
+        }
+        const nextMonday = (base: Date) => {
+          const day = base.getDay()
+          const daysUntilNextMonday = ((8 - day) % 7) || 7
+          return addDaysLocal(base, daysUntilNextMonday)
+        }
+        const endOfMonth = (base: Date) => {
+          // Last day of current month.
+          return new Date(base.getFullYear(), base.getMonth() + 1, 0)
+        }
+
+        const dateForList = () => {
+          switch (listId) {
+            case "next-week":
+              return formatKey(nextMonday(today))
+            case "this-month":
+              return formatKey(endOfMonth(today))
+            case "next-month":
+              return formatKey(new Date(today.getFullYear(), today.getMonth() + 1, 1))
+            case "next-year":
+              return formatKey(new Date(today.getFullYear() + 1, 0, 1))
+            case "someday":
+            case "goals":
+            case "ideas":
+              return null
+            default:
+              return formatKey(today)
+          }
+        }
 
         return {
           lists: state.lists.map((list) =>
@@ -2636,7 +2701,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
                     id: generateId(),
                     text,
                     completed: false,
-                    date: new Date().toISOString().split('T')[0],
+                    date: dateForList(),
                     createdAt: Date.now(),
                     endOfDay: false,
                     subtasks: [],

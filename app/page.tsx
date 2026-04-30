@@ -14,6 +14,7 @@ import { CelebrationOverlay } from "@/components/lemonade/celebration-overlay"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { BucketReminderManager } from "@/components/lemonade/bucket-reminder-manager"
 
 const textSizeVars = {
   sm: {
@@ -237,6 +238,7 @@ export default function Home() {
       setCalendarFilterMode("all")
       setCalendarTimeframe("week")
       setSelectedCalendarDate(targetDate)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setViewMode("calendar")
       return
     }
@@ -318,6 +320,7 @@ export default function Home() {
       <ErrorBoundary>
         <DailyPlannerModal />
       </ErrorBoundary>
+      <BucketReminderManager />
 
       <div
         className={cn("absolute left-1/2 top-1/2 transition-all duration-300", sidebarOpen && "ml-72")}
