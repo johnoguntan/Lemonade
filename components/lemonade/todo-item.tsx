@@ -1,15 +1,17 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
-import { normalizeTodoPriority, useLemonadeStore, type Todo } from "@/lib/store"
+import { formatLocalDateKey, parseLocalDateKey, normalizeTodoPriority, useLemonadeStore, type Todo } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { RotateCcw, Plus, Minus, X, Moon, ArrowUp, Trash2, ChevronRight, ChevronDown, NotebookPen, Link2, Paperclip, Bell, ListChecks, AlertTriangle, Tag, Palette, Shapes, Clock3, Image as ImageIcon, MapPin, AlarmClock } from "lucide-react"
+import { RotateCcw, Plus, Minus, X, Moon, ArrowUp, Trash2, ChevronRight, ChevronDown, NotebookPen, Link2, Paperclip, Bell, ListChecks, AlertTriangle, Tag, Palette, Shapes, Clock3, Image as ImageIcon, MapPin, AlarmClock, ArrowLeftRight, Calendar as CalendarIcon } from "lucide-react"
 import { toast } from "sonner"
 import { TASK_ICON_LIBRARY, TaskIcon } from "@/lib/task-icons"
 import { ColorPickerPanel } from "@/components/lemonade/color-picker-panel"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Calendar } from "@/components/ui/calendar"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -217,6 +219,8 @@ export function TodoItem({
     updateCalendarTodo, 
     updateCalendarTodoInstance,
     deleteCalendarTodo,
+    moveTodoToDate,
+    moveCalendarTodoToList,
     restoreLastDeletedTodo,
     addCalendarTodo,
     addSubtask,
@@ -261,8 +265,10 @@ export function TodoItem({
   const [attachmentDrafts, setAttachmentDrafts] = useState<string[]>([])
   const [taskMenuOpen, setTaskMenuOpen] = useState(false)
   const [activeToolPanel, setActiveToolPanel] = useState<
-    "reminder" | "subtasks" | "link" | "priority" | "icon" | "labels" | "color" | "attachment" | "snooze" | "photo" | "location" | "duration" | "split" | "merge" | "convert" | null
+    "move" | "reminder" | "subtasks" | "link" | "priority" | "icon" | "labels" | "color" | "attachment" | "snooze" | "photo" | "location" | "duration" | "split" | "merge" | "convert" | null
   >(null)
+  const [moveDatePickerOpen, setMoveDatePickerOpen] = useState(false)
+  const [moveDatePickerMonth, setMoveDatePickerMonth] = useState<Date>(() => new Date())
   const [pendingRecurringUpdate, setPendingRecurringUpdate] = useState<Partial<Todo> | null>(null)
   const [pendingParentComplete, setPendingParentComplete] = useState(false)
   const [customRecurrenceText, setCustomRecurrenceText] = useState(todo.recurringCustomText ?? "")
@@ -618,7 +624,7 @@ export function TodoItem({
   }
 
   const handleOpenToolPanel = (
-    panel: "reminder" | "subtasks" | "link" | "priority" | "icon" | "labels" | "color" | "attachment" | "snooze" | "photo" | "location" | "duration" | "split" | "merge" | "convert"
+    panel: "move" | "reminder" | "subtasks" | "link" | "priority" | "icon" | "labels" | "color" | "attachment" | "snooze" | "photo" | "location" | "duration" | "split" | "merge" | "convert"
   ) => {
     setTaskMenuOpen(true)
     setActiveToolPanel(panel)
@@ -971,6 +977,17 @@ export function TodoItem({
               className="w-[320px] max-w-[calc(100vw-24px)] overflow-x-hidden overflow-y-auto rounded-[26px] border border-border/60 bg-background/95 p-0 shadow-[0_18px_60px_rgba(0,0,0,0.18)] backdrop-blur max-h-[var(--radix-dropdown-menu-content-available-height)]"
             >
               <div className="grid grid-cols-6 gap-2 border-b border-border/50 px-3 py-3">
+                <button
+                  type="button"
+                  onClick={() => handleOpenToolPanel("move")}
+                  className={cn(
+                    "inline-flex size-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground",
+                    activeToolPanel === "move" && "bg-muted text-foreground"
+                  )}
+                  title="Move to..."
+                >
+                  <ArrowLeftRight className="size-4" />
+                </button>
                 <button
                   type="button"
                   onClick={() => handleOpenToolPanel("reminder")}
@@ -1531,6 +1548,120 @@ export function TodoItem({
                         {option.label}
                       </button>
                     ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {activeToolPanel === "move" ? (
+                <div className="space-y-3 px-3 py-3">
+                  <div className="text-sm font-medium">Move to…</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(() => {
+                      const todayKey = formatLocalDateKey(new Date())
+                      const tomorrow = new Date()
+                      tomorrow.setDate(tomorrow.getDate() + 1)
+                      const tomorrowKey = formatLocalDateKey(tomorrow)
+                      const dateTargets: Array<{ label: string; action: () => void }> = [
+                        {
+                          label: "Today",
+                          action: () => moveTodoToDate(todo.id, todayKey),
+                        },
+                        {
+                          label: "Tomorrow",
+                          action: () => moveTodoToDate(todo.id, tomorrowKey),
+                        },
+                      ]
+                      const bucketTargets: Array<{ label: string; listId: string }> = [
+                        { label: "This Week", listId: "this-week" },
+                        { label: "Next Week", listId: "next-week" },
+                        { label: "This Month", listId: "this-month" },
+                        { label: "Next Month", listId: "next-month" },
+                        { label: "This Year", listId: "this-year" },
+                        { label: "Next Year", listId: "next-year" },
+                        { label: "Goals", listId: "goals" },
+                        { label: "Someday", listId: "someday" },
+                        { label: "Ideas", listId: "ideas" },
+                      ]
+
+                      return (
+                        <>
+                          {dateTargets.map((entry) => (
+                            <button
+                              key={entry.label}
+                              type="button"
+                              onClick={() => {
+                                entry.action()
+                                setTaskMenuOpen(false)
+                                setActiveToolPanel(null)
+                                toast(`Moved to ${entry.label.toLowerCase()}`, { duration: 2000 })
+                              }}
+                              className="rounded-lg border border-border/70 px-3 py-2 text-left text-[11px] transition-colors hover:bg-muted"
+                            >
+                              {entry.label}
+                            </button>
+                          ))}
+                          <Popover
+                            open={moveDatePickerOpen}
+                            onOpenChange={(open) => {
+                              setMoveDatePickerOpen(open)
+                              if (open) {
+                                const base = typeof todo.date === "string" && todo.date ? parseLocalDateKey(todo.date) : new Date()
+                                setMoveDatePickerMonth(base)
+                              }
+                            }}
+                          >
+                            <PopoverTrigger asChild>
+                              <button
+                                type="button"
+                                className="col-span-2 flex items-center gap-2 rounded-lg border border-border/70 px-3 py-2 text-left text-[11px] transition-colors hover:bg-muted"
+                              >
+                                <CalendarIcon className="size-3.5 text-muted-foreground" />
+                                <span>Custom date…</span>
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent
+                              align="start"
+                              side="bottom"
+                              sideOffset={10}
+                              collisionPadding={12}
+                              className="z-[120] w-auto rounded-2xl border border-border/70 p-2 shadow-xl"
+                            >
+                              <Calendar
+                                mode="single"
+                                selected={typeof todo.date === "string" && todo.date ? parseLocalDateKey(todo.date) : undefined}
+                                month={moveDatePickerMonth}
+                                onMonthChange={setMoveDatePickerMonth}
+                                onSelect={(date) => {
+                                  if (!date) return
+                                  const key = formatLocalDateKey(date)
+                                  moveTodoToDate(todo.id, key)
+                                  setMoveDatePickerOpen(false)
+                                  setTaskMenuOpen(false)
+                                  setActiveToolPanel(null)
+                                  toast("Moved", { duration: 2000 })
+                                }}
+                                initialFocus
+                              />
+                            </PopoverContent>
+                          </Popover>
+                          {bucketTargets.map((entry) => (
+                            <button
+                              key={entry.listId}
+                              type="button"
+                              onClick={() => {
+                                moveCalendarTodoToList(todo.id, entry.listId)
+                                setTaskMenuOpen(false)
+                                setActiveToolPanel(null)
+                                toast(`Moved to ${entry.label.toLowerCase()}`, { duration: 2000 })
+                              }}
+                              className="rounded-lg border border-border/70 px-3 py-2 text-left text-[11px] transition-colors hover:bg-muted"
+                            >
+                              {entry.label}
+                            </button>
+                          ))}
+                        </>
+                      )
+                    })()}
                   </div>
                 </div>
               ) : null}

@@ -21,6 +21,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { getPlannerTaskDragData, setPlannerTaskDragData } from "@/lib/task-dnd"
 
 export function ListsSection() {
   const { 
@@ -597,10 +598,12 @@ function ListCard({
   showCompleted,
   listTabs,
 }: ListCardProps) {
+  const { moveCalendarTodoToList, moveListTodoToList } = useLemonadeStore()
   const [isEditingName, setIsEditingName] = useState(false)
   const [editName, setEditName] = useState(list.name)
   const [menuOpen, setMenuOpen] = useState(false)
   const [showMoveMenu, setShowMoveMenu] = useState(false)
+  const [isTaskDropOver, setIsTaskDropOver] = useState(false)
 
   const handleSaveName = () => {
     if (editName.trim()) {
@@ -666,6 +669,11 @@ function ListCard({
             <Button
               variant="ghost"
               size="icon"
+              draggable={false}
+              onDragStart={(event) => {
+                // This button should never initiate list-card drag.
+                event.preventDefault()
+              }}
               className="mt-0.5 size-7 shrink-0 rounded-md opacity-0 transition-opacity group-hover:opacity-100"
             >
               <MoreVertical className="size-4" />
@@ -767,13 +775,54 @@ function ListCard({
         </div>
       </div>
 
-      <div className="relative z-20 flex h-auto flex-col rounded-2xl border border-border/50 bg-transparent px-0 py-0">
+      <div
+        className={cn(
+          "relative z-20 flex h-auto flex-col rounded-2xl border border-border/50 bg-transparent px-0 py-0",
+          isTaskDropOver && "border-dashed border-[var(--accent-color)] bg-[color-mix(in_srgb,var(--accent-color)_8%,transparent)]"
+        )}
+        onDragOver={(event) => {
+          const dragData = getPlannerTaskDragData(event as unknown as DragEvent<HTMLDivElement>)
+          if (!dragData?.todoId) return
+          event.preventDefault()
+          event.stopPropagation()
+          event.dataTransfer.dropEffect = "move"
+          setIsTaskDropOver(true)
+        }}
+        onDragLeave={() => setIsTaskDropOver(false)}
+        onDrop={(event) => {
+          const dragData = getPlannerTaskDragData(event as unknown as DragEvent<HTMLDivElement>)
+          if (!dragData?.todoId) return
+          event.preventDefault()
+          event.stopPropagation()
+
+          if (dragData.source === "calendar" || dragData.source === "timeline-timed" || dragData.source === "timeline-unscheduled") {
+            moveCalendarTodoToList(dragData.todoId, list.id)
+          } else if (dragData.source === "list" && dragData.listId) {
+            if (dragData.listId !== list.id) {
+              moveListTodoToList(dragData.listId, dragData.todoId, list.id)
+            }
+          }
+          setIsTaskDropOver(false)
+        }}
+      >
         {Array.from({ length: Math.max(visibleTodos.length + 1, 8) }).map((_, index) => {
           const todo = visibleTodos[index]
 
           if (todo) {
             return (
-              <div key={todo.id} className="group/todo flex h-10 items-center gap-2 border-b border-[#e8e8ec] px-2 last:border-b-0 dark:border-white/15">
+              <div
+                key={todo.id}
+                className="group/todo flex h-10 items-center gap-2 border-b border-[#e8e8ec] px-2 last:border-b-0 dark:border-white/15"
+                draggable
+                onDragStart={(event) => {
+                  event.stopPropagation()
+                  setPlannerTaskDragData(event, { todoId: todo.id, source: "list", listId: list.id })
+                }}
+                onDragEnd={(event) => {
+                  event.stopPropagation()
+                  setIsTaskDropOver(false)
+                }}
+              >
                 <button
                   onClick={() => onToggleTodo(todo.id)}
                   className={cn(

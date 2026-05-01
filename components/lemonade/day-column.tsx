@@ -102,6 +102,7 @@ export function DayColumn({ date, isToday, anchorId, afterTodosContent }: DayCol
   const clearLastCreatedTodoId = useLemonadeStore((state) => state.clearLastCreatedTodoId)
   const ensureLabelIds = useLemonadeStore((state) => state.ensureLabelIds)
   const moveTodoToDate = useLemonadeStore((state) => state.moveTodoToDate)
+  const moveListTodoToDate = useLemonadeStore((state) => state.moveListTodoToDate)
   const reorderCalendarTodo = useLemonadeStore((state) => state.reorderCalendarTodo)
   const searchQuery = useLemonadeStore((state) => state.searchQuery)
   const searchModeActive = useLemonadeStore((state) => state.searchModeActive)
@@ -194,6 +195,9 @@ export function DayColumn({ date, isToday, anchorId, afterTodosContent }: DayCol
           durationMinutes: undefined,
         })
         toast("Task moved back to calendar", { duration: 2000 })
+      } else if (dragData.source === "list" && dragData.listId) {
+        moveListTodoToDate(dragData.listId, dragData.todoId, dateStr)
+        toast("Task moved", { duration: 2000 })
       } else {
         moveTodoToDate(dragData.todoId, dateStr)
         toast("Task moved", { duration: 2000 })

@@ -58,6 +58,7 @@ const optionRowClass = (active: boolean) =>
 export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewModeChange: _onViewModeChange }: HeaderProps) {
   const {
     addCalendarTodo,
+    updateCalendarTodo,
     ensureLabelIds,
     labels,
     calendarTodos,
@@ -89,7 +90,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
   const [quickAddExpanded, setQuickAddExpanded] = useState(false)
   const [draftDateKey, setDraftDateKey] = useState<string | null>(selectedCalendarDate)
   const [draftListTarget, setDraftListTarget] = useState<
-    "next-week" | "this-month" | "next-month" | "next-year" | "someday" | "goals" | null
+    "this-week" | "next-week" | "this-month" | "next-month" | "this-year" | "next-year" | "someday" | "goals" | null
   >(null)
   const [draftDateTouched, setDraftDateTouched] = useState(false)
   const [draftTime, setDraftTime] = useState<string>("")
@@ -115,6 +116,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
   const [parsedPreview, setParsedPreview] = useState<AiParsedTask | null>(null)
   const [editingParsedTask, setEditingParsedTask] = useState<AiParsedTask | null>(null)
   const [searchFiltersExpanded, setSearchFiltersExpanded] = useState(false)
+  const quickAddInputRef = useRef<HTMLInputElement>(null)
   const quickAddBoundaryRef = useRef<HTMLDivElement>(null)
   const parseRequestIdRef = useRef(0)
   const currentDate = parseLocalDateKey(selectedCalendarDate)
@@ -138,11 +140,11 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     return [
       { label: "Today", dateKey: formatLocalDateKey(base) },
       { label: "Tomorrow", dateKey: formatLocalDateKey(addDays(base, 1)) },
-      { label: "This Week", dateKey: formatLocalDateKey(base) },
+      { label: "This Week", dateKey: formatLocalDateKey(base), listTarget: "this-week" as const },
       { label: "Next Week", dateKey: formatLocalDateKey(nextWeekStart), listTarget: "next-week" as const },
       { label: "This Month", dateKey: formatLocalDateKey(base), listTarget: "this-month" as const },
       { label: "Next Month", dateKey: formatLocalDateKey(new Date(base.getFullYear(), base.getMonth() + 1, 1)), listTarget: "next-month" as const },
-      { label: "This Year", dateKey: formatLocalDateKey(base) },
+      { label: "This Year", dateKey: formatLocalDateKey(base), listTarget: "this-year" as const },
       { label: "Next Year", dateKey: formatLocalDateKey(addDays(base, 365)), listTarget: "next-year" as const },
       { label: "Someday", dateKey: null, listTarget: "someday" as const },
       { label: "Goals", dateKey: null, listTarget: "goals" as const },
@@ -234,24 +236,41 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     setEditingParsedTask(null)
   }, [])
 
-  const activeBucketLabel = useMemo(() => {
-    if (!draftListTarget) return null
-    const labels: Record<string, string> = {
-      "next-week": "NEXT WEEK",
-      "this-month": "THIS MONTH",
-      "next-month": "NEXT MONTH",
-      "next-year": "NEXT YEAR",
-      someday: "SOMEDAY",
-      goals: "GOALS",
+  const activeDestinationLabel = useMemo(() => {
+    if (draftListTarget) {
+      const labels: Record<string, string> = {
+        "this-week": "THIS WEEK",
+        "next-week": "NEXT WEEK",
+        "this-month": "THIS MONTH",
+        "next-month": "NEXT MONTH",
+        "this-year": "THIS YEAR",
+        "next-year": "NEXT YEAR",
+        someday: "SOMEDAY",
+        goals: "GOALS",
+      }
+      return labels[draftListTarget] ?? null
     }
-    return labels[draftListTarget] ?? null
-  }, [draftListTarget])
+
+    // Calendar destinations: show a pill too, even for Today/Tomorrow.
+    if (!draftDateKey) return null
+    const now = new Date()
+    const nowKey = formatLocalDateKey(now)
+    const tomorrowKey = formatLocalDateKey(addDays(now, 1))
+    if (draftDateKey === nowKey) return "TODAY"
+    if (draftDateKey === tomorrowKey) return "TOMORROW"
+    // For any other explicit date selection, show a generic "DATE" pill.
+    // (Keeps it minimal; we can show the formatted date if you want.)
+    if (draftDateTouched && draftDateKey) return "DATE"
+    return null
+  }, [draftDateKey, draftDateTouched, draftListTarget])
 
   const resolveListTargetFromPrefix = (raw: string) => {
     const trimmed = raw.trim()
+    if (/^this\s*week:\s+/i.test(trimmed)) return "this-week" as const
     if (/^next\s*week:\s+/i.test(trimmed)) return "next-week" as const
     if (/^this\s*month:\s+/i.test(trimmed)) return "this-month" as const
     if (/^next\s*month:\s+/i.test(trimmed)) return "next-month" as const
+    if (/^this\s*year:\s+/i.test(trimmed)) return "this-year" as const
     if (/^next\s*year:\s+/i.test(trimmed)) return "next-year" as const
     if (/^someday:\s+/i.test(trimmed)) return "someday" as const
     if (/^goals?:\s+/i.test(trimmed)) return "goals" as const
@@ -260,9 +279,11 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
 
   const resolveListTargetFromText = (raw: string) => {
     const trimmed = raw.trim()
+    if (/\bthis\s+week\b/i.test(trimmed)) return "this-week" as const
     if (/\bnext\s+week\b/i.test(trimmed)) return "next-week" as const
     if (/\bthis\s+month\b/i.test(trimmed)) return "this-month" as const
     if (/\bnext\s+month\b/i.test(trimmed)) return "next-month" as const
+    if (/\bthis\s+year\b/i.test(trimmed)) return "this-year" as const
     if (/\bnext\s+year\b/i.test(trimmed)) return "next-year" as const
     if (/\bsomeday\b/i.test(trimmed)) return "someday" as const
     if (/\bgoals?\b/i.test(trimmed)) return "goals" as const
@@ -271,9 +292,11 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
 
   const stripBucketPrefix = (raw: string) => {
     return raw
+      .replace(/^this\s*week:\s+/i, "")
       .replace(/^next\s*week:\s+/i, "")
       .replace(/^this\s*month:\s+/i, "")
       .replace(/^next\s*month:\s+/i, "")
+      .replace(/^this\s*year:\s+/i, "")
       .replace(/^next\s*year:\s+/i, "")
       .replace(/^someday:\s+/i, "")
       .replace(/^goals?:\s+/i, "")
@@ -282,9 +305,11 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
 
   const stripBucketWords = (raw: string) => {
     return raw
+      .replace(/\bthis\s+week\b/gi, "")
       .replace(/\bnext\s+week\b/gi, "")
       .replace(/\bthis\s+month\b/gi, "")
       .replace(/\bnext\s+month\b/gi, "")
+      .replace(/\bthis\s+year\b/gi, "")
       .replace(/\bnext\s+year\b/gi, "")
       .replace(/\bsomeday\b/gi, "")
       .replace(/\bgoals?\b/gi, "")
@@ -631,30 +656,89 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
 
       setQuickAddText("")
       resetPerTaskDraft()
+      // Keep the input ready for rapid entry.
+      window.requestAnimationFrame(() => quickAddInputRef.current?.focus())
       return
     }
 
-    setSubmitting(true)
-    try {
-      const controller = new AbortController()
-      const timeoutId = window.setTimeout(() => controller.abort(), AI_PARSE_TIMEOUT_MS)
-      const requestId = parseRequestIdRef.current + 1
-      parseRequestIdRef.current = requestId
+    // AI mode (fast): save immediately, then refine in the background.
+    // This avoids the noticeable lag before the user can add the next task.
+    const optimisticId = createOptimisticTodoId("header")
+    const optimisticTitle = rawInputString.trim()
+    addCalendarTodo({
+      id: optimisticId,
+      text: optimisticTitle,
+      completed: false,
+      date: draftDateKey,
+      time: draftTime.trim() ? draftTime.trim() : undefined,
+      isHeading: optimisticTitle === optimisticTitle.toUpperCase() && optimisticTitle.length > 2,
+      priority: draftPriority,
+      labelIds: draftLabelIds,
+      subtasks: draftSubtasks.map((subtaskTitle) => ({ title: subtaskTitle })),
+      color: draftColor,
+      notes: draftNotes,
+      reminderOffsetMinutes: draftReminderOffsetMinutes,
+      isSyncing: false,
+      syncStatus: undefined,
+    })
 
-      await aiParseSingleTask(rawInputString, controller.signal)
-        .then((task) => {
-          if (parseRequestIdRef.current !== requestId) return
-          setParsedPreview(task)
-          setQuickAddExpanded(true)
+    // Keep session UI open for rapid multi-add.
+    setQuickAddExpanded(true)
+    setQuickAddText("")
+    window.requestAnimationFrame(() => quickAddInputRef.current?.focus())
+
+    // Background parse + refine.
+    setSubmitting(true)
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => controller.abort(), AI_PARSE_TIMEOUT_MS)
+    const requestId = parseRequestIdRef.current + 1
+    parseRequestIdRef.current = requestId
+
+    void aiParseSingleTask(rawInputString, controller.signal)
+      .then((task) => {
+        if (parseRequestIdRef.current !== requestId) return
+        const title = task.title.trim()
+        if (!title) return
+
+        const parsedLabelIds = ensureLabelIds(task.labels)
+        const labelIds = Array.from(new Set([...parsedLabelIds, ...draftLabelIds]))
+        const notes = [task.notes, task.attachment ? `Attachment: ${task.attachment}` : null, draftNotes].filter(Boolean).join("\n").trim()
+        const resolvedDate = getResolvedParsedDate(task)
+
+        updateCalendarTodo(optimisticId, {
+          text: title,
+          date: resolvedDate,
+          time: task.time ?? (draftTime.trim() ? draftTime.trim() : undefined),
+          priority: draftPriority !== "normal" ? draftPriority : task.priority,
+          labelIds,
+          notes: notes || undefined,
+          url: task.url ?? (task.phone ? `tel:${task.phone}` : undefined),
+          location: task.location ?? undefined,
+          durationMinutes: task.duration ?? undefined,
+          reminderOffsetMinutes: task.reminder ?? draftReminderOffsetMinutes,
+          isRecurring: task.recurring !== null,
+          recurringFrequency:
+            task.recurring === "daily" || task.recurring === "weekly" || task.recurring === "monthly"
+              ? task.recurring
+              : undefined,
+          recurringCustomText:
+            task.recurring === "yearly"
+              ? "yearly"
+              : task.recurringDay
+                ? `every ${task.recurringDay}`
+                : undefined,
         })
-        .catch(() => {
-          if (parseRequestIdRef.current !== requestId) return
-          toast("Couldn't parse that — please try again or add manually", { duration: 3000 })
-        })
-        .finally(() => window.clearTimeout(timeoutId))
-    } finally {
-      setSubmitting(false)
-    }
+      })
+      .catch(() => {
+        // Keep the optimistic task as-is if parsing fails.
+      })
+      .finally(() => {
+        window.clearTimeout(timeoutId)
+        setSubmitting(false)
+        resetPerTaskDraft()
+        setDraftDateTouched(false)
+        parseRequestIdRef.current += 1
+      })
   }
 
   const activeFilterChips = useMemo(() => {
@@ -806,6 +890,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
           </Button>
 
           <Input
+            ref={quickAddInputRef}
             placeholder={searchModeActive ? "Search tasks..." : "Add tasks here in natural language"}
             value={searchModeActive ? searchQuery : quickAddText}
             onChange={(event) => {
@@ -845,10 +930,10 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
             )}
           />
 
-          {!searchModeActive && activeBucketLabel ? (
+          {!searchModeActive && activeDestinationLabel ? (
             <div className="flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-[10px] font-extrabold tracking-[0.14em] text-foreground">
               <span>→</span>
-              <span>{activeBucketLabel}</span>
+              <span>{activeDestinationLabel}</span>
               <button
                 type="button"
                 className={cn(
@@ -856,8 +941,8 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                   isMobile ? "h-8 w-8" : "h-6 w-6"
                 )}
                 onClick={() => setDraftListTarget(null)}
-                aria-label="Clear bucket"
-                title="Clear bucket"
+                aria-label="Clear destination"
+                title="Clear destination"
               >
                 <X className="size-3" />
               </button>
@@ -1019,7 +1104,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                             type="button"
                             onClick={() => {
                               selectDraftDate(option.dateKey)
-                              setDraftListTarget(option.listTarget ?? null)
+                            setDraftListTarget(option.listTarget ?? null)
                             }}
                             className={cn(
                               "rounded-lg border border-border/70 px-2 py-2 text-[12px] transition-colors hover:bg-muted",

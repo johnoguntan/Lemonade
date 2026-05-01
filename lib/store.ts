@@ -223,6 +223,9 @@ interface LemonadeStore {
   setSubtasksCollapsed: (todoId: string, collapsed: boolean) => void
   toggleSubtasksCollapsed: (todoId: string) => void
   moveTodoToDate: (todoId: string, newDate: string) => void
+  moveCalendarTodoToList: (todoId: string, listId: string) => void
+  moveListTodoToList: (sourceListId: string, todoId: string, targetListId: string) => void
+  moveListTodoToDate: (sourceListId: string, todoId: string, newDate: string) => void
   snoozeCalendarTodo: (todoId: string, option: SnoozeOption) => void
   duplicateCalendarTodo: (todoId: string) => void
   reorderCalendarTodo: (todoId: string, targetId: string, position: "before" | "after") => void
@@ -834,9 +837,11 @@ export const FIXED_LISTS: List[] = [
   { id: 'to-buy', name: 'TO BUY', todos: [], type: 'list', tabId: 'my-lists-tab' },
   { id: 'shopping-returns', name: 'SHOPPING RETURNS', todos: [], type: 'shopping-returns', tabId: 'shopping-returns-tab' },
   { id: 'to-read', name: 'TO READ', todos: [], type: 'list', tabId: 'my-lists-tab' },
+  { id: 'this-week', name: 'THIS WEEK', todos: [], type: 'planning', tabId: 'planning-tab' },
   { id: 'next-week', name: 'NEXT WEEK', todos: [], type: 'planning', tabId: 'planning-tab' },
   { id: 'this-month', name: 'THIS MONTH', todos: [], type: 'planning', tabId: 'planning-tab' },
   { id: 'next-month', name: 'NEXT MONTH', todos: [], type: 'planning', tabId: 'planning-tab' },
+  { id: 'this-year', name: 'THIS YEAR', todos: [], type: 'planning', tabId: 'planning-tab' },
   { id: 'next-year', name: 'NEXT YEAR', todos: [], type: 'planning', tabId: 'planning-tab' },
   { id: 'goals', name: 'GOALS', todos: [], type: 'planning', tabId: 'planning-tab' },
   { id: 'someday', name: 'SOMEDAY', todos: [], type: 'planning', tabId: 'planning-tab' },
@@ -2184,6 +2189,162 @@ export const useLemonadeStore = create<LemonadeStore>()(
         )
       })),
 
+      moveCalendarTodoToList: (todoId, listId) => set((state) => {
+        const source = state.calendarTodos.find((todo) => todo.id === todoId)
+        const targetList = state.lists.find((list) => list.id === listId)
+        if (!source || !targetList) return state
+
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        const addDaysLocal = (base: Date, amount: number) => {
+          const next = new Date(base)
+          next.setDate(next.getDate() + amount)
+          return next
+        }
+        const formatKey = (date: Date) => formatLocalDateKey(date)
+        const endOfWeekSunday = (base: Date) => {
+          const day = base.getDay()
+          const diff = (7 - day) % 7
+          return addDaysLocal(base, diff)
+        }
+        const nextMonday = (base: Date) => {
+          const day = base.getDay()
+          const daysUntilNextMonday = ((8 - day) % 7) || 7
+          return addDaysLocal(base, daysUntilNextMonday)
+        }
+        const endOfMonth = (base: Date) => new Date(base.getFullYear(), base.getMonth() + 1, 0)
+        const endOfYear = (base: Date) => new Date(base.getFullYear(), 11, 31)
+        const dueDateForList = () => {
+          switch (listId) {
+            case "this-week":
+              return formatKey(endOfWeekSunday(today))
+            case "next-week":
+              return formatKey(nextMonday(today))
+            case "this-month":
+              return formatKey(endOfMonth(today))
+            case "next-month":
+              return formatKey(new Date(today.getFullYear(), today.getMonth() + 1, 1))
+            case "this-year":
+              return formatKey(endOfYear(today))
+            case "next-year":
+              return formatKey(new Date(today.getFullYear() + 1, 0, 1))
+            default:
+              return null
+          }
+        }
+
+        const moved: Todo = {
+          ...source,
+          date: dueDateForList(),
+          time: undefined,
+          durationMinutes: undefined,
+        }
+
+        return {
+          ...pushTaskHistory(state, "move task"),
+          calendarTodos: state.calendarTodos.filter((todo) => todo.id !== todoId),
+          lists: state.lists.map((list) =>
+            list.id === listId ? { ...list, todos: [...list.todos, moved] } : list
+          ),
+        }
+      }),
+
+      moveListTodoToList: (sourceListId, todoId, targetListId) => set((state) => {
+        if (sourceListId === targetListId) return state
+        const sourceList = state.lists.find((list) => list.id === sourceListId)
+        const targetList = state.lists.find((list) => list.id === targetListId)
+        if (!sourceList || !targetList) return state
+        const item = sourceList.todos.find((todo) => todo.id === todoId)
+        if (!item) return state
+
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        const addDaysLocal = (base: Date, amount: number) => {
+          const next = new Date(base)
+          next.setDate(next.getDate() + amount)
+          return next
+        }
+        const formatKey = (date: Date) => formatLocalDateKey(date)
+        const endOfWeekSunday = (base: Date) => {
+          const day = base.getDay()
+          const diff = (7 - day) % 7
+          return addDaysLocal(base, diff)
+        }
+        const nextMonday = (base: Date) => {
+          const day = base.getDay()
+          const daysUntilNextMonday = ((8 - day) % 7) || 7
+          return addDaysLocal(base, daysUntilNextMonday)
+        }
+        const endOfMonth = (base: Date) => new Date(base.getFullYear(), base.getMonth() + 1, 0)
+        const endOfYear = (base: Date) => new Date(base.getFullYear(), 11, 31)
+        const dueDateForList = () => {
+          switch (targetListId) {
+            case "this-week":
+              return formatKey(endOfWeekSunday(today))
+            case "next-week":
+              return formatKey(nextMonday(today))
+            case "this-month":
+              return formatKey(endOfMonth(today))
+            case "next-month":
+              return formatKey(new Date(today.getFullYear(), today.getMonth() + 1, 1))
+            case "this-year":
+              return formatKey(endOfYear(today))
+            case "next-year":
+              return formatKey(new Date(today.getFullYear() + 1, 0, 1))
+            default:
+              return null
+          }
+        }
+
+        const moved: Todo = {
+          ...item,
+          date: dueDateForList(),
+          time: undefined,
+          durationMinutes: undefined,
+        }
+
+        return {
+          ...pushTaskHistory(state, "move task"),
+          lists: state.lists.map((list) => {
+            if (list.id === sourceListId) {
+              return { ...list, todos: list.todos.filter((todo) => todo.id !== todoId) }
+            }
+            if (list.id === targetListId) {
+              return { ...list, todos: [...list.todos, moved] }
+            }
+            return list
+          }),
+        }
+      }),
+
+      moveListTodoToDate: (sourceListId, todoId, newDate) => {
+        const state = get()
+        const sourceList = state.lists.find((list) => list.id === sourceListId)
+        const item = sourceList?.todos.find((todo) => todo.id === todoId) ?? null
+        if (!item) return
+
+        // 1) Remove from list
+        set((current) => ({
+          ...pushTaskHistory(current, "move task"),
+          lists: current.lists.map((list) =>
+            list.id === sourceListId
+              ? { ...list, todos: list.todos.filter((todo) => todo.id !== todoId) }
+              : list
+          ),
+        }))
+
+        // 2) Add to calendar (preserve id + metadata)
+        get().addCalendarTodo({
+          ...item,
+          id: item.id,
+          date: newDate,
+          time: undefined,
+          durationMinutes: undefined,
+          isSyncing: false,
+          syncStatus: undefined,
+        })
+      },
+
       snoozeCalendarTodo: (todoId, option) => set((state) => {
         const target = state.calendarTodos.find((todo) => todo.id === todoId)
         if (!target) {
@@ -2663,6 +2824,12 @@ export const useLemonadeStore = create<LemonadeStore>()(
           next.setDate(next.getDate() + amount)
           return next
         }
+        const endOfWeekSunday = (base: Date) => {
+          // Sunday = 0 ... Saturday = 6
+          const day = base.getDay()
+          const diff = (7 - day) % 7
+          return addDaysLocal(base, diff)
+        }
         const nextMonday = (base: Date) => {
           const day = base.getDay()
           const daysUntilNextMonday = ((8 - day) % 7) || 7
@@ -2672,15 +2839,20 @@ export const useLemonadeStore = create<LemonadeStore>()(
           // Last day of current month.
           return new Date(base.getFullYear(), base.getMonth() + 1, 0)
         }
+        const endOfYear = (base: Date) => new Date(base.getFullYear(), 11, 31)
 
         const dateForList = () => {
           switch (listId) {
+            case "this-week":
+              return formatKey(endOfWeekSunday(today))
             case "next-week":
               return formatKey(nextMonday(today))
             case "this-month":
               return formatKey(endOfMonth(today))
             case "next-month":
               return formatKey(new Date(today.getFullYear(), today.getMonth() + 1, 1))
+            case "this-year":
+              return formatKey(endOfYear(today))
             case "next-year":
               return formatKey(new Date(today.getFullYear() + 1, 0, 1))
             case "someday":

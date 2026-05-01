@@ -5,7 +5,7 @@ import { formatLocalDateKey, useLemonadeStore } from "@/lib/store"
 import { Drawer, DrawerClose, DrawerContent, DrawerFooter, DrawerHeader, DrawerTitle } from "@/components/ui/drawer"
 import { Button } from "@/components/ui/button"
 
-type BucketId = "next-week" | "this-month" | "next-month" | "next-year"
+type BucketId = "this-week" | "next-week" | "this-month" | "next-month" | "this-year" | "next-year"
 
 type DueItem = {
   bucketId: BucketId
@@ -15,9 +15,11 @@ type DueItem = {
 }
 
 const BUCKET_LABEL: Record<BucketId, string> = {
+  "this-week": "This Week",
   "next-week": "Next Week",
   "this-month": "This Month",
   "next-month": "Next Month",
+  "this-year": "This Year",
   "next-year": "Next Year",
 }
 
@@ -35,7 +37,7 @@ export function BucketReminderManager() {
   const todayKey = useMemo(() => formatLocalDateKey(new Date()), [])
 
   const dueItems = useMemo(() => {
-    const buckets: BucketId[] = ["next-week", "this-month", "next-month", "next-year"]
+    const buckets: BucketId[] = ["this-week", "next-week", "this-month", "next-month", "this-year", "next-year"]
     const result: DueItem[] = []
     for (const bucketId of buckets) {
       const list = lists.find((l) => l.id === bucketId)
