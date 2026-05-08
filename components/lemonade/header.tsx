@@ -14,6 +14,8 @@ import {
   Tag,
   AlertTriangle,
   Search,
+  Timer,
+  Clock3,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -42,6 +44,8 @@ interface HeaderProps {
 }
 
 const AI_PARSE_TIMEOUT_MS = 15000
+const QUICK_ADD_DURATION_OPTIONS = [15, 30, 45, 60, 90, 120] as const
+const QUICK_ADD_TIME_OPTIONS = ["09:00", "11:00", "13:00", "15:00", "17:00", "19:00"] as const
 
 const addDays = (date: Date, amount: number) => {
   const nextDate = new Date(date)
@@ -54,6 +58,100 @@ const optionRowClass = (active: boolean) =>
     "flex w-full items-center justify-center rounded-lg px-3 py-2 text-center text-[12px] transition-colors",
     active ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
   )
+
+const formatDurationLabel = (minutes: number | null) => {
+  if (!minutes || minutes <= 0) {
+    return ""
+  }
+
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60
+    return `${hours} hr${hours === 1 ? "" : "s"}`
+  }
+
+  if (minutes > 60) {
+    const hours = Math.floor(minutes / 60)
+    const remainder = minutes % 60
+    return `${hours} hr ${remainder} min`
+  }
+
+  return `${minutes} min`
+}
+
+const formatDurationBadgeLabel = (minutes: number | null) => {
+  if (!minutes || minutes <= 0) {
+    return ""
+  }
+
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60
+    return `${hours}HR`
+  }
+
+  if (minutes > 60) {
+    const hours = Math.floor(minutes / 60)
+    const remainder = minutes % 60
+    return `${hours}HR ${remainder}MIN`
+  }
+
+  return `${minutes}MIN`
+}
+
+const parseDurationInput = (value: string) => {
+  const normalized = value.trim().toLowerCase()
+  if (!normalized) {
+    return null
+  }
+
+  const clockMatch = normalized.match(/^(\d{1,2})\s*:\s*(\d{2})$/)
+  if (clockMatch) {
+    const hours = Number.parseInt(clockMatch[1], 10)
+    const minutes = Number.parseInt(clockMatch[2], 10)
+    const total = hours * 60 + minutes
+    return Number.isFinite(total) && total > 0 ? total : null
+  }
+
+  const mixedMatch = normalized.match(
+    /^(?:(\d+(?:\.\d+)?)\s*h(?:r|rs|ours)?\s*)?(?:(\d+)\s*m(?:in|ins|inutes)?\s*)?$/
+  )
+  if (mixedMatch && (mixedMatch[1] || mixedMatch[2])) {
+    const hoursPart = mixedMatch[1] ? Number.parseFloat(mixedMatch[1]) : 0
+    const minutesPart = mixedMatch[2] ? Number.parseInt(mixedMatch[2], 10) : 0
+    const total = Math.round(hoursPart * 60) + minutesPart
+    return Number.isFinite(total) && total > 0 ? total : null
+  }
+
+  const hoursMatch = normalized.match(/^(\d+(?:\.\d+)?)\s*h(?:r|rs)?$/)
+  if (hoursMatch) {
+    return Math.max(1, Math.round(Number.parseFloat(hoursMatch[1]) * 60))
+  }
+
+  const minutesMatch = normalized.match(/^(\d+)\s*m(?:in|ins)?$/)
+  if (minutesMatch) {
+    return Math.max(1, Number.parseInt(minutesMatch[1], 10))
+  }
+
+  const plainNumber = Number.parseInt(normalized, 10)
+  return Number.isFinite(plainNumber) && plainNumber > 0 ? plainNumber : null
+}
+
+const formatTimeDisplayLabel = (value: string) => {
+  const normalized = value.trim()
+  const match = normalized.match(/^(\d{1,2}):(\d{2})$/)
+  if (!match) {
+    return normalized
+  }
+
+  const hours = Number.parseInt(match[1], 10)
+  const minutes = Number.parseInt(match[2], 10)
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+    return normalized
+  }
+
+  const suffix = hours >= 12 ? "PM" : "AM"
+  const displayHours = hours % 12 || 12
+  return minutes === 0 ? `${displayHours}${suffix}` : `${displayHours}:${match[2]}${suffix}`
+}
 
 export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewModeChange: _onViewModeChange }: HeaderProps) {
   const {
@@ -94,9 +192,13 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
   >(null)
   const [draftDateTouched, setDraftDateTouched] = useState(false)
   const [draftTime, setDraftTime] = useState<string>("")
+  const [showTimePopover, setShowTimePopover] = useState(false)
   const [showReminderPopover, setShowReminderPopover] = useState(false)
   const [draftReminderOffsetMinutes, setDraftReminderOffsetMinutes] = useState<number | null>(null)
   const [draftReminderCustomMinutes, setDraftReminderCustomMinutes] = useState<string>("")
+  const [showDurationPopover, setShowDurationPopover] = useState(false)
+  const [draftDurationMinutes, setDraftDurationMinutes] = useState<number | null>(null)
+  const [draftDurationCustomValue, setDraftDurationCustomValue] = useState("")
   const [showLinkInput, setShowLinkInput] = useState(false)
   const [draftLink, setDraftLink] = useState("")
   const [draftAttachments, setDraftAttachments] = useState<Array<{ name: string; type: string; size: number; lastModified: number }>>([])
@@ -218,7 +320,11 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     setShowReminderPopover(false)
     setDraftReminderOffsetMinutes(null)
     setDraftReminderCustomMinutes("")
+    setShowDurationPopover(false)
+    setDraftDurationMinutes(null)
+    setDraftDurationCustomValue("")
     setDraftTime("")
+    setShowTimePopover(false)
     setShowLinkInput(false)
     setDraftLink("")
     setDraftAttachments([])
@@ -446,11 +552,11 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       : `${parsedPreview.reminder} min before`
     : null
 
-  const parsedPreviewDurationLabel = parsedPreview?.duration != null
-    ? parsedPreview.duration >= 60 && parsedPreview.duration % 60 === 0
-      ? `${parsedPreview.duration / 60} hr${parsedPreview.duration === 60 ? "" : "s"}`
-      : `${parsedPreview.duration} min`
+  const parsedPreviewDurationLabel = parsedPreview
+    ? formatDurationLabel(draftDurationMinutes ?? parsedPreview.duration)
     : null
+  const activeDurationLabel = formatDurationBadgeLabel(draftDurationMinutes)
+  const activeTimeLabel = draftTime.trim() ? formatTimeDisplayLabel(draftTime) : ""
 
   const createTaskFromParsedPreview = (task: AiParsedTask) => {
     const title = task.title.trim()
@@ -488,7 +594,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       notes: notes || undefined,
       url: task.url ?? (task.phone ? `tel:${task.phone}` : undefined),
       location: task.location ?? undefined,
-      durationMinutes: task.duration ?? undefined,
+      durationMinutes: draftDurationMinutes ?? task.duration ?? undefined,
       reminderOffsetMinutes: task.reminder ?? draftReminderOffsetMinutes,
       isRecurring: task.recurring !== null,
       recurringFrequency:
@@ -553,7 +659,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       notes: notes || undefined,
       url: trimmedLink || task.url || (task.phone ? `tel:${task.phone}` : undefined),
       location: task.location ?? undefined,
-      durationMinutes: task.duration ?? undefined,
+      durationMinutes: draftDurationMinutes ?? task.duration ?? undefined,
       reminderOffsetMinutes: draftReminderOffsetMinutes,
       isRecurring: task.recurring !== null,
       recurringFrequency:
@@ -589,6 +695,8 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     setDraftTime(parsedPreview.time ?? "")
     setDraftPriority(parsedPreview.priority)
     setDraftReminderOffsetMinutes(parsedPreview.reminder)
+    setDraftDurationMinutes(parsedPreview.duration)
+    setDraftDurationCustomValue(parsedPreview.duration ? String(parsedPreview.duration) : "")
     setDraftLink(parsedPreview.url ?? "")
     setShowLinkInput(Boolean(parsedPreview.url))
     setDraftLabelIds(ensureLabelIds(parsedPreview.labels))
@@ -649,6 +757,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
         subtasks: draftSubtasks.map((subtaskTitle) => ({ title: subtaskTitle })),
         color: draftColor,
         notes: draftNotes,
+        durationMinutes: draftDurationMinutes ?? undefined,
         reminderOffsetMinutes: draftReminderOffsetMinutes,
         isSyncing: false,
         syncStatus: undefined,
@@ -677,6 +786,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       subtasks: draftSubtasks.map((subtaskTitle) => ({ title: subtaskTitle })),
       color: draftColor,
       notes: draftNotes,
+      durationMinutes: draftDurationMinutes ?? undefined,
       reminderOffsetMinutes: draftReminderOffsetMinutes,
       isSyncing: false,
       syncStatus: undefined,
@@ -714,7 +824,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
           notes: notes || undefined,
           url: task.url ?? (task.phone ? `tel:${task.phone}` : undefined),
           location: task.location ?? undefined,
-          durationMinutes: task.duration ?? undefined,
+          durationMinutes: draftDurationMinutes ?? task.duration ?? undefined,
           reminderOffsetMinutes: task.reminder ?? draftReminderOffsetMinutes,
           isRecurring: task.recurring !== null,
           recurringFrequency:
@@ -943,6 +1053,47 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                 onClick={() => setDraftListTarget(null)}
                 aria-label="Clear destination"
                 title="Clear destination"
+              >
+                <X className="size-3" />
+              </button>
+            </div>
+          ) : null}
+
+          {!searchModeActive && activeDurationLabel ? (
+            <div className="flex items-center gap-1 rounded-full border border-border/60 bg-background/80 px-2 py-1 text-[10px] font-extrabold tracking-[0.14em] text-foreground">
+              <Timer className="size-3" />
+              <span>{activeDurationLabel}</span>
+              <button
+                type="button"
+                className={cn(
+                  "ml-1 inline-flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground",
+                  isMobile ? "h-8 w-8" : "h-6 w-6"
+                )}
+                onClick={() => {
+                  setDraftDurationMinutes(null)
+                  setDraftDurationCustomValue("")
+                }}
+                aria-label="Clear duration"
+                title="Clear duration"
+              >
+                <X className="size-3" />
+              </button>
+            </div>
+          ) : null}
+
+          {!searchModeActive && activeTimeLabel ? (
+            <div className="flex items-center gap-1 rounded-full border border-border/60 bg-background/80 px-2 py-1 text-[10px] font-extrabold tracking-[0.14em] text-foreground">
+              <Clock3 className="size-3" />
+              <span>{activeTimeLabel}</span>
+              <button
+                type="button"
+                className={cn(
+                  "ml-1 inline-flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground",
+                  isMobile ? "h-8 w-8" : "h-6 w-6"
+                )}
+                onClick={() => setDraftTime("")}
+                aria-label="Clear time"
+                title="Clear time"
               >
                 <X className="size-3" />
               </button>
@@ -1570,7 +1721,98 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
 
             {/* Bottom: action icons (functional) */}
             <div className="flex flex-wrap items-center gap-1 text-muted-foreground">
-              {/* 1) Alert/Reminder */}
+              {/* 1) Time */}
+              <Popover open={showTimePopover} onOpenChange={setShowTimePopover}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className={cn("size-8 hover:text-foreground", draftTime.trim() && "text-foreground")}
+                    aria-label="Set time"
+                  >
+                    <Clock3 className="size-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  side="bottom"
+                  sideOffset={10}
+                  data-quick-add-surface="true"
+                  className="z-50 w-[240px] rounded-2xl border border-border/60 bg-background/96 p-3 shadow-[0_14px_34px_rgba(0,0,0,0.10)]"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                        Time
+                      </div>
+                      {draftTime.trim() ? (
+                        <button
+                          type="button"
+                          onClick={() => setDraftTime("")}
+                          className="text-[10px] font-medium text-foreground/80 hover:text-foreground"
+                        >
+                          Clear
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {QUICK_ADD_TIME_OPTIONS.map((timeValue) => {
+                        const active = draftTime === timeValue
+                        return (
+                          <button
+                            key={timeValue}
+                            type="button"
+                            onClick={() => {
+                              setDraftTime(timeValue)
+                              setShowTimePopover(false)
+                            }}
+                            className={cn(
+                              "rounded-full px-2 py-2 text-[11px] font-medium transition-colors",
+                              active
+                                ? "bg-foreground text-background"
+                                : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+                            )}
+                          >
+                            {formatTimeDisplayLabel(timeValue)}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    <div className="space-y-2 rounded-2xl bg-muted/35 p-2.5">
+                      <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                        Custom
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="time"
+                          value={draftTime}
+                          onChange={(event) => setDraftTime(event.target.value)}
+                          className="h-8 border-0 bg-background/80 text-[12px] shadow-none focus-visible:ring-1"
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 rounded-full px-3 text-[11px] font-medium text-foreground hover:bg-background"
+                          onClick={() => setShowTimePopover(false)}
+                        >
+                          Done
+                        </Button>
+                      </div>
+                      {draftTime.trim() ? (
+                        <div className="text-[11px] text-muted-foreground">
+                          Selected: {formatTimeDisplayLabel(draftTime)}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+
+              {/* 2) Alert/Reminder */}
               <Popover open={showReminderPopover} onOpenChange={setShowReminderPopover}>
                 <PopoverTrigger asChild>
                   <Button
@@ -1658,7 +1900,124 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                 </PopoverContent>
               </Popover>
 
-              {/* 2) Subtask */}
+              {/* 3) Duration */}
+              <Popover open={showDurationPopover} onOpenChange={setShowDurationPopover}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className={cn("size-8 hover:text-foreground", draftDurationMinutes !== null && "text-foreground")}
+                    aria-label="Set duration"
+                  >
+                    <Timer className="size-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  side="bottom"
+                  sideOffset={10}
+                  data-quick-add-surface="true"
+                  className="z-50 w-[240px] rounded-2xl border border-border/60 bg-background/96 p-3 shadow-[0_14px_34px_rgba(0,0,0,0.10)]"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                        Duration
+                      </div>
+                      {draftDurationMinutes !== null ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDraftDurationMinutes(null)
+                            setDraftDurationCustomValue("")
+                          }}
+                          className="text-[10px] font-medium text-foreground/80 hover:text-foreground"
+                        >
+                          Clear
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {QUICK_ADD_DURATION_OPTIONS.map((minutes) => {
+                        const active = draftDurationMinutes === minutes
+                        return (
+                          <button
+                            key={minutes}
+                            type="button"
+                            onClick={() => {
+                              setDraftDurationMinutes(minutes)
+                              setDraftDurationCustomValue(String(minutes))
+                              setShowDurationPopover(false)
+                            }}
+                            className={cn(
+                              "rounded-full px-2 py-2 text-[11px] font-medium transition-colors",
+                              active
+                                ? "bg-foreground text-background"
+                                : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+                            )}
+                          >
+                            {formatDurationBadgeLabel(minutes)}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    <div className="space-y-2 rounded-2xl bg-muted/35 p-2.5">
+                      <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                        Custom
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          placeholder="15min, 1hr, 1:30"
+                          value={draftDurationCustomValue}
+                          onChange={(event) => setDraftDurationCustomValue(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault()
+                              const minutes = parseDurationInput(draftDurationCustomValue)
+                              if (minutes === null) {
+                                toast("Invalid duration", { duration: 2000 })
+                                return
+                              }
+                              setDraftDurationMinutes(minutes)
+                              setDraftDurationCustomValue(formatDurationLabel(minutes))
+                              setShowDurationPopover(false)
+                            }
+                          }}
+                          className="h-8 border-0 bg-background/80 text-[12px] shadow-none focus-visible:ring-1"
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 rounded-full px-3 text-[11px] font-medium text-foreground hover:bg-background"
+                          onClick={() => {
+                            const minutes = parseDurationInput(draftDurationCustomValue)
+                            if (minutes === null) {
+                              toast("Invalid duration", { duration: 2000 })
+                              return
+                            }
+                            setDraftDurationMinutes(minutes)
+                            setDraftDurationCustomValue(formatDurationLabel(minutes))
+                            setShowDurationPopover(false)
+                          }}
+                        >
+                          Apply
+                        </Button>
+                      </div>
+                      {draftDurationMinutes !== null ? (
+                        <div className="text-[11px] text-muted-foreground">
+                          Selected: {formatDurationLabel(draftDurationMinutes)}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+
+              {/* 4) Subtask */}
               <Button
                 type="button"
                 variant="ghost"
@@ -1670,7 +2029,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                 <ListChecks className="size-4" />
               </Button>
 
-              {/* 3) URL / Phone */}
+              {/* 5) URL / Phone */}
               <Button
                 type="button"
                 variant="ghost"
@@ -1682,7 +2041,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                 <Link2 className="size-4" />
               </Button>
 
-              {/* 4) Urgency */}
+              {/* 6) Urgency */}
               <Popover open={showPriorityPopover} onOpenChange={setShowPriorityPopover}>
                 <PopoverTrigger asChild>
                   <Button
@@ -1726,7 +2085,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                 </PopoverContent>
               </Popover>
 
-              {/* 5) Label */}
+              {/* 7) Label */}
               <Popover open={showLabelPopover} onOpenChange={setShowLabelPopover}>
                 <PopoverTrigger asChild>
                   <Button
@@ -1812,7 +2171,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                 </PopoverContent>
               </Popover>
 
-              {/* 7) Color */}
+              {/* 8) Color */}
               <Popover open={showDraftColorPopover} onOpenChange={setShowDraftColorPopover}>
                 <PopoverTrigger asChild>
                   <Button
@@ -1837,13 +2196,23 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                     palette={preferences.colorPalette}
                     onChange={(color) => {
                       setDraftColor(color)
-                      setShowDraftColorPopover(false)
                     }}
                     onPaletteChange={(palette) => setPreferences({ colorPalette: palette })}
                     onClear={() => setDraftColor(undefined)}
                     title="Color"
                     description="Pick a color from the wheel or choose a saved swatch."
                   />
+                  <div className="mt-3 flex justify-end">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 rounded-full px-3 text-[11px] font-medium"
+                      onClick={() => setShowDraftColorPopover(false)}
+                    >
+                      Done
+                    </Button>
+                  </div>
                 </PopoverContent>
               </Popover>
 
