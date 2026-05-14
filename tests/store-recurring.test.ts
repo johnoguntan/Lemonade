@@ -107,3 +107,51 @@ test("updating a recurring parent clears old incomplete children but keeps compl
   assert.equal(remainingCompletedChild?.completed, true)
   assert.ok(nextMonthChild)
 })
+
+test("updating an optimistic task into a future monthly recurring task generates later months", () => {
+  const baseDate = new Date()
+  const parentId = useLemonadeStore.getState().addCalendarTodo({
+    text: "Pay Rent",
+    completed: false,
+    date: formatLocalDateKey(baseDate),
+    labelIds: [],
+  })
+
+  const nextMonth = addMonths(baseDate, 1)
+  const firstOfNextMonth = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 1)
+  const secondOccurrence = addMonths(firstOfNextMonth, 1)
+
+  useLemonadeStore.getState().updateCalendarTodo(parentId, {
+    date: formatLocalDateKey(firstOfNextMonth),
+    isRecurring: true,
+    recurringFrequency: "monthly",
+  })
+
+  const state = useLemonadeStore.getState()
+  const childDates = state.calendarTodos
+    .filter((todo) => todo.parentId === parentId)
+    .map((todo) => todo.date)
+
+  assert.ok(childDates.includes(formatLocalDateKey(secondOccurrence)))
+})
+
+test("weekly recurring tasks can generate on multiple selected weekdays", () => {
+  const parentDate = new Date("2026-05-14T12:00:00")
+  const parentId = useLemonadeStore.getState().addCalendarTodo({
+    text: "Water Plants",
+    completed: false,
+    date: formatLocalDateKey(parentDate),
+    labelIds: [],
+    isRecurring: true,
+    recurringFrequency: "weekly",
+    recurringDays: [4, 0],
+  })
+
+  const state = useLemonadeStore.getState()
+  const childDates = state.calendarTodos
+    .filter((todo) => todo.parentId === parentId)
+    .map((todo) => todo.date)
+
+  assert.ok(childDates.includes("2026-05-17"))
+  assert.ok(childDates.includes("2026-05-21"))
+})

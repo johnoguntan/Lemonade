@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { createOptimisticTodoId, localTaskParser, normalizeCalendarDateKey, normalizeTodoPriority, parseNaturalLanguageTaskEntries, reconcileOptimisticTaskOrder, todoMatchesSearchFilters, useLemonadeStore, type Todo } from "@/lib/store"
 import { getPlannerTaskDragData, setPlannerTaskDragData } from "@/lib/task-dnd"
+import { resolveParsedRecurringTodoFields } from "@/lib/task-shortcuts"
 import { cn } from "@/lib/utils"
 import { format, isValid, parseISO } from "date-fns"
 import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Flag, GripVertical, PencilLine, Plus, Sparkles, Trash2 } from "lucide-react"
@@ -612,17 +613,7 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
               : []
           )
           const aiPriority: Todo["priority"] = normalizeTodoPriority(primaryTask.priority ?? parsedTask.priority)
-          const aiRecurringFrequency =
-            primaryTask.recurringFrequency === "daily" ||
-            primaryTask.recurringFrequency === "weekday" ||
-            primaryTask.recurringFrequency === "weekly" ||
-            primaryTask.recurringFrequency === "monthly"
-              ? primaryTask.recurringFrequency
-              : undefined
-          const aiRecurringInterval =
-            typeof primaryTask.recurringInterval === "number" && Number.isFinite(primaryTask.recurringInterval) && primaryTask.recurringInterval > 1
-              ? Math.floor(primaryTask.recurringInterval)
-              : undefined
+          const recurringFields = resolveParsedRecurringTodoFields(primaryTask)
 
           updateCalendarTodo(tempId, {
             text: aiTitle,
@@ -650,16 +641,7 @@ export function TimelineView({ date, onNavigate }: TimelineViewProps) {
               typeof primaryTask.reminder === "number" && Number.isFinite(primaryTask.reminder) && primaryTask.reminder >= 0
                 ? Math.floor(primaryTask.reminder)
                 : undefined,
-            isRecurring: primaryTask.isRecurring === true,
-            recurringFrequency: aiRecurringFrequency,
-            recurringDays: Array.isArray(primaryTask.recurringDays)
-              ? primaryTask.recurringDays.filter((day): day is number => typeof day === "number")
-              : undefined,
-            recurringInterval: aiRecurringInterval,
-            recurringCustomText:
-              typeof primaryTask.recurringCustomText === "string" && primaryTask.recurringCustomText.trim()
-                ? primaryTask.recurringCustomText.trim()
-                : undefined,
+            ...recurringFields,
             isHeading: aiTitle === aiTitle.toUpperCase() && aiTitle.length > 2,
             isSyncing: false,
             syncStatus: undefined,

@@ -469,6 +469,10 @@ export function applyCloudSnapshotToStore(snapshot: CloudSnapshot) {
       lastCreatedTodoId: null,
     }
   })
+
+  // Remote snapshots may contain only the recurring parent tasks.
+  // Always regenerate derived future instances after applying server state.
+  useLemonadeStore.getState().generateRecurringInstances()
 }
 
 export function readPendingCloudQueue(): PendingCloudQueue | null {

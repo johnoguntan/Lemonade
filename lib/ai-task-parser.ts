@@ -15,8 +15,9 @@ export type AiParsedTask = {
   location: string | null
   duration: number | null
   reminder: number | null
-  recurring: "daily" | "weekly" | "monthly" | "yearly" | null
-  recurringDay: string | null
+  recurring: "daily" | "weekday" | "weekly" | "monthly" | "yearly" | null
+  recurringDay: number | null
+  recurringDays?: number[]
   notes: string | null
   url: string | null
   phone: string | null
@@ -32,6 +33,15 @@ export type AiParsedTaskRecord = Record<string, unknown> & {
 
 const coerceStringOrNull = (value: unknown) => (typeof value === "string" ? value : null)
 const coerceNumberOrNull = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : null)
+const coerceWeekdays = (value: unknown) => {
+  if (!Array.isArray(value)) return undefined
+  const days = value
+    .filter((day): day is number => typeof day === "number" && Number.isFinite(day))
+    .map((day) => Math.floor(day))
+    .filter((day) => day >= 0 && day <= 6)
+
+  return days.length > 0 ? Array.from(new Set(days)) : undefined
+}
 const coercePriority = (value: unknown): AiParsedTask["priority"] =>
   value === "urgent" || value === "important" || value === "normal" ? value : "normal"
 
@@ -155,12 +165,14 @@ export async function aiParseSingleTask(input: string, signal?: AbortSignal): Pr
     reminder: coerceNumberOrNull(data.reminder),
     recurring:
       data.recurring === "daily" ||
+      data.recurring === "weekday" ||
       data.recurring === "weekly" ||
       data.recurring === "monthly" ||
       data.recurring === "yearly"
         ? data.recurring
         : null,
-    recurringDay: coerceStringOrNull(data.recurringDay),
+    recurringDay: coerceNumberOrNull(data.recurringDay),
+    recurringDays: coerceWeekdays(data.recurringDays),
     notes: coerceStringOrNull(data.notes),
     url: coerceStringOrNull(data.url),
     phone: coerceStringOrNull(data.phone),

@@ -10,6 +10,17 @@ const WEEKDAY_INDEX_BY_NAME: Record<string, number> = {
   saturday: 6,
 };
 
+const normalizeWeekdayName = (value: string | null | undefined) => {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(WEEKDAY_INDEX_BY_NAME, normalized) ? normalized : null;
+};
+
+const normalizeWeekdayIndex = (value: string | null | undefined) => {
+  const normalized = normalizeWeekdayName(value);
+  return normalized ? WEEKDAY_INDEX_BY_NAME[normalized] : null;
+};
+
 const explicitMarkerPattern =
   /(?:\bcall:|📞|\blink:|\burl:|🔗|\bat:|\bloc:|📍|\bduration:|\bfor:|⏱|\bremind:|🔔|\bnote:|📝|\battach:|📎)/i;
 const dateTimeBoundaryPattern =
@@ -27,6 +38,13 @@ export type ExtractedShortcutFields = {
   attachment: string | null;
 };
 
+type ParsedRecurringValue = "daily" | "weekday" | "weekly" | "monthly" | "yearly" | null;
+type StoreRecurringFrequency = "daily" | "weekday" | "weekly" | "monthly";
+
+const WEEKDAY_NAME_BY_INDEX = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+const WEEKDAY_NAMES_PATTERN = "monday|tuesday|wednesday|thursday|friday|saturday|sunday";
+const DUE_TODAY_PRIORITY_PATTERN = /\b(?:due|deadline|by|before)\s+(?:today|tonight|end\s+of\s+day|eod)\b|\b(?:today|tonight)\s+(?:deadline|due)\b/i;
+
 export const hasShortcutFields = (fields: ExtractedShortcutFields) =>
   Boolean(
     fields.phone ||
@@ -37,6 +55,108 @@ export const hasShortcutFields = (fields: ExtractedShortcutFields) =>
     fields.notes ||
     fields.attachment
   );
+
+const coercePositiveInteger = (value: unknown) => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const normalized = Math.floor(value);
+  return normalized > 0 ? normalized : null;
+};
+
+const coerceRecurringDay = (value: unknown, recurring: ParsedRecurringValue) => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const normalized = Math.floor(value);
+
+  if (recurring === "weekly") {
+    return normalized >= 0 && normalized <= 6 ? normalized : null;
+  }
+
+  if (recurring === "monthly") {
+    return normalized >= 1 && normalized <= 31 ? normalized : null;
+  }
+
+  return null;
+};
+
+const coerceRecurringDays = (value: unknown) => {
+  if (!Array.isArray(value)) return undefined;
+  const days = value
+    .filter((day): day is number => typeof day === "number" && Number.isFinite(day))
+    .map((day) => Math.floor(day))
+    .filter((day) => day >= 0 && day <= 6);
+
+  return days.length > 0 ? Array.from(new Set(days)) : undefined;
+};
+
+const coerceRecurringValue = (value: unknown): ParsedRecurringValue => {
+  if (
+    value === "daily" ||
+    value === "weekday" ||
+    value === "weekly" ||
+    value === "monthly" ||
+    value === "yearly"
+  ) {
+    return value;
+  }
+
+  return null;
+};
+
+const getRecurringWeekdayIndexes = (input: string) => {
+  const normalized = input.toLowerCase();
+  const weekdayListMatch = normalized.match(
+    new RegExp(`\\b(?:every|each)\\s+([a-z,\\s]+?)(?:\\s+at\\b|[.!?;:]|$)`, "i")
+  );
+  if (!weekdayListMatch) return [];
+
+  const weekdays = Array.from(
+    weekdayListMatch[1].matchAll(new RegExp(`\\b(${WEEKDAY_NAMES_PATTERN})\\b`, "gi"))
+  )
+    .map((match) => normalizeWeekdayIndex(match[1]))
+    .filter((day): day is number => day !== null);
+
+  return Array.from(new Set(weekdays));
+};
+
+export const resolveParsedRecurringTodoFields = (task: Record<string, unknown>) => {
+  const recurring = coerceRecurringValue(task.recurring) ?? coerceRecurringValue(task.recurringFrequency);
+  const recurringDay = coerceRecurringDay(task.recurringDay, recurring);
+  const explicitRecurringDays = coerceRecurringDays(task.recurringDays);
+  const recurringInterval = coercePositiveInteger(task.recurringInterval);
+  const existingCustomText =
+    typeof task.recurringCustomText === "string" && task.recurringCustomText.trim().length > 0
+      ? task.recurringCustomText.trim()
+      : undefined;
+  const weeklyDayLabel =
+    recurring === "weekly" && recurringDay !== null ? WEEKDAY_NAME_BY_INDEX[recurringDay] : null;
+  const recurringFrequency: StoreRecurringFrequency | undefined =
+    recurring === "daily" || recurring === "weekday" || recurring === "weekly" || recurring === "monthly"
+      ? recurring
+      : undefined;
+
+  return {
+    isRecurring: task.isRecurring === true || recurring !== null,
+    recurringFrequency,
+    recurringDays:
+      explicitRecurringDays ??
+      (recurring === "weekly" && recurringDay !== null
+        ? [recurringDay]
+        : recurring === "weekday"
+          ? [1, 2, 3, 4, 5]
+          : undefined),
+    recurringInterval: recurringInterval && recurringInterval > 1 ? recurringInterval : undefined,
+    recurringCustomText:
+      existingCustomText ??
+      (recurring === "yearly"
+        ? "yearly"
+        : weeklyDayLabel
+          ? `every ${weeklyDayLabel.toLowerCase()}`
+          : recurring === "monthly" && recurringDay !== null
+            ? `every month on day ${recurringDay}`
+            : recurring === "weekday"
+              ? "every weekday"
+              : undefined),
+  };
+};
 
 const formatDateKey = (date: Date) => format(date, "yyyy-MM-dd");
 
@@ -110,6 +230,24 @@ const addDaysUtc = (date: Date, amount: number) => {
   return next;
 };
 
+const getNextMonthlyOccurrenceUtc = (referenceDate: Date, dayOfMonth: number) => {
+  const safeDay = Math.max(1, Math.min(dayOfMonth, 31));
+  const year = referenceDate.getUTCFullYear();
+  const month = referenceDate.getUTCMonth();
+  const currentDay = referenceDate.getUTCDate();
+
+  if (safeDay > currentDay) {
+    const daysInCurrentMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    return new Date(Date.UTC(year, month, Math.min(safeDay, daysInCurrentMonth), 12, 0, 0, 0));
+  }
+
+  const nextMonthDate = new Date(Date.UTC(year, month + 1, 1, 12, 0, 0, 0));
+  const nextMonthYear = nextMonthDate.getUTCFullYear();
+  const nextMonth = nextMonthDate.getUTCMonth();
+  const daysInNextMonth = new Date(Date.UTC(nextMonthYear, nextMonth + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(nextMonthYear, nextMonth, Math.min(safeDay, daysInNextMonth), 12, 0, 0, 0));
+};
+
 export const detectFallbackDate = (input: string, referenceDateKey: string) => {
   const normalized = input.toLowerCase();
   const referenceDate = new Date(`${referenceDateKey}T12:00:00.000Z`);
@@ -120,6 +258,17 @@ export const detectFallbackDate = (input: string, referenceDateKey: string) => {
 
   if (/\btomorrow\b/.test(normalized)) {
     return formatDateKey(addDaysUtc(referenceDate, 1));
+  }
+
+  const monthlyOrdinalMatch = normalized.match(
+    /\b(?:on\s+)?the\s+(\d{1,2})(?:st|nd|rd|th)\s+of\s+(?:every|each)\s+month\b|\b(?:every|each)\s+month\s+on\s+the\s+(\d{1,2})(?:st|nd|rd|th)\b|\b(?:every|each)\s+(\d{1,2})(?:st|nd|rd|th)\s+of\s+the\s+month\b/
+  );
+  if (monthlyOrdinalMatch) {
+    const matchedDay = monthlyOrdinalMatch[1] ?? monthlyOrdinalMatch[2] ?? monthlyOrdinalMatch[3];
+    const dayOfMonth = Number.parseInt(matchedDay ?? "", 10);
+    if (Number.isFinite(dayOfMonth) && dayOfMonth >= 1 && dayOfMonth <= 31) {
+      return formatDateKey(getNextMonthlyOccurrenceUtc(referenceDate, dayOfMonth));
+    }
   }
 
   const weekdayMatch = normalized.match(/\b(?:(next|this)\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/);
@@ -163,6 +312,97 @@ export const detectFallbackTime = (input: string) => {
   }
 
   return null;
+};
+
+export const detectRecurringPattern = (input: string) => {
+  const normalized = input.toLowerCase();
+
+  const monthlyOrdinalMatch = normalized.match(
+    /\b(?:on\s+)?the\s+(\d{1,2})(?:st|nd|rd|th)\s+of\s+(?:every|each)\s+month\b|\b(?:every|each)\s+month\s+on\s+the\s+(\d{1,2})(?:st|nd|rd|th)\b|\b(?:every|each)\s+(\d{1,2})(?:st|nd|rd|th)\s+of\s+the\s+month\b/
+  );
+  if (monthlyOrdinalMatch) {
+    const matchedDay = monthlyOrdinalMatch[1] ?? monthlyOrdinalMatch[2] ?? monthlyOrdinalMatch[3];
+    const dayOfMonth = Number.parseInt(matchedDay ?? "", 10);
+    if (Number.isFinite(dayOfMonth) && dayOfMonth >= 1 && dayOfMonth <= 31) {
+      return {
+        recurring: "monthly" as const,
+        recurringDay: dayOfMonth,
+      };
+    }
+  }
+
+  if (/\bevery\s+weekday\b|\beach\s+weekday\b/.test(normalized)) {
+    return {
+      recurring: "weekday" as const,
+      recurringDay: null,
+      recurringDays: [1, 2, 3, 4, 5],
+    };
+  }
+
+  const recurringWeekdays = getRecurringWeekdayIndexes(input);
+  if (recurringWeekdays.length > 0) {
+    return {
+      recurring: "weekly" as const,
+      recurringDay: recurringWeekdays[0] ?? null,
+      recurringDays: recurringWeekdays,
+    };
+  }
+
+  if (/\bdaily\b|\bevery\s+day\b|\beach\s+day\b|\beveryday\b/.test(normalized)) {
+    return {
+      recurring: "daily" as const,
+      recurringDay: null,
+      recurringDays: undefined,
+    };
+  }
+
+  if (/\bmonthly\b|\bevery\s+month\b|\beach\s+month\b/.test(normalized)) {
+    return {
+      recurring: "monthly" as const,
+      recurringDay: null,
+      recurringDays: undefined,
+    };
+  }
+
+  if (/\byearly\b|\bannually\b|\bevery\s+year\b|\beach\s+year\b/.test(normalized)) {
+    return {
+      recurring: "yearly" as const,
+      recurringDay: null,
+      recurringDays: undefined,
+    };
+  }
+
+  const weeklyWeekdayMatch = normalized.match(
+    /\b(?:every|each)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/
+  );
+  if (weeklyWeekdayMatch) {
+    return {
+      recurring: "weekly" as const,
+      recurringDay: normalizeWeekdayIndex(weeklyWeekdayMatch[1]),
+      recurringDays:
+        normalizeWeekdayIndex(weeklyWeekdayMatch[1]) !== null
+          ? [normalizeWeekdayIndex(weeklyWeekdayMatch[1]) as number]
+          : undefined,
+    };
+  }
+
+  if (/\bweekly\b|\bevery\s+week\b|\beach\s+week\b/.test(normalized)) {
+    return {
+      recurring: "weekly" as const,
+      recurringDay: null,
+      recurringDays: undefined,
+    };
+  }
+
+  return {
+    recurring: null,
+    recurringDay: null,
+    recurringDays: undefined,
+  };
+};
+
+export const detectImplicitTaskPriority = (input: string) => {
+  return DUE_TODAY_PRIORITY_PATTERN.test(input) ? "important" as const : undefined;
 };
 
 export const extractExplicitSignals = (rawInput: string) => {
@@ -258,14 +498,33 @@ export const buildHeuristicParsedTask = (
   referenceDateKey: string,
   explicit: ExtractedShortcutFields,
 ) => {
+  const recurrence = detectRecurringPattern(rawInput);
   const titleBase = cleanShortcutTitle(extractExplicitSignals(rawInput).inputForModel || rawInput, explicit);
   const title = titleBase
+    .replace(/\bset\s+to\s+repeat\b/gi, " ")
+    .replace(/\brepeat\b/gi, " ")
+    .replace(/\b(?:every|each)\s+weekday\b/gi, " ")
+    .replace(/\b(?:every|each)\s+day\b/gi, " ")
+    .replace(/\beveryday\b/gi, " ")
+    .replace(/\b(?:every|each)\s+week\b/gi, " ")
+    .replace(/\b(?:every|each)\s+month\b/gi, " ")
+    .replace(/\b(?:every|each)\s+year\b/gi, " ")
+    .replace(new RegExp(`\\b(?:every|each)\\s+(?:${WEEKDAY_NAMES_PATTERN})(?:\\s*(?:,|and)\\s*(?:${WEEKDAY_NAMES_PATTERN}))+`, "gi"), " ")
+    .replace(/\b(?:every|each)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, " ")
+    .replace(/\b(?:on\s+)?the\s+\d{1,2}(?:st|nd|rd|th)\s+of\s+(?:every|each)\s+month\b/gi, " ")
+    .replace(/\b(?:every|each)\s+month\s+on\s+the\s+\d{1,2}(?:st|nd|rd|th)\b/gi, " ")
+    .replace(/\b(?:every|each)\s+\d{1,2}(?:st|nd|rd|th)\s+of\s+the\s+month\b/gi, " ")
+    .replace(/\bon\s+the\s+\d{1,2}(?:st|nd|rd|th)\s+of\b/gi, " ")
+    .replace(/\b(daily|weekly|monthly|yearly|annually)\b/gi, " ")
     .replace(/\b(today|tomorrow|tonight)\b/gi, " ")
     .replace(/\b(this|next)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, " ")
-    .replace(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, " ")
+    .replace(/\bon\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, " ")
+    .replace(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b(?=\s+at\b)/gi, " ")
     .replace(/\b\d{1,2}(?::\d{2})?\s*(am|pm)\b/gi, " ")
     .replace(/\b\d{1,2}:\d{2}\b/g, " ")
-    .replace(/\b(at|on|by|for)\b\s*$/i, " ")
+    .replace(/\bdue\b\s*[.!?]?$/i, " ")
+    .replace(/\b(at|on|by|for|due)\b\s*$/i, " ")
+    .replace(/\s*[:,-]\s*$/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   if (!title) return null;
@@ -274,12 +533,13 @@ export const buildHeuristicParsedTask = (
     title,
     date: detectFallbackDate(rawInput, referenceDateKey) ?? referenceDateKey,
     time: detectFallbackTime(rawInput),
-    priority: "normal" as const,
+    priority: detectImplicitTaskPriority(rawInput) ?? "normal" as const,
     location: explicit.location,
     duration: explicit.duration,
     reminder: explicit.reminder,
-    recurring: null,
-    recurringDay: null,
+    recurring: recurrence.recurring,
+    recurringDay: recurrence.recurringDay,
+    recurringDays: recurrence.recurringDays,
     notes: explicit.notes,
     url: explicit.url,
     phone: explicit.phone,

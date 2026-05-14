@@ -4,11 +4,12 @@ import { Suspense, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/client"
+import { normalizeAuthNextPath, resolveAuthRedirectOrigin } from "@/lib/auth-redirect"
 
 function LoginPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const nextPath = searchParams.get("next") || "/"
+  const nextPath = normalizeAuthNextPath(searchParams.get("next"))
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -48,7 +49,7 @@ function LoginPageInner() {
         options: {
           emailRedirectTo:
             typeof window !== "undefined"
-              ? `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`
+              ? `${resolveAuthRedirectOrigin(window.location.origin)}/auth/callback?next=${encodeURIComponent(nextPath)}`
               : undefined,
         },
       })

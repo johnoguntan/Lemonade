@@ -24,6 +24,7 @@ import { Calendar } from "@/components/ui/calendar"
 import { cn } from "@/lib/utils"
 import { aiParseSingleTask, type AiParsedTask } from "@/lib/ai-task-parser"
 import { ColorPickerPanel } from "./color-picker-panel"
+import { buildHeuristicParsedTask, detectRecurringPattern, extractExplicitSignals, resolveParsedRecurringTodoFields } from "@/lib/task-shortcuts"
 import {
   DEFAULT_TASK_SEARCH_FILTERS,
   createOptimisticTodoId,
@@ -31,7 +32,7 @@ import {
   parseLocalDateKey,
   useLemonadeStore,
 } from "@/lib/store"
-import { format, isValid, parseISO } from "date-fns"
+import { addMonths, format, isValid, parseISO } from "date-fns"
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
 import { toast } from "sonner"
 import { TASK_ICON_LIBRARY } from "@/lib/task-icons"
@@ -46,6 +47,7 @@ interface HeaderProps {
 const AI_PARSE_TIMEOUT_MS = 15000
 const QUICK_ADD_DURATION_OPTIONS = [15, 30, 45, 60, 90, 120] as const
 const QUICK_ADD_TIME_OPTIONS = ["09:00", "11:00", "13:00", "15:00", "17:00", "19:00"] as const
+const WEEKDAY_NAME_BY_INDEX = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const
 
 const addDays = (date: Date, amount: number) => {
   const nextDate = new Date(date)
@@ -151,6 +153,73 @@ const formatTimeDisplayLabel = (value: string) => {
   const suffix = hours >= 12 ? "PM" : "AM"
   const displayHours = hours % 12 || 12
   return minutes === 0 ? `${displayHours}${suffix}` : `${displayHours}:${match[2]}${suffix}`
+}
+
+const resolveRecurringTodoFields = (task: AiParsedTask) => {
+  return resolveParsedRecurringTodoFields(task as unknown as Record<string, unknown>)
+}
+
+const buildRecurringSeriesPreview = (task: AiParsedTask, dateKey: string | null) => {
+  if (!task.recurring || !dateKey) {
+    return null
+  }
+
+  const start = parseISO(dateKey)
+  if (!isValid(start)) {
+    return null
+  }
+
+  const dates: Date[] = [start]
+
+  if (task.recurring === "daily") {
+    dates.push(addDays(start, 1), addDays(start, 2))
+  } else if (task.recurring === "weekday") {
+    let cursor = start
+    while (dates.length < 3) {
+      cursor = addDays(cursor, 1)
+      if (cursor.getDay() !== 0 && cursor.getDay() !== 6) {
+        dates.push(cursor)
+      }
+    }
+  } else if (task.recurring === "weekly") {
+    const recurringDays = Array.isArray(task.recurringDays) && task.recurringDays.length > 0
+      ? new Set(task.recurringDays)
+      : null
+
+    if (recurringDays) {
+      let cursor = start
+      while (dates.length < 3) {
+        cursor = addDays(cursor, 1)
+        if (recurringDays.has(cursor.getDay())) {
+          dates.push(cursor)
+        }
+      }
+    } else {
+      dates.push(addDays(start, 7), addDays(start, 14))
+    }
+  } else if (task.recurring === "monthly") {
+    dates.push(addMonths(start, 1), addMonths(start, 2))
+  } else if (task.recurring === "yearly") {
+    const nextYear = new Date(start)
+    nextYear.setFullYear(nextYear.getFullYear() + 1)
+    const yearAfter = new Date(start)
+    yearAfter.setFullYear(yearAfter.getFullYear() + 2)
+    dates.push(nextYear, yearAfter)
+  }
+
+  const scheduleLabel =
+    task.recurring === "weekday"
+      ? "Repeats every weekday"
+      : task.recurring === "weekly" && Array.isArray(task.recurringDays) && task.recurringDays.length > 1
+        ? `Repeats every ${task.recurringDays.map((day) => WEEKDAY_NAME_BY_INDEX[day]?.toLowerCase()).filter(Boolean).join(" and ")}`
+      : task.recurring === "weekly" && typeof task.recurringDay === "number" && task.recurringDay >= 0 && task.recurringDay <= 6
+        ? `Repeats every ${WEEKDAY_NAME_BY_INDEX[task.recurringDay].toLowerCase()}`
+        : task.recurring === "monthly" && typeof task.recurringDay === "number"
+          ? `Repeats every month on day ${task.recurringDay}`
+        : `Repeats ${task.recurring}`
+
+  const previewDates = dates.map((date) => format(date, "MMM d"))
+  return `${scheduleLabel}. Upcoming: ${previewDates.join(", ")}`
 }
 
 export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewModeChange: _onViewModeChange }: HeaderProps) {
@@ -558,6 +627,34 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
   const activeDurationLabel = formatDurationBadgeLabel(draftDurationMinutes)
   const activeTimeLabel = draftTime.trim() ? formatTimeDisplayLabel(draftTime) : ""
 
+  const buildDeterministicQuickAddTask = useCallback((rawInput: string) => {
+    const trimmed = rawInput.trim()
+    if (!trimmed) {
+      return null
+    }
+
+    const extracted = extractExplicitSignals(trimmed)
+    const heuristicTask = buildHeuristicParsedTask(
+      extracted.inputForModel || trimmed,
+      todayKey,
+      extracted.explicit
+    )
+
+    if (!heuristicTask) {
+      return null
+    }
+
+    const hasRecurringIntent = detectRecurringPattern(trimmed).recurring !== null
+    const hasDeterministicTime = Boolean(heuristicTask.time)
+    const hasDeterministicDate = Boolean(heuristicTask.date && heuristicTask.date !== todayKey)
+    const hasExplicitDuration = heuristicTask.duration !== null
+    const hasImplicitPriority = heuristicTask.priority !== "normal"
+
+    return hasRecurringIntent || hasDeterministicTime || hasDeterministicDate || hasExplicitDuration || hasImplicitPriority
+      ? heuristicTask
+      : null
+  }, [todayKey])
+
   const createTaskFromParsedPreview = (task: AiParsedTask) => {
     const title = task.title.trim()
     if (!title) return
@@ -579,6 +676,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     const labelIds = Array.from(new Set([...parsedLabelIds, ...draftLabelIds]))
     const notes = [task.notes, task.attachment ? `Attachment: ${task.attachment}` : null, draftNotes].filter(Boolean).join("\n").trim()
     const resolvedDate = getResolvedParsedDate(task)
+    const recurringFields = resolveRecurringTodoFields(task)
 
     addCalendarTodo({
       id: createOptimisticTodoId("header"),
@@ -596,20 +694,15 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       location: task.location ?? undefined,
       durationMinutes: draftDurationMinutes ?? task.duration ?? undefined,
       reminderOffsetMinutes: task.reminder ?? draftReminderOffsetMinutes,
-      isRecurring: task.recurring !== null,
-      recurringFrequency:
-        task.recurring === "daily" || task.recurring === "weekly" || task.recurring === "monthly"
-          ? task.recurring
-          : undefined,
-      recurringCustomText:
-        task.recurring === "yearly"
-          ? "yearly"
-          : task.recurringDay
-            ? `every ${task.recurringDay}`
-            : undefined,
+      ...recurringFields,
       isSyncing: false,
       syncStatus: undefined,
     })
+
+    const recurringPreview = buildRecurringSeriesPreview(task, resolvedDate)
+    if (recurringPreview) {
+      toast(recurringPreview, { duration: 4000 })
+    }
 
     setQuickAddText("")
     resetPerTaskDraft()
@@ -644,6 +737,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     const notes = [task.notes, task.attachment ? `Attachment: ${task.attachment}` : null, draftNotes].filter(Boolean).join("\n").trim()
     const trimmedLink = draftLink.trim()
     const resolvedDate = draftDateKey
+    const recurringFields = resolveRecurringTodoFields(task)
 
     addCalendarTodo({
       id: createOptimisticTodoId("header"),
@@ -661,20 +755,15 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       location: task.location ?? undefined,
       durationMinutes: draftDurationMinutes ?? task.duration ?? undefined,
       reminderOffsetMinutes: draftReminderOffsetMinutes,
-      isRecurring: task.recurring !== null,
-      recurringFrequency:
-        task.recurring === "daily" || task.recurring === "weekly" || task.recurring === "monthly"
-          ? task.recurring
-          : undefined,
-      recurringCustomText:
-        task.recurring === "yearly"
-          ? "yearly"
-          : task.recurringDay
-            ? `every ${task.recurringDay}`
-            : undefined,
+      ...recurringFields,
       isSyncing: false,
       syncStatus: undefined,
     })
+
+    const recurringPreview = buildRecurringSeriesPreview(task, resolvedDate)
+    if (recurringPreview) {
+      toast(recurringPreview, { duration: 4000 })
+    }
 
     setQuickAddText("")
     resetPerTaskDraft()
@@ -739,6 +828,12 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
 
     if (editingParsedTask) {
       createTaskFromEditedParsedDraft(editingParsedTask)
+      return
+    }
+
+    const deterministicTask = buildDeterministicQuickAddTask(rawInputString)
+    if (deterministicTask) {
+      createTaskFromParsedPreview(deterministicTask)
       return
     }
 
@@ -814,6 +909,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
         const labelIds = Array.from(new Set([...parsedLabelIds, ...draftLabelIds]))
         const notes = [task.notes, task.attachment ? `Attachment: ${task.attachment}` : null, draftNotes].filter(Boolean).join("\n").trim()
         const resolvedDate = getResolvedParsedDate(task)
+        const recurringFields = resolveRecurringTodoFields(task)
 
         updateCalendarTodo(optimisticId, {
           text: title,
@@ -826,18 +922,13 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
           location: task.location ?? undefined,
           durationMinutes: draftDurationMinutes ?? task.duration ?? undefined,
           reminderOffsetMinutes: task.reminder ?? draftReminderOffsetMinutes,
-          isRecurring: task.recurring !== null,
-          recurringFrequency:
-            task.recurring === "daily" || task.recurring === "weekly" || task.recurring === "monthly"
-              ? task.recurring
-              : undefined,
-          recurringCustomText:
-            task.recurring === "yearly"
-              ? "yearly"
-              : task.recurringDay
-                ? `every ${task.recurringDay}`
-                : undefined,
+          ...recurringFields,
         })
+
+        const recurringPreview = buildRecurringSeriesPreview(task, resolvedDate)
+        if (recurringPreview) {
+          toast(recurringPreview, { duration: 4000 })
+        }
       })
       .catch(() => {
         // Keep the optimistic task as-is if parsing fails.

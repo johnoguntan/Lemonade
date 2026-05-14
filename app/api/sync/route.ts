@@ -439,248 +439,30 @@ export async function POST(request: Request) {
       taskLabelCount: payload.taskLabels.length,
     })
 
-    logQuery("users.upsert", { userId: user.id })
-    const userUpsert = await admin.from("users").upsert({
-      id: user.id,
-      email: user.email,
-      display_name: payload.profile.displayName ?? user.user_metadata?.display_name ?? null,
+    logQuery("sync_user_snapshot.rpc", {
+      userId: user.id,
+      taskCount: payload.tasks.length,
+      labelCount: payload.labels.length,
+      taskLabelCount: payload.taskLabels.length,
+      listCount: payload.lists.length,
+      listItemCount: payload.listItems.length,
+      shoppingReturnCount: payload.shoppingReturns.length,
     })
-    if (userUpsert.error) {
-      console.error("/api/sync query users.upsert failed:", userUpsert.error)
-      throw userUpsert.error
-    }
-
-    logQuery("tasks.select existing", { userId: user.id })
-    const { data: existingTasks, error: existingTasksError } = await admin.from("tasks").select("id").eq("user_id", user.id)
-    if (existingTasksError) {
-      console.error("/api/sync query tasks.select existing failed:", existingTasksError)
-      throw existingTasksError
-    }
-
-    logQuery("lists.select existing", { userId: user.id })
-    const { data: existingLists, error: existingListsError } = await admin.from("lists").select("id").eq("user_id", user.id)
-    if (existingListsError) {
-      console.error("/api/sync query lists.select existing failed:", existingListsError)
-      throw existingListsError
-    }
-
-    const existingTaskIds = (existingTasks ?? []).map((task) => task.id)
-    const existingListIds = (existingLists ?? []).map((list) => list.id)
-    const payloadTaskIds = new Set(payload.tasks.map((task) => task.id))
-    const removedTaskIds = existingTaskIds.filter((taskId) => !payloadTaskIds.has(taskId))
-    logStep("POST existing ids loaded", {
-      existingTaskCount: existingTaskIds.length,
-      existingListCount: existingListIds.length,
-      removedTaskCount: removedTaskIds.length,
+    const syncResult = await admin.rpc("sync_user_snapshot", {
+      p_user_id: user.id,
+      p_email: user.email ?? payload.profile.email ?? null,
+      p_display_name: payload.profile.displayName ?? user.user_metadata?.display_name ?? null,
+      p_tasks: payload.tasks,
+      p_labels: payload.labels,
+      p_task_labels: payload.taskLabels,
+      p_lists: payload.lists,
+      p_list_items: payload.listItems,
+      p_shopping_returns: payload.shoppingReturns,
     })
 
-    if (existingTaskIds.length > 0) {
-      logQuery("task_labels.delete existing", { userId: user.id, taskCount: existingTaskIds.length })
-      const result = await admin.from("task_labels").delete().in("task_id", existingTaskIds)
-      if (result.error) {
-        console.error("/api/sync query task_labels.delete existing failed:", result.error)
-        throw result.error
-      }
-    }
-
-    if (existingListIds.length > 0) {
-      logQuery("list_items.delete existing", { userId: user.id, listCount: existingListIds.length })
-      const result = await admin.from("list_items").delete().in("list_id", existingListIds)
-      if (result.error) {
-        console.error("/api/sync query list_items.delete existing failed:", result.error)
-        throw result.error
-      }
-    }
-
-    logQuery("bulk delete current rows", { userId: user.id })
-    const [shoppingDelete, labelsDelete, listsDelete] = await Promise.all([
-      admin.from("shopping_returns").delete().eq("user_id", user.id),
-      admin.from("labels").delete().eq("user_id", user.id),
-      admin.from("lists").delete().eq("user_id", user.id),
-    ])
-
-    if (shoppingDelete.error) {
-      console.error("/api/sync query shopping_returns.delete failed:", shoppingDelete.error)
-      throw shoppingDelete.error
-    }
-    if (labelsDelete.error) {
-      console.error("/api/sync query labels.delete failed:", labelsDelete.error)
-      throw labelsDelete.error
-    }
-    if (listsDelete.error) {
-      console.error("/api/sync query lists.delete failed:", listsDelete.error)
-      throw listsDelete.error
-    }
-
-    if (payload.labels.length > 0) {
-      logQuery("labels.insert", { userId: user.id, count: payload.labels.length })
-      const { error } = await admin.from("labels").upsert(
-        payload.labels.map((label) => ({
-          id: label.id,
-          user_id: user.id,
-          name: label.name,
-          color: label.color,
-          created_at: label.createdAt ?? new Date().toISOString(),
-        })),
-        { onConflict: "id" }
-      )
-      if (error) {
-        console.error("/api/sync query labels.insert failed:", error)
-        throw error
-      }
-    }
-
-    if (payload.tasks.length > 0) {
-      logQuery("tasks.insert", {
-        userId: user.id,
-        count: payload.tasks.length,
-        preservesScheduledNotificationIds: true,
-      })
-
-      const { error } = await admin.from("tasks").upsert(
-        payload.tasks.map((task) => ({
-          id: task.id,
-          user_id: user.id,
-          title: task.title,
-          date: task.date,
-          time: task.time,
-          priority: task.priority,
-          completed: task.completed,
-          completed_at: task.completedAt,
-          notes: task.notes,
-          location: task.location,
-          duration: task.duration,
-          url: task.url,
-          photo_url: task.photoUrl,
-          color: task.color,
-          icon: task.icon,
-          recurring: task.recurring,
-          recurring_day: task.recurringDay,
-          reminder: task.reminder,
-          snoozed_until: task.snoozedUntil,
-          parent_task_id: task.parentTaskId,
-          order_index: task.orderIndex,
-          when_added: task.whenAdded ?? new Date().toISOString(),
-          created_at: task.createdAt ?? new Date().toISOString(),
-          updated_at: task.updatedAt ?? new Date().toISOString(),
-          end_of_day: task.endOfDay,
-          is_heading: task.isHeading,
-          recurring_days: task.recurringDays,
-          recurring_interval: task.recurringInterval,
-          recurring_custom_text: task.recurringCustomText,
-          subtasks: task.subtasks,
-        })),
-        { onConflict: "id" }
-      )
-      if (error) {
-        console.error("/api/sync query tasks.insert failed:", error)
-        throw error
-      }
-    }
-
-    if (removedTaskIds.length > 0) {
-      logQuery("scheduled_notifications.detach removed tasks", { userId: user.id, count: removedTaskIds.length })
-      const detachResult = await admin
-        .from("scheduled_notifications")
-        .update({ task_id: null })
-        .eq("user_id", user.id)
-        .in("task_id", removedTaskIds)
-
-      if (detachResult.error) {
-        console.error("/api/sync query scheduled_notifications.detach removed tasks failed:", detachResult.error)
-        throw detachResult.error
-      }
-
-      logQuery("tasks.delete removed", { userId: user.id, count: removedTaskIds.length })
-      const deleteResult = await admin
-        .from("tasks")
-        .delete()
-        .eq("user_id", user.id)
-        .in("id", removedTaskIds)
-
-      if (deleteResult.error) {
-        console.error("/api/sync query tasks.delete removed failed:", deleteResult.error)
-        throw deleteResult.error
-      }
-    }
-
-    if (payload.taskLabels.length > 0) {
-      logQuery("task_labels.insert", { userId: user.id, count: payload.taskLabels.length })
-      const { error } = await admin.from("task_labels").upsert(
-        payload.taskLabels.map((item) => ({
-          task_id: item.taskId,
-          label_id: item.labelId,
-        })),
-        { onConflict: "task_id,label_id" }
-      )
-      if (error) {
-        console.error("/api/sync query task_labels.insert failed:", error)
-        throw error
-      }
-    }
-
-    if (payload.lists.length > 0) {
-      logQuery("lists.insert", { userId: user.id, count: payload.lists.length })
-      const { error } = await admin.from("lists").upsert(
-        payload.lists.map((list) => ({
-          id: list.id,
-          user_id: user.id,
-          name: list.name,
-          tab: list.tab,
-          type: list.type,
-          order_index: list.orderIndex,
-          created_at: list.createdAt ?? new Date().toISOString(),
-          updated_at: list.updatedAt ?? new Date().toISOString(),
-        })),
-        { onConflict: "id" }
-      )
-      if (error) {
-        console.error("/api/sync query lists.insert failed:", error)
-        throw error
-      }
-    }
-
-    if (payload.listItems.length > 0) {
-      logQuery("list_items.insert", { userId: user.id, count: payload.listItems.length })
-      const { error } = await admin.from("list_items").upsert(
-        payload.listItems.map((item) => ({
-          id: item.id,
-          list_id: item.listId,
-          content: item.content,
-          completed: item.completed,
-          order_index: item.orderIndex,
-          created_at: item.createdAt ?? new Date().toISOString(),
-          notes: item.notes,
-          updated_at: item.updatedAt ?? new Date().toISOString(),
-        })),
-        { onConflict: "id" }
-      )
-      if (error) {
-        console.error("/api/sync query list_items.insert failed:", error)
-        throw error
-      }
-    }
-
-    if (payload.shoppingReturns.length > 0) {
-      logQuery("shopping_returns.insert", { userId: user.id, count: payload.shoppingReturns.length })
-      const { error } = await admin.from("shopping_returns").upsert(
-        payload.shoppingReturns.map((item) => ({
-          id: item.id,
-          user_id: user.id,
-          item: item.item,
-          store: item.store,
-          deadline: item.deadline,
-          notes: item.notes,
-          returned: item.returned,
-          created_at: item.createdAt ?? new Date().toISOString(),
-          updated_at: item.updatedAt ?? new Date().toISOString(),
-        })),
-        { onConflict: "id" }
-      )
-      if (error) {
-        console.error("/api/sync query shopping_returns.insert failed:", error)
-        throw error
-      }
+    if (syncResult.error) {
+      console.error("/api/sync query sync_user_snapshot.rpc failed:", syncResult.error)
+      throw syncResult.error
     }
 
     const response = await fetchSnapshot(admin, user.id, user.email ?? null)

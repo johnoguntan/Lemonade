@@ -1125,6 +1125,14 @@ const titleCase = (value: string) =>
   value.replace(/\b\w/g, (char) => char.toUpperCase())
 
 const normalizeTagName = (value: string) => value.trim().toLowerCase()
+const cleanLabelName = (value: string) =>
+  value
+    .trim()
+    .replace(/^#/, "")
+    .replace(/[.!?;:]+$/g, "")
+    .trim()
+
+const LABEL_METADATA_PATTERN = /\b(?:tags?|labels?)\s*:/i
 
 const DATE_TIME_STOP_WORDS = new Set([
   "at",
@@ -1146,12 +1154,38 @@ const BLOCKED_TASK_PATTERN =
   /\b(?:can't|cant|cannot|unable|blocked|stuck|problem|issue|error|broken|won't|wont|doesn't|doesnt|not\s+(?:working|opening|loading|available)|weird\s+file\s+type)\b/i
 const DEADLINE_TASK_PATTERN =
   /\b(?:asap|urgent|critical|right away|due|deadline|before|by|no later than|end of day|eod|close of business|cob)\b/i
+const DUE_TODAY_PRIORITY_PATTERN =
+  /\b(?:due|deadline|by|before)\s+(?:today|tonight|end\s+of\s+day|eod)\b|\b(?:today|tonight)\s+(?:deadline|due)\b/i
 
-const splitNaturalLanguageTaskFragments = (input: string) => {
-  const strongFragments = input
+const splitStrongTaskFragments = (input: string) => {
+  const metadataMatch = LABEL_METADATA_PATTERN.exec(input)
+
+  if (!metadataMatch) {
+    return input
+      .split(STRONG_TASK_SEPARATOR)
+      .map((fragment) => fragment.trim())
+      .filter(Boolean)
+  }
+
+  const beforeMetadata = input.slice(0, metadataMatch.index)
+  const metadata = input.slice(metadataMatch.index).trim()
+  const beforeFragments = beforeMetadata
     .split(STRONG_TASK_SEPARATOR)
     .map((fragment) => fragment.trim())
     .filter(Boolean)
+
+  if (beforeFragments.length === 0) {
+    return metadata ? [metadata] : []
+  }
+
+  const lastFragment = beforeFragments.pop()
+  const combined = [lastFragment, metadata].filter(Boolean).join(" ").trim()
+
+  return [...beforeFragments, combined].filter(Boolean)
+}
+
+const splitNaturalLanguageTaskFragments = (input: string) => {
+  const strongFragments = splitStrongTaskFragments(input)
 
   return strongFragments.flatMap((fragment) => {
     const andMatches = [...fragment.matchAll(/\s+and\s+/gi)]
@@ -1296,6 +1330,10 @@ const detectImplicitPriority = (input: string): Todo["priority"] | undefined => 
     return "urgent"
   }
 
+  if (DUE_TODAY_PRIORITY_PATTERN.test(input)) {
+    return "important"
+  }
+
   return undefined
 }
 
@@ -1378,6 +1416,7 @@ export function parseNaturalLanguageTaskInput(
   const labelIds: string[] = []
   const newLabelNames: string[] = []
   const labelPreviews: NaturalLanguagePreviewToken[] = []
+  const seenLabelNames = new Set<string>()
 
   const pushRange = (range: TokenRange) => {
     if (!hasOverlap(ranges, range.start, range.end)) {
@@ -1385,6 +1424,33 @@ export function parseNaturalLanguageTaskInput(
       return true
     }
     return false
+  }
+
+  const addParsedLabel = (rawName: string, index: number) => {
+    const labelName = cleanLabelName(rawName)
+    if (!labelName) {
+      return
+    }
+
+    const normalized = normalizeTagName(labelName)
+    if (seenLabelNames.has(normalized)) {
+      return
+    }
+
+    seenLabelNames.add(normalized)
+    const existingLabel = options.labels.find((label) => normalizeTagName(label.name) === normalized)
+    const preview = {
+      key: `tag-${index}`,
+      label: existingLabel ? `#${existingLabel.name}` : `#${labelName} (new)`,
+    }
+
+    if (existingLabel) {
+      labelIds.push(existingLabel.id)
+    } else {
+      newLabelNames.push(labelName)
+    }
+
+    labelPreviews.push(preview)
   }
 
   for (const match of taskInput.matchAll(/\b(p1|p2|p3|high priority|medium priority|low priority|urgent|asap|important|normal priority|normal|whenever)\b/gi)) {
@@ -1406,32 +1472,58 @@ export function parseNaturalLanguageTaskInput(
     }
   }
 
+  for (const match of taskInput.matchAll(/\b(?:tags?|labels?)\s*:\s*([\s\S]+)/gi)) {
+    const labels = match[1]
+      .split(",")
+      .map(cleanLabelName)
+      .filter(Boolean)
+
+    if (labels.length === 0) {
+      continue
+    }
+
+    let start = match.index!
+    while (start > 0 && /\s/.test(taskInput[start - 1])) {
+      start -= 1
+    }
+    if (start > 0 && /[:\-]/.test(taskInput[start - 1])) {
+      start -= 1
+      while (start > 0 && /\s/.test(taskInput[start - 1])) {
+        start -= 1
+      }
+    }
+
+    if (!pushRange({
+      start,
+      end: match.index! + match[0].length,
+      type: "tag",
+      preview: {
+        key: `tag-metadata-${match.index}`,
+        label: labels.map((label) => `#${label}`).join(" "),
+      },
+      payload: labels,
+    })) {
+      continue
+    }
+
+    labels.forEach((label, index) => addParsedLabel(label, match.index! + index))
+  }
+
   for (const match of taskInput.matchAll(/#([a-z0-9_-]+)/gi)) {
-    const tagName = normalizeTagName(match[1])
-    const existingLabel = options.labels.find((label) => normalizeTagName(label.name) === tagName)
     if (!pushRange({
       start: match.index!,
       end: match.index! + match[0].length,
       type: "tag",
       preview: {
         key: `tag-${match.index}`,
-        label: existingLabel ? `#${tagName}` : `#${tagName} (new)`,
+        label: `#${cleanLabelName(match[1])}`,
       },
-      payload: tagName,
+      payload: cleanLabelName(match[1]),
     })) {
       continue
     }
 
-    if (existingLabel) {
-      labelIds.push(existingLabel.id)
-    } else if (!newLabelNames.includes(tagName)) {
-      newLabelNames.push(tagName)
-    }
-
-    labelPreviews.push({
-      key: `tag-${match.index}`,
-      label: existingLabel ? `#${tagName}` : `#${tagName} (new)`,
-    })
+    addParsedLabel(match[1], match.index!)
   }
 
   const previewTokens: NaturalLanguagePreviewToken[] = []
@@ -2971,7 +3063,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
 
           const newLabel = {
             id: generateId(),
-            name: normalized,
+            name: cleanLabelName(rawName) || normalized,
             color: DEFAULT_LABEL_COLOR,
           }
 

@@ -5,7 +5,9 @@ import {
   buildHeuristicParsedTask,
   cleanShortcutTitle,
   detectFallbackDate,
+  detectRecurringPattern,
   detectFallbackTime,
+  detectImplicitTaskPriority,
   extractExplicitSignals,
   hasShortcutFields,
   normalizeIsoDate,
@@ -39,6 +41,7 @@ RULES FOR UNDERSTANDING INTENT:
 - Urgency words imply priority:
   'asap', 'urgent', 'critical', 'right away' = urgent
   'important', 'don't forget', 'make sure' = important
+  'due today', 'deadline today', 'by EOD' = important
   deadline + blocker = urgent, even without the word urgent:
   'send back before the 31st but I can't open attachment 2' = urgent
   'due tomorrow and the file will not open' = urgent
@@ -52,11 +55,20 @@ RULES FOR UNDERSTANDING INTENT:
   - Phone numbers (any format: 212-555-1234, +1 212 555 1234, (212) 555-1234) → phone field, remove from title
   - URLs and domains (google.com, https://..., www...) → url field, remove from title
   - If user uses explicit signals like 'call:', 'link:', 'at:', 'duration:', 'remind:' extract to correct field
+  - If user uses 'tag:', 'tags:', 'label:', or 'labels:' with comma-separated values, put those values in labels and remove that metadata from the title
   - Return phone as a string in the json response
 - Duration words:
   'for 2 hours', 'takes about 30 mins' = duration
 - Recurring patterns:
-  'every Monday', 'daily', 'each week' = recurring
+  'every month', 'monthly', 'each month' = recurring monthly
+  'on the 1st', 'on the 15th' = recurringDay for monthly recurrence
+  'every week', 'weekly', 'each week' = recurring weekly
+  'every Thursday and Sunday' = recurring weekly and recurringDays [4,0]
+  'every day', 'daily' = recurring daily
+  'every year', 'yearly', 'annually' = recurring yearly
+  'every Monday', 'every Tuesday' = recurring weekly and recurringDay is that weekday number
+  'repeat', 'set to repeat', 'repeating' signal recurrence intent
+  'remind me every...' is a recurring reminder/task
 - If no date mentioned = today
 - If no priority mentioned = normal
 - Clean up the title — remove date/time/location info 
@@ -87,7 +99,8 @@ Return this exact JSON structure:
   duration: number in minutes or null,
   reminder: number in minutes before or null,
   recurring: daily | weekly | monthly | yearly | null,
-  recurringDay: day of week if weekly e.g. monday or null,
+  recurringDay: number 1-31 for monthly day or 0-6 for weekly weekday (Sunday=0) or null,
+  recurringDays: array of weekday numbers for weekly recurrences or null,
   notes: any extra context that does not fit above or null,
   url: any web address mentioned or null,
   phone: string or null,
@@ -161,6 +174,33 @@ const normalizeNumber = (value: unknown) => {
   return Math.floor(value);
 };
 
+const normalizeRecurringDay = (value: unknown, recurring: "daily" | "weekday" | "weekly" | "monthly" | "yearly" | null) => {
+  const normalized = normalizeNumber(value)
+  if (normalized === null) return null
+
+  if (recurring === "weekly") {
+    return normalized >= 0 && normalized <= 6 ? normalized : null
+  }
+
+  if (recurring === "monthly") {
+    return normalized >= 1 && normalized <= 31 ? normalized : null
+  }
+
+  return null
+}
+
+const normalizeRecurringDays = (value: unknown, recurring: "daily" | "weekday" | "weekly" | "monthly" | "yearly" | null) => {
+  if (recurring !== "weekly" && recurring !== "weekday") return null
+  if (!Array.isArray(value)) return null
+
+  const days = value
+    .filter((day): day is number => typeof day === "number" && Number.isFinite(day))
+    .map((day) => Math.floor(day))
+    .filter((day) => day >= 0 && day <= 6)
+
+  return days.length > 0 ? Array.from(new Set(days)) : null
+}
+
 const normalizePhone = (value: unknown) => {
   const phone = normalizeString(value);
   return phone ? phone : null;
@@ -179,6 +219,15 @@ const sanitizeParsedTask = (raw: unknown) => {
     return null;
   }
 
+  const recurring =
+    task.recurring === "daily" ||
+    task.recurring === "weekday" ||
+    task.recurring === "weekly" ||
+    task.recurring === "monthly" ||
+    task.recurring === "yearly"
+      ? task.recurring
+      : null
+
   return {
     title,
     date: normalizeDate(task.date),
@@ -190,14 +239,9 @@ const sanitizeParsedTask = (raw: unknown) => {
     location: normalizeString(task.location),
     duration: normalizeNumber(task.duration),
     reminder: normalizeNumber(task.reminder),
-    recurring:
-      task.recurring === "daily" ||
-      task.recurring === "weekly" ||
-      task.recurring === "monthly" ||
-      task.recurring === "yearly"
-        ? task.recurring
-        : null,
-    recurringDay: normalizeString(task.recurringDay)?.toLowerCase() ?? null,
+    recurring,
+    recurringDay: normalizeRecurringDay(task.recurringDay, recurring),
+    recurringDays: normalizeRecurringDays(task.recurringDays, recurring),
     notes: normalizeString(task.notes),
     url: normalizeString(task.url),
     phone: normalizePhone(task.phone),
@@ -273,12 +317,13 @@ export async function POST(req: Request) {
           title,
           date: relativeDate,
           time: relativeTime,
-          priority: "normal",
+          priority: detectImplicitTaskPriority(input.trim()) ?? "normal",
           location: explicit.location,
           duration: explicit.duration,
           reminder: explicit.reminder ?? 0,
           recurring: null,
           recurringDay: null,
+          recurringDays: null,
           notes: explicit.notes,
           url: explicit.url,
           phone: explicit.phone,
@@ -329,6 +374,16 @@ export async function POST(req: Request) {
 
     if (!sanitized.time) {
       sanitized.time = detectFallbackTime(input.trim());
+    }
+
+    const deterministicRecurrence = detectRecurringPattern(input.trim());
+    sanitized.recurring = deterministicRecurrence.recurring ?? sanitized.recurring;
+    sanitized.recurringDay = deterministicRecurrence.recurringDay ?? sanitized.recurringDay;
+    sanitized.recurringDays = deterministicRecurrence.recurringDays ?? sanitized.recurringDays;
+
+    const deterministicPriority = detectImplicitTaskPriority(input.trim());
+    if (deterministicPriority && sanitized.priority === "normal") {
+      sanitized.priority = deterministicPriority;
     }
 
     sanitized.phone = explicit.phone ?? sanitized.phone;

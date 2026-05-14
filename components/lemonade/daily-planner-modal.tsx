@@ -2,6 +2,7 @@
 
 import { useState, useSyncExternalStore } from "react"
 import { createOptimisticTodoId, formatLocalDateKey, normalizeCalendarDateKey, normalizeTodoPriority, parseNaturalLanguageTaskEntries, reconcileOptimisticTaskOrder, useLemonadeStore, type Todo } from "@/lib/store"
+import { resolveParsedRecurringTodoFields } from "@/lib/task-shortcuts"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { format, isValid, parseISO } from "date-fns"
@@ -152,17 +153,7 @@ export function DailyPlannerModal() {
                 : []
             )
             const aiPriority: Todo["priority"] = normalizeTodoPriority(primaryTask.priority ?? parsedTask.priority ?? "important")
-            const aiRecurringFrequency =
-              primaryTask.recurringFrequency === "daily" ||
-              primaryTask.recurringFrequency === "weekday" ||
-              primaryTask.recurringFrequency === "weekly" ||
-              primaryTask.recurringFrequency === "monthly"
-                ? primaryTask.recurringFrequency
-                : undefined
-            const aiRecurringInterval =
-              typeof primaryTask.recurringInterval === "number" && Number.isFinite(primaryTask.recurringInterval) && primaryTask.recurringInterval > 1
-                ? Math.floor(primaryTask.recurringInterval)
-                : undefined
+            const recurringFields = resolveParsedRecurringTodoFields(primaryTask)
 
             updateCalendarTodo(tempId, {
               text: aiTitle,
@@ -190,16 +181,7 @@ export function DailyPlannerModal() {
                 typeof primaryTask.reminder === "number" && Number.isFinite(primaryTask.reminder) && primaryTask.reminder >= 0
                   ? Math.floor(primaryTask.reminder)
                   : undefined,
-              isRecurring: primaryTask.isRecurring === true,
-              recurringFrequency: aiRecurringFrequency,
-              recurringDays: Array.isArray(primaryTask.recurringDays)
-                ? primaryTask.recurringDays.filter((day): day is number => typeof day === "number")
-                : undefined,
-              recurringInterval: aiRecurringInterval,
-              recurringCustomText:
-                typeof primaryTask.recurringCustomText === "string" && primaryTask.recurringCustomText.trim()
-                  ? primaryTask.recurringCustomText.trim()
-                  : undefined,
+              ...recurringFields,
               isHeading: aiTitle === aiTitle.toUpperCase() && aiTitle.length > 2,
               isSyncing: false,
               syncStatus: undefined,
