@@ -338,6 +338,17 @@ export function TodoItem({
   ] as const
   const durationLabel = formatDurationEstimate(todo.durationMinutes)
   const timeLabel = formatTimeLabel(todo.time)
+  const recurringLabel = todo.isRecurring
+    ? todo.recurringCustomText
+      ? todo.recurringCustomText
+      : todo.recurringFrequency === "weekday"
+        ? "Weekdays"
+        : todo.recurringFrequency === "weekly"
+          ? "Weekly"
+          : todo.recurringFrequency === "monthly"
+            ? "Monthly"
+            : "Daily"
+    : ""
 
   const handleSave = () => {
     const trimmedText = editText.trim()
@@ -859,7 +870,7 @@ export function TodoItem({
               })}
             </div>
           )}
-          {(effectiveUrl || todo.location || durationLabel || timeLabel || todo.photoDataUrl || isSelectedForMerge) ? (
+          {(effectiveUrl || todo.location || durationLabel || timeLabel || recurringLabel || todo.photoDataUrl || isSelectedForMerge) ? (
             <div className="flex flex-wrap items-center gap-1.5">
               {timeLabel ? (
                 <span className="inline-flex items-center gap-1 rounded-full border border-border/70 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
@@ -888,6 +899,12 @@ export function TodoItem({
                 <span className="inline-flex items-center gap-1 rounded-full border border-border/70 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                   <Clock3 className="size-3" />
                   <span>{durationLabel}</span>
+                </span>
+              ) : null}
+              {recurringLabel ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-border/70 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  <RotateCcw className="size-3" />
+                  <span>{recurringLabel}</span>
                 </span>
               ) : null}
               {isSelectedForMerge ? (

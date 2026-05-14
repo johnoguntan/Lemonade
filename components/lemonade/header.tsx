@@ -16,6 +16,7 @@ import {
   Search,
   Timer,
   Clock3,
+  RotateCcw,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -48,6 +49,21 @@ const AI_PARSE_TIMEOUT_MS = 15000
 const QUICK_ADD_DURATION_OPTIONS = [15, 30, 45, 60, 90, 120] as const
 const QUICK_ADD_TIME_OPTIONS = ["09:00", "11:00", "13:00", "15:00", "17:00", "19:00"] as const
 const WEEKDAY_NAME_BY_INDEX = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const
+const QUICK_ADD_RECURRING_OPTIONS = [
+  { value: "daily", label: "Daily" },
+  { value: "weekday", label: "Weekdays" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+] as const
+const WEEKDAY_INDEX_BY_NAME: Record<string, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+}
 
 const addDays = (date: Date, amount: number) => {
   const nextDate = new Date(date)
@@ -268,6 +284,12 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
   const [showDurationPopover, setShowDurationPopover] = useState(false)
   const [draftDurationMinutes, setDraftDurationMinutes] = useState<number | null>(null)
   const [draftDurationCustomValue, setDraftDurationCustomValue] = useState("")
+  const [showRecurringPopover, setShowRecurringPopover] = useState(false)
+  const [draftRecurring, setDraftRecurring] = useState<AiParsedTask["recurring"]>(null)
+  const [draftRecurringDays, setDraftRecurringDays] = useState<number[] | undefined>(undefined)
+  const [draftRecurringInterval, setDraftRecurringInterval] = useState<number | undefined>(undefined)
+  const [draftRecurringCustomText, setDraftRecurringCustomText] = useState<string | undefined>(undefined)
+  const [draftRecurringCustomValue, setDraftRecurringCustomValue] = useState("")
   const [showLinkInput, setShowLinkInput] = useState(false)
   const [draftLink, setDraftLink] = useState("")
   const [draftAttachments, setDraftAttachments] = useState<Array<{ name: string; type: string; size: number; lastModified: number }>>([])
@@ -297,6 +319,23 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     setDraftDateKey(dateKey)
     setDraftDateTouched(true)
   }, [])
+
+  const focusQuickAddInput = useCallback(() => {
+    window.requestAnimationFrame(() => quickAddInputRef.current?.focus())
+  }, [])
+
+  const applyDraftDateSelection = useCallback((
+    dateKey: string | null,
+    listTarget: "this-week" | "next-week" | "this-month" | "next-month" | "this-year" | "next-year" | "someday" | "goals" | null = null,
+    options?: { closeDatePopover?: boolean }
+  ) => {
+    selectDraftDate(dateKey)
+    setDraftListTarget(listTarget)
+    if (options?.closeDatePopover) {
+      setShowShortcutDatePopover(false)
+    }
+    focusQuickAddInput()
+  }, [focusQuickAddInput, selectDraftDate])
 
   const todayKey = formatLocalDateKey(new Date())
   const draftDateShortcutOptions = useMemo(() => {
@@ -392,6 +431,12 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     setShowDurationPopover(false)
     setDraftDurationMinutes(null)
     setDraftDurationCustomValue("")
+    setShowRecurringPopover(false)
+    setDraftRecurring(null)
+    setDraftRecurringDays(undefined)
+    setDraftRecurringInterval(undefined)
+    setDraftRecurringCustomText(undefined)
+    setDraftRecurringCustomValue("")
     setDraftTime("")
     setShowTimePopover(false)
     setShowLinkInput(false)
@@ -426,18 +471,22 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       return labels[draftListTarget] ?? null
     }
 
-    // Calendar destinations: show a pill too, even for Today/Tomorrow.
+    if (!draftDateTouched) return null
     if (!draftDateKey) return null
     const now = new Date()
     const nowKey = formatLocalDateKey(now)
     const tomorrowKey = formatLocalDateKey(addDays(now, 1))
     if (draftDateKey === nowKey) return "TODAY"
     if (draftDateKey === tomorrowKey) return "TOMORROW"
-    // For any other explicit date selection, show a generic "DATE" pill.
-    // (Keeps it minimal; we can show the formatted date if you want.)
-    if (draftDateTouched && draftDateKey) return "DATE"
-    return null
+    return "DATE"
   }, [draftDateKey, draftDateTouched, draftListTarget])
+
+  const clearDraftDestination = useCallback(() => {
+    setDraftListTarget(null)
+    setDraftDateKey(selectedCalendarDate)
+    setDraftDateTouched(false)
+    focusQuickAddInput()
+  }, [focusQuickAddInput, selectedCalendarDate])
 
   const resolveListTargetFromPrefix = (raw: string) => {
     const trimmed = raw.trim()
@@ -598,7 +647,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
   }
 
   const getResolvedParsedDate = (task: AiParsedTask) =>
-    draftDateTouched ? draftDateKey : task.date
+    draftDateTouched ? draftDateKey : task.date ?? todayKey
 
   const getPreviewDateLabel = (dateKey: string | null) => {
     if (!dateKey) return "Someday"
@@ -626,6 +675,140 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     : null
   const activeDurationLabel = formatDurationBadgeLabel(draftDurationMinutes)
   const activeTimeLabel = draftTime.trim() ? formatTimeDisplayLabel(draftTime) : ""
+  const activeRecurringLabel = draftRecurringCustomText
+    ? draftRecurringCustomText
+    : draftRecurring === "daily"
+      ? "Daily"
+      : draftRecurring === "weekday"
+        ? "Weekdays"
+        : draftRecurring === "weekly"
+          ? "Weekly"
+          : draftRecurring === "monthly"
+            ? "Monthly"
+            : ""
+
+  const buildDraftRecurringTask = useCallback((
+    task: AiParsedTask,
+    recurring: AiParsedTask["recurring"],
+    dateKey: string | null,
+    config?: {
+      recurringDays?: number[]
+      recurringInterval?: number
+      recurringCustomText?: string
+    }
+  ) => {
+    if (!recurring) {
+      return task
+    }
+
+    const parsedDate = dateKey ? parseLocalDateKey(dateKey) : null
+    const recurringDay =
+      recurring === "weekly" && parsedDate
+        ? parsedDate.getDay()
+        : recurring === "monthly" && parsedDate
+          ? parsedDate.getDate()
+          : null
+
+    return {
+      ...task,
+      recurring,
+      recurringDay,
+      recurringDays:
+        config?.recurringDays ??
+        draftRecurringDays ??
+        (recurring === "weekday"
+          ? [1, 2, 3, 4, 5]
+          : recurring === "weekly" && recurringDay !== null
+            ? [recurringDay]
+            : undefined),
+      recurringInterval: config?.recurringInterval ?? draftRecurringInterval,
+      recurringCustomText: config?.recurringCustomText ?? draftRecurringCustomText,
+    }
+  }, [draftRecurringCustomText, draftRecurringDays, draftRecurringInterval])
+
+  const clearDraftRecurring = useCallback(() => {
+    setDraftRecurring(null)
+    setDraftRecurringDays(undefined)
+    setDraftRecurringInterval(undefined)
+    setDraftRecurringCustomText(undefined)
+    setDraftRecurringCustomValue("")
+  }, [])
+
+  const applyDraftRecurringPreset = useCallback((recurring: Exclude<AiParsedTask["recurring"], null>) => {
+    setDraftRecurring(recurring)
+    setDraftRecurringDays(recurring === "weekday" ? [1, 2, 3, 4, 5] : undefined)
+    setDraftRecurringInterval(undefined)
+    setDraftRecurringCustomText(undefined)
+    setDraftRecurringCustomValue("")
+    setShowRecurringPopover(false)
+  }, [])
+
+  const getNextMonthlyDateKey = useCallback((dayOfMonth: number) => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    const buildCandidate = (monthOffset: number) => {
+      const candidate = new Date(today.getFullYear(), today.getMonth() + monthOffset, dayOfMonth)
+      return candidate.getMonth() === (today.getMonth() + monthOffset) % 12 ? candidate : null
+    }
+
+    const thisMonth = buildCandidate(0)
+    if (thisMonth && thisMonth >= today) {
+      return formatLocalDateKey(thisMonth)
+    }
+
+    const nextMonth = buildCandidate(1)
+    return formatLocalDateKey(nextMonth ?? addMonths(today, 1))
+  }, [])
+
+  const applyDraftCustomRecurrence = useCallback(() => {
+    const trimmed = draftRecurringCustomValue.trim()
+
+    if (!trimmed) {
+      clearDraftRecurring()
+      setShowRecurringPopover(false)
+      return
+    }
+
+    const normalized = trimmed.toLowerCase()
+    const recurringDays = Array.from(
+      new Set(
+        [...normalized.matchAll(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/g)]
+          .map((match) => WEEKDAY_INDEX_BY_NAME[match[1]])
+          .filter((day): day is number => typeof day === "number")
+      )
+    )
+    const intervalMatch = normalized.match(/\bevery\s+(\d+)\s+(day|days|week|weeks|month|months)\b/)
+    const recurringInterval = intervalMatch ? Math.max(1, Number.parseInt(intervalMatch[1], 10) || 1) : 1
+    const monthlyDayMatch = normalized.match(/\bon\s+(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\b/)
+    const monthlyDay = monthlyDayMatch ? Number.parseInt(monthlyDayMatch[1], 10) : null
+
+    let recurring: AiParsedTask["recurring"] = "weekly"
+    if (/\bweekdays?\b/.test(normalized)) {
+      recurring = "weekday"
+    } else if (/\bmonth|months|monthly\b/.test(normalized)) {
+      recurring = "monthly"
+    } else if (/\bday|days|daily|everyday\b/.test(normalized) && recurringDays.length === 0) {
+      recurring = "daily"
+    }
+
+    setDraftRecurring(recurring)
+    setDraftRecurringDays(
+      recurring === "weekday"
+        ? [1, 2, 3, 4, 5]
+        : recurringDays.length > 0
+          ? recurringDays
+          : undefined
+    )
+    setDraftRecurringInterval(recurringInterval > 1 ? recurringInterval : undefined)
+    setDraftRecurringCustomText(trimmed)
+
+    if (recurring === "monthly" && monthlyDay !== null && monthlyDay >= 1 && monthlyDay <= 31) {
+      selectDraftDate(getNextMonthlyDateKey(monthlyDay))
+    }
+
+    setShowRecurringPopover(false)
+  }, [clearDraftRecurring, draftRecurringCustomValue, getNextMonthlyDateKey, selectDraftDate])
 
   const buildDeterministicQuickAddTask = useCallback((rawInput: string) => {
     const trimmed = rawInput.trim()
@@ -676,7 +859,8 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     const labelIds = Array.from(new Set([...parsedLabelIds, ...draftLabelIds]))
     const notes = [task.notes, task.attachment ? `Attachment: ${task.attachment}` : null, draftNotes].filter(Boolean).join("\n").trim()
     const resolvedDate = getResolvedParsedDate(task)
-    const recurringFields = resolveRecurringTodoFields(task)
+    const taskWithDraftRecurring = buildDraftRecurringTask(task, draftRecurring, resolvedDate)
+    const recurringFields = resolveRecurringTodoFields(taskWithDraftRecurring)
 
     addCalendarTodo({
       id: createOptimisticTodoId("header"),
@@ -699,7 +883,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       syncStatus: undefined,
     })
 
-    const recurringPreview = buildRecurringSeriesPreview(task, resolvedDate)
+    const recurringPreview = buildRecurringSeriesPreview(taskWithDraftRecurring, resolvedDate)
     if (recurringPreview) {
       toast(recurringPreview, { duration: 4000 })
     }
@@ -737,7 +921,8 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     const notes = [task.notes, task.attachment ? `Attachment: ${task.attachment}` : null, draftNotes].filter(Boolean).join("\n").trim()
     const trimmedLink = draftLink.trim()
     const resolvedDate = draftDateKey
-    const recurringFields = resolveRecurringTodoFields(task)
+    const taskWithDraftRecurring = buildDraftRecurringTask(task, draftRecurring, resolvedDate)
+    const recurringFields = resolveRecurringTodoFields(taskWithDraftRecurring)
 
     addCalendarTodo({
       id: createOptimisticTodoId("header"),
@@ -760,7 +945,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       syncStatus: undefined,
     })
 
-    const recurringPreview = buildRecurringSeriesPreview(task, resolvedDate)
+    const recurringPreview = buildRecurringSeriesPreview(taskWithDraftRecurring, resolvedDate)
     if (recurringPreview) {
       toast(recurringPreview, { duration: 4000 })
     }
@@ -786,6 +971,11 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     setDraftReminderOffsetMinutes(parsedPreview.reminder)
     setDraftDurationMinutes(parsedPreview.duration)
     setDraftDurationCustomValue(parsedPreview.duration ? String(parsedPreview.duration) : "")
+    setDraftRecurring(parsedPreview.recurring)
+    setDraftRecurringDays(parsedPreview.recurringDays)
+    setDraftRecurringInterval(undefined)
+    setDraftRecurringCustomText(undefined)
+    setDraftRecurringCustomValue("")
     setDraftLink(parsedPreview.url ?? "")
     setShowLinkInput(Boolean(parsedPreview.url))
     setDraftLabelIds(ensureLabelIds(parsedPreview.labels))
@@ -844,7 +1034,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
         id: createOptimisticTodoId("header"),
         text: title,
         completed: false,
-        date: draftDateKey,
+        date: draftDateTouched ? draftDateKey : todayKey,
         time: draftTime.trim() ? draftTime.trim() : undefined,
         isHeading: title === title.toUpperCase() && title.length > 2,
         priority: draftPriority,
@@ -854,14 +1044,35 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
         notes: draftNotes,
         durationMinutes: draftDurationMinutes ?? undefined,
         reminderOffsetMinutes: draftReminderOffsetMinutes,
+        ...resolveRecurringTodoFields(buildDraftRecurringTask({
+          title,
+          date: draftDateTouched ? draftDateKey : todayKey,
+          time: draftTime.trim() ? draftTime.trim() : null,
+          priority: draftPriority,
+          location: null,
+          duration: draftDurationMinutes,
+          reminder: draftReminderOffsetMinutes,
+          recurring: null,
+          recurringDay: null,
+          notes: draftNotes ?? null,
+          url: null,
+          phone: null,
+          attachment: null,
+          labels: [],
+        }, draftRecurring, draftDateTouched ? draftDateKey : todayKey)),
         isSyncing: false,
         syncStatus: undefined,
       })
 
       setQuickAddText("")
       resetPerTaskDraft()
+      if ((draftDateTouched ? draftDateKey : todayKey) && (draftDateTouched ? draftDateKey : todayKey) !== selectedCalendarDate) {
+        setSelectedCalendarDate((draftDateTouched ? draftDateKey : todayKey) as string)
+        toast(`Task added to ${getPreviewDateLabel(draftDateTouched ? draftDateKey : todayKey)}`, { duration: 2500 })
+      }
+
       // Keep the input ready for rapid entry.
-      window.requestAnimationFrame(() => quickAddInputRef.current?.focus())
+      focusQuickAddInput()
       return
     }
 
@@ -869,20 +1080,58 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     // This avoids the noticeable lag before the user can add the next task.
     const optimisticId = createOptimisticTodoId("header")
     const optimisticTitle = rawInputString.trim()
+    const draftSnapshot = {
+      dateKey: draftDateKey,
+      dateTouched: draftDateTouched,
+      time: draftTime,
+      priority: draftPriority,
+      labelIds: [...draftLabelIds],
+      subtasks: [...draftSubtasks],
+      color: draftColor,
+      notes: draftNotes,
+      durationMinutes: draftDurationMinutes,
+      reminderOffsetMinutes: draftReminderOffsetMinutes,
+      recurring: draftRecurring,
+      recurringDays: draftRecurringDays,
+      recurringInterval: draftRecurringInterval,
+      recurringCustomText: draftRecurringCustomText,
+    }
+    const optimisticDateKey = draftSnapshot.dateTouched ? draftSnapshot.dateKey : todayKey
+    const optimisticRecurringTask = buildDraftRecurringTask({
+      title: optimisticTitle,
+      date: optimisticDateKey,
+      time: draftSnapshot.time.trim() ? draftSnapshot.time.trim() : null,
+      priority: draftSnapshot.priority,
+      location: null,
+      duration: draftSnapshot.durationMinutes,
+      reminder: draftSnapshot.reminderOffsetMinutes,
+      recurring: null,
+      recurringDay: null,
+      notes: draftSnapshot.notes ?? null,
+      url: null,
+      phone: null,
+      attachment: null,
+      labels: [],
+    }, draftSnapshot.recurring, optimisticDateKey, {
+      recurringDays: draftSnapshot.recurringDays,
+      recurringInterval: draftSnapshot.recurringInterval,
+      recurringCustomText: draftSnapshot.recurringCustomText,
+    })
     addCalendarTodo({
       id: optimisticId,
       text: optimisticTitle,
       completed: false,
-      date: draftDateKey,
-      time: draftTime.trim() ? draftTime.trim() : undefined,
+      date: optimisticDateKey,
+      time: draftSnapshot.time.trim() ? draftSnapshot.time.trim() : undefined,
       isHeading: optimisticTitle === optimisticTitle.toUpperCase() && optimisticTitle.length > 2,
-      priority: draftPriority,
-      labelIds: draftLabelIds,
-      subtasks: draftSubtasks.map((subtaskTitle) => ({ title: subtaskTitle })),
-      color: draftColor,
-      notes: draftNotes,
-      durationMinutes: draftDurationMinutes ?? undefined,
-      reminderOffsetMinutes: draftReminderOffsetMinutes,
+      priority: draftSnapshot.priority,
+      labelIds: draftSnapshot.labelIds,
+      subtasks: draftSnapshot.subtasks.map((subtaskTitle) => ({ title: subtaskTitle })),
+      color: draftSnapshot.color,
+      notes: draftSnapshot.notes,
+      durationMinutes: draftSnapshot.durationMinutes ?? undefined,
+      reminderOffsetMinutes: draftSnapshot.reminderOffsetMinutes,
+      ...resolveRecurringTodoFields(optimisticRecurringTask),
       isSyncing: false,
       syncStatus: undefined,
     })
@@ -890,44 +1139,58 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     // Keep session UI open for rapid multi-add.
     setQuickAddExpanded(true)
     setQuickAddText("")
-    window.requestAnimationFrame(() => quickAddInputRef.current?.focus())
+    resetPerTaskDraft()
+    setDraftDateTouched(false)
+    focusQuickAddInput()
+
+    if (optimisticDateKey && optimisticDateKey !== selectedCalendarDate) {
+      setSelectedCalendarDate(optimisticDateKey)
+      toast(`Task added to ${getPreviewDateLabel(optimisticDateKey)}`, { duration: 2500 })
+    }
 
     // Background parse + refine.
     setSubmitting(true)
     const controller = new AbortController()
     const timeoutId = window.setTimeout(() => controller.abort(), AI_PARSE_TIMEOUT_MS)
-    const requestId = parseRequestIdRef.current + 1
-    parseRequestIdRef.current = requestId
 
     void aiParseSingleTask(rawInputString, controller.signal)
       .then((task) => {
-        if (parseRequestIdRef.current !== requestId) return
         const title = task.title.trim()
         if (!title) return
 
         const parsedLabelIds = ensureLabelIds(task.labels)
-        const labelIds = Array.from(new Set([...parsedLabelIds, ...draftLabelIds]))
-        const notes = [task.notes, task.attachment ? `Attachment: ${task.attachment}` : null, draftNotes].filter(Boolean).join("\n").trim()
-        const resolvedDate = getResolvedParsedDate(task)
-        const recurringFields = resolveRecurringTodoFields(task)
+        const labelIds = Array.from(new Set([...parsedLabelIds, ...draftSnapshot.labelIds]))
+        const notes = [task.notes, task.attachment ? `Attachment: ${task.attachment}` : null, draftSnapshot.notes].filter(Boolean).join("\n").trim()
+        const resolvedDate = draftSnapshot.dateTouched ? draftSnapshot.dateKey : task.date ?? todayKey
+        const taskWithDraftRecurring = buildDraftRecurringTask(task, draftSnapshot.recurring, resolvedDate, {
+          recurringDays: draftSnapshot.recurringDays,
+          recurringInterval: draftSnapshot.recurringInterval,
+          recurringCustomText: draftSnapshot.recurringCustomText,
+        })
+        const recurringFields = resolveRecurringTodoFields(taskWithDraftRecurring)
 
         updateCalendarTodo(optimisticId, {
           text: title,
           date: resolvedDate,
-          time: task.time ?? (draftTime.trim() ? draftTime.trim() : undefined),
-          priority: draftPriority !== "normal" ? draftPriority : task.priority,
+          time: task.time ?? (draftSnapshot.time.trim() ? draftSnapshot.time.trim() : undefined),
+          priority: draftSnapshot.priority !== "normal" ? draftSnapshot.priority : task.priority,
           labelIds,
           notes: notes || undefined,
           url: task.url ?? (task.phone ? `tel:${task.phone}` : undefined),
           location: task.location ?? undefined,
-          durationMinutes: draftDurationMinutes ?? task.duration ?? undefined,
-          reminderOffsetMinutes: task.reminder ?? draftReminderOffsetMinutes,
+          durationMinutes: draftSnapshot.durationMinutes ?? task.duration ?? undefined,
+          reminderOffsetMinutes: task.reminder ?? draftSnapshot.reminderOffsetMinutes,
           ...recurringFields,
         })
 
-        const recurringPreview = buildRecurringSeriesPreview(task, resolvedDate)
+        const recurringPreview = buildRecurringSeriesPreview(taskWithDraftRecurring, resolvedDate)
         if (recurringPreview) {
           toast(recurringPreview, { duration: 4000 })
+        }
+
+        if (resolvedDate && resolvedDate !== optimisticDateKey && resolvedDate !== selectedCalendarDate) {
+          setSelectedCalendarDate(resolvedDate)
+          toast(`Task added to ${getPreviewDateLabel(resolvedDate)}`, { duration: 2500 })
         }
       })
       .catch(() => {
@@ -936,8 +1199,6 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       .finally(() => {
         window.clearTimeout(timeoutId)
         setSubmitting(false)
-        resetPerTaskDraft()
-        setDraftDateTouched(false)
         parseRequestIdRef.current += 1
       })
   }
@@ -1054,6 +1315,11 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     return chips
   }, [activeFilterColor, labelFilterIds, labels, searchQuery, setActiveFilterColor, setLabelFilterIds, setSearchQuery, setTaskSearchFilters, taskSearchFilters])
 
+  const quickAddSettingChipClass =
+    "flex shrink-0 items-center gap-1 rounded-full border border-border/55 bg-background/75 px-1.5 py-0.5 text-[9px] font-extrabold leading-none tracking-[0.09em] text-foreground"
+  const quickAddSettingChipClearClass =
+    "ml-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+
   return (
     <header
       className="lemonade-header flex w-full items-center"
@@ -1061,7 +1327,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     >
       <div ref={quickAddBoundaryRef} data-quick-add-surface="true" className="relative w-full">
         <div
-          className="flex w-full items-center gap-2 rounded-full border border-border/45 bg-background/55 px-4 py-3 backdrop-blur-[10px] dark:bg-[rgba(19,19,19,0.42)]"
+          className="flex w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-full border border-border/45 bg-background/55 px-3 py-3 backdrop-blur-[10px] dark:bg-[rgba(19,19,19,0.42)]"
           onMouseDown={(event) => {
             if (searchModeActive) return
             const target = event.target as HTMLElement
@@ -1126,68 +1392,83 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
               }
             }}
             className={cn(
-              "h-auto w-full min-w-0 flex-1 rounded-full border-0 bg-transparent px-0 py-0 text-[14px] text-foreground shadow-none focus-visible:ring-0",
+              "h-auto min-w-[120px] flex-[1_1_240px] rounded-full border-0 bg-transparent py-0 pl-1 pr-0 text-[14px] text-foreground shadow-none focus-visible:ring-0 sm:min-w-[180px]",
               isMobile && "text-[15px]"
             )}
           />
 
-          {!searchModeActive && activeDestinationLabel ? (
-            <div className="flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-[10px] font-extrabold tracking-[0.14em] text-foreground">
-              <span>→</span>
-              <span>{activeDestinationLabel}</span>
-              <button
-                type="button"
-                className={cn(
-                  "ml-1 inline-flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground",
-                  isMobile ? "h-8 w-8" : "h-6 w-6"
-                )}
-                onClick={() => setDraftListTarget(null)}
-                aria-label="Clear destination"
-                title="Clear destination"
-              >
-                <X className="size-3" />
-              </button>
-            </div>
-          ) : null}
+          {!searchModeActive && (activeDestinationLabel || activeDurationLabel || activeTimeLabel || activeRecurringLabel) ? (
+            <div
+              tabIndex={0}
+              aria-label="Selected task settings"
+              className="flex max-w-[min(28vw,220px)] flex-none items-center gap-1 overflow-x-auto overscroll-x-contain pr-1 outline-none [scrollbar-width:none] focus-visible:ring-1 focus-visible:ring-ring sm:max-w-[min(32vw,260px)] [&::-webkit-scrollbar]:hidden"
+            >
+              {activeDestinationLabel ? (
+                <div className={cn(quickAddSettingChipClass, "bg-muted/80")}>
+                  <span>→</span>
+                  <span>{activeDestinationLabel}</span>
+                  <button
+                    type="button"
+                    className={quickAddSettingChipClearClass}
+                    onClick={clearDraftDestination}
+                    aria-label="Clear destination"
+                    title="Clear destination"
+                  >
+                    <X className="size-2.5" />
+                  </button>
+                </div>
+              ) : null}
 
-          {!searchModeActive && activeDurationLabel ? (
-            <div className="flex items-center gap-1 rounded-full border border-border/60 bg-background/80 px-2 py-1 text-[10px] font-extrabold tracking-[0.14em] text-foreground">
-              <Timer className="size-3" />
-              <span>{activeDurationLabel}</span>
-              <button
-                type="button"
-                className={cn(
-                  "ml-1 inline-flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground",
-                  isMobile ? "h-8 w-8" : "h-6 w-6"
-                )}
-                onClick={() => {
-                  setDraftDurationMinutes(null)
-                  setDraftDurationCustomValue("")
-                }}
-                aria-label="Clear duration"
-                title="Clear duration"
-              >
-                <X className="size-3" />
-              </button>
-            </div>
-          ) : null}
+              {activeDurationLabel ? (
+                <div className={quickAddSettingChipClass}>
+                  <Timer className="size-2.5" />
+                  <span>{activeDurationLabel}</span>
+                  <button
+                    type="button"
+                    className={quickAddSettingChipClearClass}
+                    onClick={() => {
+                      setDraftDurationMinutes(null)
+                      setDraftDurationCustomValue("")
+                    }}
+                    aria-label="Clear duration"
+                    title="Clear duration"
+                  >
+                    <X className="size-2.5" />
+                  </button>
+                </div>
+              ) : null}
 
-          {!searchModeActive && activeTimeLabel ? (
-            <div className="flex items-center gap-1 rounded-full border border-border/60 bg-background/80 px-2 py-1 text-[10px] font-extrabold tracking-[0.14em] text-foreground">
-              <Clock3 className="size-3" />
-              <span>{activeTimeLabel}</span>
-              <button
-                type="button"
-                className={cn(
-                  "ml-1 inline-flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground",
-                  isMobile ? "h-8 w-8" : "h-6 w-6"
-                )}
-                onClick={() => setDraftTime("")}
-                aria-label="Clear time"
-                title="Clear time"
-              >
-                <X className="size-3" />
-              </button>
+              {activeTimeLabel ? (
+                <div className={quickAddSettingChipClass}>
+                  <Clock3 className="size-2.5" />
+                  <span>{activeTimeLabel}</span>
+                  <button
+                    type="button"
+                    className={quickAddSettingChipClearClass}
+                    onClick={() => setDraftTime("")}
+                    aria-label="Clear time"
+                    title="Clear time"
+                  >
+                    <X className="size-2.5" />
+                  </button>
+                </div>
+              ) : null}
+
+              {activeRecurringLabel ? (
+                <div className={quickAddSettingChipClass}>
+                  <RotateCcw className="size-2.5" />
+                  <span className="max-w-[110px] truncate">{activeRecurringLabel}</span>
+                  <button
+                    type="button"
+                    className={quickAddSettingChipClearClass}
+                    onClick={clearDraftRecurring}
+                    aria-label="Clear recurring"
+                    title="Clear recurring"
+                  >
+                    <X className="size-2.5" />
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -1331,8 +1612,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                       onMonthChange={setShortcutPickerMonth}
                       onSelect={(date) => {
                         if (!date) return
-                        selectDraftDate(formatLocalDateKey(date))
-                        setDraftListTarget(null)
+                        applyDraftDateSelection(formatLocalDateKey(date), null, { closeDatePopover: true })
                       }}
                       initialFocus
                     />
@@ -1345,8 +1625,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                             key={option.label}
                             type="button"
                             onClick={() => {
-                              selectDraftDate(option.dateKey)
-                            setDraftListTarget(option.listTarget ?? null)
+                              applyDraftDateSelection(option.dateKey, option.listTarget ?? null, { closeDatePopover: true })
                             }}
                             className={cn(
                               "rounded-lg border border-border/70 px-2 py-2 text-[12px] transition-colors hover:bg-muted",
@@ -1385,7 +1664,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                         variant="ghost"
                         size="sm"
                         className="h-8"
-                        onClick={() => selectDraftDate(null)}
+                        onClick={() => applyDraftDateSelection(null, "someday", { closeDatePopover: true })}
                       >
                         Someday
                       </Button>
@@ -1393,7 +1672,10 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                         type="button"
                         size="sm"
                         className="h-8"
-                        onClick={() => setShowShortcutDatePopover(false)}
+                        onClick={() => {
+                          setShowShortcutDatePopover(false)
+                          focusQuickAddInput()
+                        }}
                       >
                         Done
                       </Button>
@@ -1795,11 +2077,10 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                       className={cn(
                         "inline-flex w-auto items-center justify-end whitespace-nowrap rounded-lg px-2 py-1.5 text-right text-[12px] transition-colors hover:bg-muted",
                         draftDateKey === option.dateKey && "bg-muted"
-                      )}
-                      onClick={() => {
-                        selectDraftDate(option.dateKey)
-                        setDraftListTarget(option.listTarget ?? null)
-                      }}
+	                      )}
+	                      onClick={() => {
+	                        applyDraftDateSelection(option.dateKey, option.listTarget ?? null)
+	                      }}
                     >
                       <span className="text-foreground">{option.label}</span>
                     </button>
@@ -2108,7 +2389,106 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                 </PopoverContent>
               </Popover>
 
-              {/* 4) Subtask */}
+              {/* 4) Recurring */}
+              <Popover open={showRecurringPopover} onOpenChange={setShowRecurringPopover}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className={cn("size-8 hover:text-foreground", draftRecurring && "text-foreground")}
+                    aria-label="Set recurring"
+                  >
+                    <RotateCcw className="size-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  side="bottom"
+                  sideOffset={10}
+                  data-quick-add-surface="true"
+                  className="z-50 w-[240px] rounded-2xl border border-border/60 bg-background/96 p-3 shadow-[0_14px_34px_rgba(0,0,0,0.10)]"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                        Recurring
+                      </div>
+                      {draftRecurring ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            clearDraftRecurring()
+                            setShowRecurringPopover(false)
+                          }}
+                          className="text-[10px] font-medium text-foreground/80 hover:text-foreground"
+                        >
+                          Clear
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {QUICK_ADD_RECURRING_OPTIONS.map((option) => {
+                        const active = draftRecurring === option.value
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => applyDraftRecurringPreset(option.value)}
+                            className={cn(
+                              "rounded-full px-2 py-2 text-[11px] font-medium transition-colors",
+                              active
+                                ? "bg-foreground text-background"
+                                : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+                            )}
+                          >
+                            {option.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    <div className="rounded-2xl bg-muted/35 p-2.5 text-[11px] leading-5 text-muted-foreground">
+                      Weekly and monthly repeats use the selected task date as the anchor.
+                    </div>
+
+                    <div className="space-y-2 rounded-2xl border border-border/60 bg-background/70 p-2.5 shadow-inner">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">
+                        Custom
+                      </div>
+                      <Input
+                        placeholder="Every Tue and Thu, every 2 weeks, monthly on 15th"
+                        value={draftRecurringCustomValue}
+                        onChange={(event) => setDraftRecurringCustomValue(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault()
+                            applyDraftCustomRecurrence()
+                          }
+                        }}
+                        className="h-10 rounded-xl border border-border/80 bg-background px-3 text-[12px] text-foreground shadow-sm placeholder:text-muted-foreground/80 focus-visible:border-foreground/50 focus-visible:ring-2 focus-visible:ring-ring/30"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 w-full rounded-full px-3 text-[11px] font-medium text-foreground hover:bg-background"
+                        onClick={applyDraftCustomRecurrence}
+                      >
+                        Apply custom repeat
+                      </Button>
+                      {draftRecurringCustomText ? (
+                        <div className="text-[11px] text-muted-foreground">
+                          Selected: {draftRecurringCustomText}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+
+              {/* 5) Subtask */}
               <Button
                 type="button"
                 variant="ghost"
@@ -2120,7 +2500,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                 <ListChecks className="size-4" />
               </Button>
 
-              {/* 5) URL / Phone */}
+              {/* 6) URL / Phone */}
               <Button
                 type="button"
                 variant="ghost"
@@ -2132,7 +2512,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                 <Link2 className="size-4" />
               </Button>
 
-              {/* 6) Urgency */}
+              {/* 7) Urgency */}
               <Popover open={showPriorityPopover} onOpenChange={setShowPriorityPopover}>
                 <PopoverTrigger asChild>
                   <Button
@@ -2176,7 +2556,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                 </PopoverContent>
               </Popover>
 
-              {/* 7) Label */}
+              {/* 8) Label */}
               <Popover open={showLabelPopover} onOpenChange={setShowLabelPopover}>
                 <PopoverTrigger asChild>
                   <Button
@@ -2262,7 +2642,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                 </PopoverContent>
               </Popover>
 
-              {/* 8) Color */}
+              {/* 9) Color */}
               <Popover open={showDraftColorPopover} onOpenChange={setShowDraftColorPopover}>
                 <PopoverTrigger asChild>
                   <Button

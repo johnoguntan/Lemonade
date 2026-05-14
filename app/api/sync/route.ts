@@ -439,6 +439,10 @@ export async function POST(request: Request) {
       taskLabelCount: payload.taskLabels.length,
     })
 
+    // Notification scheduling is an async side-effect that can race snapshot sync.
+    // Let /api/notifications/schedule own scheduled_notification_id after task rows exist.
+    payload.tasks = payload.tasks.map((task) => ({ ...task, scheduledNotificationId: null }))
+
     logQuery("sync_user_snapshot.rpc", {
       userId: user.id,
       taskCount: payload.tasks.length,
