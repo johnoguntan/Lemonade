@@ -240,6 +240,7 @@ export async function POST(request: Request) {
               status: "scheduled",
               loop_rule: loopRule,
               payload: item.payload ?? null,
+            })
           }
         }
       }
