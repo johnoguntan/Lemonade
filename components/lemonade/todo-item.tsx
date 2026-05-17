@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
-import { formatLocalDateKey, parseLocalDateKey, normalizeTodoPriority, useLemonadeStore, type Todo } from "@/lib/store"
+import { formatLocalDateKey, parseLocalDateKey, normalizeTodoPriority, useLemonadeStore, type TaskAttachment, type Todo } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -41,11 +41,37 @@ interface TodoItemProps {
   textSizeClass: string
   isDragging?: boolean
   draggable?: boolean
+  listId?: string
+  showInlineTaskActions?: boolean
+  openDetailsOnTextClick?: boolean
   onDragStart?: (event: React.DragEvent<HTMLDivElement>) => void
   onDragEnd?: (event: React.DragEvent<HTMLDivElement>) => void
 }
 
 const ATTACHMENT_PREFIX = "Attachment: "
+
+const readFileAsDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result)
+        return
+      }
+      reject(new Error("Unable to read file"))
+    }
+    reader.onerror = () => reject(reader.error ?? new Error("Unable to read file"))
+    reader.readAsDataURL(file)
+  })
+
+const fileToTaskAttachment = async (file: File): Promise<TaskAttachment> => ({
+  id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${file.name}-${file.lastModified}-${file.size}`,
+  name: file.name,
+  type: file.type,
+  size: file.size,
+  dataUrl: await readFileAsDataUrl(file),
+  createdAt: Date.now(),
+})
 
 const isStructuredLinkValue = (value: string) => {
   const normalized = value.trim()
@@ -207,6 +233,9 @@ export function TodoItem({
   textSizeClass,
   isDragging = false,
   draggable = false,
+  listId,
+  showInlineTaskActions = false,
+  openDetailsOnTextClick = false,
   onDragStart,
   onDragEnd,
 }: TodoItemProps) {
@@ -221,6 +250,11 @@ export function TodoItem({
     deleteCalendarTodo,
     moveTodoToDate,
     moveCalendarTodoToList,
+    moveListTodoToDate,
+    moveListTodoToList,
+    updateListTodo,
+    deleteListTodo,
+    toggleListTodo,
     restoreLastDeletedTodo,
     addCalendarTodo,
     addSubtask,
@@ -257,12 +291,14 @@ export function TodoItem({
   const [isNotesOpen, setIsNotesOpen] = useState(false)
   const [noteText, setNoteText] = useState(todo.notes ?? "")
   const [photoPreviewOpen, setPhotoPreviewOpen] = useState(false)
+  const [previewAttachment, setPreviewAttachment] = useState<{ dataUrl: string; name: string } | null>(null)
   const [showReminderEditor, setShowReminderEditor] = useState(false)
   const [reminderCustomMinutes, setReminderCustomMinutes] = useState("")
   const [linkDraft, setLinkDraft] = useState("")
   const [locationDraft, setLocationDraft] = useState(todo.location ?? "")
   const [durationDraft, setDurationDraft] = useState(formatDurationEstimate(todo.durationMinutes))
   const [attachmentDrafts, setAttachmentDrafts] = useState<string[]>([])
+  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false)
   const [taskMenuOpen, setTaskMenuOpen] = useState(false)
   const [activeToolPanel, setActiveToolPanel] = useState<
     "move" | "reminder" | "subtasks" | "link" | "priority" | "icon" | "labels" | "color" | "attachment" | "snooze" | "photo" | "location" | "duration" | "split" | "merge" | "convert" | null
@@ -310,6 +346,8 @@ export function TodoItem({
     normal: "Normal",
   } as const
   const structuredNotes = useMemo(() => parseStructuredTaskNotes(todo.notes), [todo.notes])
+  const taskAttachments = todo.attachments ?? []
+  const hasVisibleAttachments = taskAttachments.length > 0 || structuredNotes.attachments.length > 0
   const effectiveUrl = todo.url ?? structuredNotes.link
   const isSelectedForMerge = selectedTaskIds.includes(todo.id)
   const selectedTodos = useMemo(
@@ -349,6 +387,47 @@ export function TodoItem({
             ? "Monthly"
             : "Daily"
     : ""
+  const isListContext = Boolean(listId)
+
+  const updateTodo = (updates: Partial<Todo>) => {
+    if (listId) {
+      updateListTodo(listId, todo.id, updates)
+      return
+    }
+    updateCalendarTodo(todo.id, updates)
+  }
+
+  const toggleTodo = () => {
+    if (listId) {
+      toggleListTodo(listId, todo.id)
+      return
+    }
+    toggleCalendarTodo(todo.id)
+  }
+
+  const deleteTodo = () => {
+    if (listId) {
+      deleteListTodo(listId, todo.id)
+      return
+    }
+    deleteCalendarTodo(todo.id)
+  }
+
+  const moveCurrentTodoToDate = (dateKey: string) => {
+    if (listId) {
+      moveListTodoToDate(listId, todo.id, dateKey)
+      return
+    }
+    moveTodoToDate(todo.id, dateKey)
+  }
+
+  const moveCurrentTodoToList = (targetListId: string) => {
+    if (listId) {
+      moveListTodoToList(listId, todo.id, targetListId)
+      return
+    }
+    moveCalendarTodoToList(todo.id, targetListId)
+  }
 
   const handleSave = () => {
     const trimmedText = editText.trim()
@@ -356,7 +435,7 @@ export function TodoItem({
     if (trimmedText) {
       const isHeading = trimmedText === trimmedText.toUpperCase() && trimmedText.length > 2
 
-      updateCalendarTodo(todo.id, { text: trimmedText, isHeading })
+      updateTodo({ text: trimmedText, isHeading })
     }
     setIsEditing(false)
   }
@@ -468,8 +547,8 @@ export function TodoItem({
   }
 
   const handleRecurringChange = (updates: Partial<Todo>) => {
-    if (!todo.parentId) {
-      updateCalendarTodo(todo.id, updates)
+    if (isListContext || !todo.parentId) {
+      updateTodo(updates)
       toast("Series updated", { duration: 2000 })
       return
     }
@@ -539,16 +618,18 @@ export function TodoItem({
   }
 
   const handleDelete = () => {
-    deleteCalendarTodo(todo.id)
+    deleteTodo()
     const deleteToken = useLemonadeStore.getState().lastDeleted?.token
 
-    toast("Task deleted", {
-      duration: 5000,
-      action: {
-        label: "Undo",
-        onClick: () => restoreLastDeletedTodo(),
-      },
-    })
+    toast("Task deleted", isListContext
+      ? { duration: 2000 }
+      : {
+          duration: 5000,
+          action: {
+            label: "Undo",
+            onClick: () => restoreLastDeletedTodo(),
+          },
+        })
 
     if (deleteToken) {
       window.setTimeout(() => {
@@ -575,7 +656,7 @@ export function TodoItem({
 
   const handleSaveNotes = () => {
     const trimmed = noteText.trim()
-    updateCalendarTodo(todo.id, { notes: trimmed.length > 0 ? trimmed : undefined })
+    updateTodo({ notes: trimmed.length > 0 ? trimmed : undefined })
     setIsNotesOpen(false)
   }
 
@@ -587,7 +668,7 @@ export function TodoItem({
       attachments: nextAttachments,
     })
 
-    updateCalendarTodo(todo.id, { notes: nextNotes })
+    updateTodo({ notes: nextNotes })
 
     if (isNotesOpen) {
       setNoteText(nextNotes ?? "")
@@ -600,7 +681,7 @@ export function TodoItem({
   }
 
   const handleSaveLink = () => {
-    updateCalendarTodo(todo.id, { url: linkDraft.trim() || undefined })
+    updateTodo({ url: linkDraft.trim() || undefined })
     persistStructuredNotes(linkDraft, attachmentDrafts.length > 0 ? attachmentDrafts : structuredNotes.attachments)
   }
 
@@ -610,15 +691,22 @@ export function TodoItem({
       return
     }
 
-    const nextAttachments = [...structuredNotes.attachments, ...files.map((file) => file.name)]
-    setAttachmentDrafts(nextAttachments)
-    persistStructuredNotes(structuredNotes.link, nextAttachments)
+    setIsUploadingAttachment(true)
+    void Promise.all(files.map(fileToTaskAttachment))
+      .then((attachments) => {
+        updateTodo({ attachments: taskAttachments.concat(attachments) })
+        setActiveToolPanel("attachment")
+        toast(`${attachments.length === 1 ? "Attachment" : "Attachments"} added`, { duration: 1800 })
+      })
+      .catch(() => toast("Could not attach one or more files", { duration: 2500 }))
+      .finally(() => setIsUploadingAttachment(false))
+
     event.target.value = ""
   }
 
   const handleClearStructuredLink = () => {
     setLinkDraft("")
-    updateCalendarTodo(todo.id, { url: undefined })
+    updateTodo({ url: undefined })
     persistStructuredNotes("", structuredNotes.attachments)
   }
 
@@ -628,8 +716,12 @@ export function TodoItem({
     persistStructuredNotes(structuredNotes.link, nextAttachments)
   }
 
+  const handleRemoveStoredAttachment = (attachmentId: string) => {
+    updateTodo({ attachments: taskAttachments.filter((attachment) => attachment.id !== attachmentId) })
+  }
+
   const applyReminderOffset = (minutes: number | null) => {
-    updateCalendarTodo(todo.id, { reminderOffsetMinutes: minutes })
+    updateTodo({ reminderOffsetMinutes: minutes })
     setShowReminderEditor(false)
     setReminderCustomMinutes("")
   }
@@ -703,7 +795,7 @@ export function TodoItem({
     const reader = new FileReader()
     reader.onload = () => {
       if (typeof reader.result === "string") {
-        updateCalendarTodo(todo.id, { photoDataUrl: reader.result })
+        updateTodo({ photoDataUrl: reader.result })
       }
     }
     reader.readAsDataURL(file)
@@ -774,7 +866,7 @@ export function TodoItem({
         <div className="flex min-w-0 flex-1 flex-col justify-center gap-1">
           <div className="flex min-w-0 items-start">
             <button
-              onClick={() => toggleCalendarTodo(todo.id)}
+              onClick={toggleTodo}
               className={cn(
                 "mr-2 size-4 rounded-full border transition-all flex items-center justify-center shrink-0",
                 todo.completed
@@ -818,10 +910,18 @@ export function TodoItem({
               />
             ) : (
               <span
-                onClick={() => setIsEditing(true)}
+                onClick={() => {
+                  if (openDetailsOnTextClick) {
+                    setTaskMenuOpen(true)
+                    setActiveToolPanel(null)
+                    return
+                  }
+                  setIsEditing(true)
+                }}
                 className={cn(
                   // Avoid letter-by-letter wrapping in narrow layouts.
-                  "lemonade-task-text min-w-0 flex-1 cursor-text whitespace-normal break-normal font-task font-normal text-[14px] leading-[1.15] text-[#000000]",
+                  "lemonade-task-text min-w-0 flex-1 whitespace-normal break-normal font-task font-normal text-[14px] leading-[1.15] text-[#000000]",
+                  openDetailsOnTextClick ? "cursor-pointer" : "cursor-text",
                   !hasCustomColor && "dark:text-foreground",
                   todo.completed && "line-through opacity-40"
                 )}
@@ -870,7 +970,7 @@ export function TodoItem({
               })}
             </div>
           )}
-          {(effectiveUrl || todo.location || durationLabel || timeLabel || recurringLabel || todo.photoDataUrl || isSelectedForMerge) ? (
+          {(effectiveUrl || todo.location || durationLabel || timeLabel || recurringLabel || hasVisibleAttachments || todo.photoDataUrl || isSelectedForMerge) ? (
             <div className="flex flex-wrap items-center gap-1.5">
               {timeLabel ? (
                 <span className="inline-flex items-center gap-1 rounded-full border border-border/70 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
@@ -907,6 +1007,37 @@ export function TodoItem({
                   <span>{recurringLabel}</span>
                 </span>
               ) : null}
+              {taskAttachments.map((attachment) => (
+                <button
+                  key={attachment.id}
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setPreviewAttachment(attachment)
+                  }}
+                  className="inline-flex max-w-[190px] items-center gap-1 rounded-full border border-border/70 px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  title={`View ${attachment.name}`}
+                >
+                  <Paperclip className="size-3 shrink-0" />
+                  <span className="truncate">{attachment.name}</span>
+                </button>
+              ))}
+              {structuredNotes.attachments.map((attachmentName) => (
+                <button
+                  key={attachmentName}
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setTaskMenuOpen(true)
+                    setActiveToolPanel("attachment")
+                  }}
+                  className="inline-flex max-w-[190px] items-center gap-1 rounded-full border border-border/70 px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  title={`${attachmentName} is filename-only`}
+                >
+                  <Paperclip className="size-3 shrink-0" />
+                  <span className="truncate">{attachmentName}</span>
+                </button>
+              ))}
               {isSelectedForMerge ? (
                 <span className="inline-flex items-center gap-1 rounded-full border border-[var(--accent-color)] px-2 py-0.5 text-[10px] font-medium text-[var(--accent-color)]">
                   Selected for merge
@@ -935,11 +1066,14 @@ export function TodoItem({
           ) : null}
         </div>
 
-        <div className="flex min-h-[52px] items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className={cn(
+          "flex min-h-[52px] items-center gap-0.5 transition-opacity",
+          showInlineTaskActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        )}>
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => updateCalendarTodo(todo.id, { priority: nextPriority[resolvedPriority] })}
+            onClick={() => updateTodo({ priority: nextPriority[resolvedPriority] })}
             className={cn(
               "h-7 rounded-full border px-2.5 text-[10px] font-semibold uppercase tracking-[0.08em]",
               priorityPillClasses[resolvedPriority]
@@ -952,7 +1086,13 @@ export function TodoItem({
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => toggleEndOfDay(todo.id)}
+            onClick={() => {
+              if (listId) {
+                updateTodo({ endOfDay: !todo.endOfDay })
+                return
+              }
+              toggleEndOfDay(todo.id)
+            }}
             className={cn(
               "size-7 hover:bg-transparent",
               todo.endOfDay
@@ -1098,7 +1238,7 @@ export function TodoItem({
                   className={cn(
                     "inline-flex size-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground",
                     activeToolPanel === "attachment" && "bg-muted text-foreground",
-                    structuredNotes.attachments.length > 0 && activeToolPanel !== "attachment" && "text-foreground"
+                    (structuredNotes.attachments.length > 0 || taskAttachments.length > 0 || isUploadingAttachment) && activeToolPanel !== "attachment" && "text-foreground"
                   )}
                   title="Attachment"
                 >
@@ -1368,7 +1508,7 @@ export function TodoItem({
                       <button
                         key={priority}
                         type="button"
-                        onClick={() => updateCalendarTodo(todo.id, { priority })}
+                        onClick={() => updateTodo({ priority })}
                         className={cn(
                           "rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] transition-colors",
                           priority === "urgent"
@@ -1397,7 +1537,7 @@ export function TodoItem({
                     <div className="text-sm font-medium">Icon</div>
                     <button
                       type="button"
-                      onClick={() => updateCalendarTodo(todo.id, { icon: undefined })}
+                      onClick={() => updateTodo({ icon: undefined })}
                       className={cn(
                         "inline-flex items-center gap-2 rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
                         !todo.icon && "bg-muted text-foreground"
@@ -1413,7 +1553,7 @@ export function TodoItem({
                         <button
                           key={key}
                           type="button"
-                          onClick={() => updateCalendarTodo(todo.id, { icon: key })}
+                          onClick={() => updateTodo({ icon: key })}
                           className={cn(
                             "flex items-center justify-center rounded-lg border border-border/70 p-2 transition-colors hover:bg-muted",
                             selected && "border-transparent bg-foreground text-background hover:bg-foreground"
@@ -1488,9 +1628,9 @@ export function TodoItem({
                   <ColorPickerPanel
                     value={todo.color}
                     palette={colorPalette}
-                    onChange={(color) => updateCalendarTodo(todo.id, { color })}
+                    onChange={(color) => updateTodo({ color })}
                     onPaletteChange={(palette) => setPreferences({ colorPalette: palette })}
-                    onClear={() => updateCalendarTodo(todo.id, { color: undefined })}
+                    onClear={() => updateTodo({ color: undefined })}
                     description="Pick a color from the wheel or choose a saved swatch."
                   />
                 </div>
@@ -1518,18 +1658,55 @@ export function TodoItem({
                     className="hidden"
                     onChange={handleAttachmentPick}
                   />
-                  {structuredNotes.attachments.length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5">
+                  {taskAttachments.length > 0 || structuredNotes.attachments.length > 0 || isUploadingAttachment ? (
+                    <div className="space-y-2">
+                      {isUploadingAttachment ? (
+                        <div className="flex items-center gap-2 rounded-xl border border-dashed border-border px-2 py-2 text-[11px] text-muted-foreground">
+                          <Paperclip className="size-3.5 shrink-0" />
+                          Uploading attachment...
+                        </div>
+                      ) : null}
+                      {taskAttachments.map((attachment) => (
+                        <div
+                          key={attachment.id}
+                          className="flex items-center gap-2 rounded-xl border border-border/70 px-2 py-2 text-[11px]"
+                        >
+                          <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
+                          <button
+                            type="button"
+                            onClick={() => setPreviewAttachment(attachment)}
+                            className="min-w-0 flex-1 text-left truncate hover:underline"
+                          >
+                            {attachment.name}
+                          </button>
+                          <a
+                            href={attachment.dataUrl}
+                            download={attachment.name}
+                            className="rounded-full border border-border/70 px-2 py-1 text-[10px] font-medium text-foreground hover:bg-muted"
+                          >
+                            Download
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveStoredAttachment(attachment.id)}
+                            className="text-muted-foreground hover:text-destructive"
+                            title="Remove attachment"
+                          >
+                            <X className="size-3.5" />
+                          </button>
+                        </div>
+                      ))}
                       {structuredNotes.attachments.map((attachmentName) => (
                         <button
                           key={attachmentName}
                           type="button"
                           onClick={() => handleRemoveAttachment(attachmentName)}
                           className="inline-flex items-center gap-1 rounded-full border border-border/70 px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                          title="Remove attachment"
+                          title="Remove legacy attachment name"
                         >
                           <Paperclip className="size-3" />
                           <span>{attachmentName}</span>
+                          <span className="text-[9px]">(filename only)</span>
                           <X className="size-3" />
                         </button>
                       ))}
@@ -1581,11 +1758,11 @@ export function TodoItem({
                       const dateTargets: Array<{ label: string; action: () => void }> = [
                         {
                           label: "Today",
-                          action: () => moveTodoToDate(todo.id, todayKey),
+                          action: () => moveCurrentTodoToDate(todayKey),
                         },
                         {
                           label: "Tomorrow",
-                          action: () => moveTodoToDate(todo.id, tomorrowKey),
+                          action: () => moveCurrentTodoToDate(tomorrowKey),
                         },
                       ]
                       const bucketTargets: Array<{ label: string; listId: string }> = [
@@ -1651,7 +1828,7 @@ export function TodoItem({
                                 onSelect={(date) => {
                                   if (!date) return
                                   const key = formatLocalDateKey(date)
-                                  moveTodoToDate(todo.id, key)
+                                  moveCurrentTodoToDate(key)
                                   setMoveDatePickerOpen(false)
                                   setTaskMenuOpen(false)
                                   setActiveToolPanel(null)
@@ -1666,7 +1843,7 @@ export function TodoItem({
                               key={entry.listId}
                               type="button"
                               onClick={() => {
-                                moveCalendarTodoToList(todo.id, entry.listId)
+                                moveCurrentTodoToList(entry.listId)
                                 setTaskMenuOpen(false)
                                 setActiveToolPanel(null)
                                 toast(`Moved to ${entry.label.toLowerCase()}`, { duration: 2000 })
@@ -1690,7 +1867,7 @@ export function TodoItem({
                     {todo.photoDataUrl ? (
                       <button
                         type="button"
-                        onClick={() => updateCalendarTodo(todo.id, { photoDataUrl: undefined })}
+                        onClick={() => updateTodo({ photoDataUrl: undefined })}
                         className="text-[10px] font-medium text-foreground/80 hover:text-foreground"
                       >
                         Remove
@@ -1722,7 +1899,7 @@ export function TodoItem({
                     {todo.location ? (
                       <button
                         type="button"
-                        onClick={() => updateCalendarTodo(todo.id, { location: undefined })}
+                        onClick={() => updateTodo({ location: undefined })}
                         className="text-[10px] font-medium text-foreground/80 hover:text-foreground"
                       >
                         Clear
@@ -1739,7 +1916,7 @@ export function TodoItem({
                     placeholder="Type a place or address"
                     className="h-8 w-full rounded-md border border-border bg-transparent px-2 text-[11px] outline-none"
                   />
-                  <Button type="button" size="sm" className="h-8 w-full text-[11px]" onClick={() => updateCalendarTodo(todo.id, { location: locationDraft || undefined })}>
+                  <Button type="button" size="sm" className="h-8 w-full text-[11px]" onClick={() => updateTodo({ location: locationDraft || undefined })}>
                     Save location
                   </Button>
                 </div>
@@ -1754,7 +1931,7 @@ export function TodoItem({
                         type="button"
                         onClick={() => {
                           setDurationDraft("")
-                          updateCalendarTodo(todo.id, { durationMinutes: undefined })
+                          updateTodo({ durationMinutes: undefined })
                         }}
                         className="text-[10px] font-medium text-foreground/80 hover:text-foreground"
                       >
@@ -1779,7 +1956,7 @@ export function TodoItem({
                         toast("Invalid duration", { duration: 2000 })
                         return
                       }
-                      updateCalendarTodo(todo.id, { durationMinutes: minutes })
+                      updateTodo({ durationMinutes: minutes })
                       setDurationDraft(formatDurationEstimate(minutes))
                       setTaskMenuOpen(false)
                       setActiveToolPanel(null)
@@ -2117,7 +2294,7 @@ export function TodoItem({
             <AlertDialogAction
               onClick={() => {
                 if (!pendingRecurringUpdate) return
-                updateCalendarTodo(todo.id, pendingRecurringUpdate)
+                updateTodo(pendingRecurringUpdate)
                 toast("Series updated", { duration: 2000 })
                 setPendingRecurringUpdate(null)
               }}
@@ -2142,7 +2319,7 @@ export function TodoItem({
               onClick={() => {
                 // Only complete the parent if the user confirms.
                 if (!todo.completed) {
-                  toggleCalendarTodo(todo.id)
+                  toggleTodo()
                 }
               }}
             >
@@ -2151,6 +2328,31 @@ export function TodoItem({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={!!previewAttachment} onOpenChange={(open) => !open && setPreviewAttachment(null)}>
+        <DialogContent className="max-w-[min(92vw,720px)] p-4">
+          <DialogTitle className="text-lg font-medium">{previewAttachment?.name}</DialogTitle>
+          <div className="mt-2 flex flex-col items-center gap-4">
+            {previewAttachment?.dataUrl.startsWith("data:image/") ? (
+              <img src={previewAttachment.dataUrl} alt={previewAttachment.name} className="max-h-[70vh] w-full rounded-md object-contain" />
+            ) : (
+              <div className="flex h-40 w-full items-center justify-center rounded-md bg-muted text-muted-foreground">
+                Preview not available for this file type.
+              </div>
+            )}
+            <div className="flex gap-2 justify-end w-full">
+              <Button asChild variant="outline">
+                <a href={previewAttachment?.dataUrl} download={previewAttachment?.name}>
+                  Download
+                </a>
+              </Button>
+              <Button onClick={() => setPreviewAttachment(null)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

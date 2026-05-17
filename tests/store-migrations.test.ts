@@ -11,7 +11,7 @@ test("legacy preferences are normalized during migration", () => {
     },
   })
 
-  assert.equal(STORAGE_VERSION, 2)
+  assert.equal(STORAGE_VERSION, 3)
   assert.equal(migrated.preferences?.textSize, "sm")
   assert.equal(migrated.preferences?.spacing, "comfortable")
   assert.equal(migrated.preferences?.showDotGridBackground, true)

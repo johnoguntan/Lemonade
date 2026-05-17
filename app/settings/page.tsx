@@ -135,10 +135,15 @@ export default function SettingsPage() {
   }, [refreshNotificationData])
 
   const saveNotificationSettings = async (next: Partial<{ enabled: boolean; quietHoursStart: string | null; quietHoursEnd: string | null }>) => {
+    const payload = {
+      enabled: next.enabled,
+      quiet_hours_start: next.quietHoursStart,
+      quiet_hours_end: next.quietHoursEnd,
+    }
     const response = await fetch("/api/notifications/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(next),
+      body: JSON.stringify(payload),
     })
     if (!response.ok) {
       return

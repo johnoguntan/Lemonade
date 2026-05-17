@@ -80,7 +80,8 @@ create table if not exists public.tasks (
   subtasks jsonb not null default '[]'::jsonb,
   when_added timestamptz not null default now(),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  scheduled_notification_id uuid
 );
 
 create index if not exists tasks_user_id_idx on public.tasks(user_id);
@@ -167,6 +168,48 @@ drop trigger if exists set_shopping_returns_updated_at on public.shopping_return
 create trigger set_shopping_returns_updated_at
 before update on public.shopping_returns
 for each row execute function public.set_updated_at();
+
+-- NOTIFICATION SETTINGS
+create table if not exists public.notification_settings (
+  user_id uuid primary key references public.users(id) on delete cascade,
+  enabled boolean not null default true,
+  permission text not null default 'default',
+  quiet_hours_start text,
+  quiet_hours_end text,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.notification_settings enable row level security;
+create policy "notification_settings_own" on public.notification_settings for all using (auth.uid() = user_id);
+
+-- PUSH SUBSCRIPTIONS
+create table if not exists public.push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users(id) on delete cascade,
+  subscription jsonb not null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.push_subscriptions enable row level security;
+create policy "push_subscriptions_own" on public.push_subscriptions for all using (auth.uid() = user_id);
+
+-- SCHEDULED NOTIFICATIONS
+create table if not exists public.scheduled_notifications (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users(id) on delete cascade,
+  task_id uuid references public.tasks(id) on delete cascade,
+  scheduled_for timestamptz not null,
+  status text not null default 'scheduled',
+  loop_rule text,
+  payload jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint scheduled_notifications_task_id_fkey foreign key (task_id) references public.tasks(id) on delete cascade
+);
+
+create index if not exists scheduled_notifications_user_scheduled_idx on public.scheduled_notifications(user_id, scheduled_for);
+alter table public.scheduled_notifications enable row level security;
+create policy "scheduled_notifications_own" on public.scheduled_notifications for all using (auth.uid() = user_id);
 
 -- RLS
 alter table public.users enable row level security;

@@ -85,8 +85,8 @@ export async function POST(request: Request) {
     const now = new Date().toISOString()
     const { data: due, error } = await admin
       .from("scheduled_notifications")
-      .select("id, user_id, task_id, loop_rule, payload, scheduled_for, tasks!scheduled_notifications_task_id_fkey(id, title, date, time, location, completed)")
-      .eq("status", "scheduled")
+      .select("id, user_id, task_id, loop_rule, payload, scheduled_for, retry_count, status, tasks!scheduled_notifications_task_id_fkey(id, title, date, time, location, completed)")
+      .in("status", ["scheduled", "failed"])
       .lte("scheduled_for", now)
       .limit(200)
 
@@ -95,11 +95,15 @@ export async function POST(request: Request) {
       throw error
     }
 
-    console.error("/api/notifications/dispatch due count", { count: due?.length ?? 0 })
+    const itemsToProcess = (due ?? []).filter((item: any) => 
+      item.status === "scheduled" || (item.status === "failed" && (item.retry_count ?? 0) < 3)
+    )
+
+    console.error("/api/notifications/dispatch due count", { count: itemsToProcess.length })
 
     const processed: string[] = []
 
-    for (const item of due ?? []) {
+    for (const item of itemsToProcess) {
       console.error("/api/notifications/dispatch processing item", {
         id: item.id,
         userId: item.user_id,
@@ -161,6 +165,7 @@ export async function POST(request: Request) {
         })
       )
 
+      let hasFailures = false
       await Promise.all(
         (subs ?? []).map(async (row) => {
           try {
@@ -179,52 +184,63 @@ export async function POST(request: Request) {
             })
             if (code === 404 || code === 410) {
               await admin.from("push_subscriptions").delete().eq("id", row.id)
+            } else {
+              hasFailures = true
             }
           }
         })
       )
 
-      await admin.from("scheduled_notifications").update({ status: "sent" }).eq("id", item.id)
-      processed.push(item.id)
+      if (hasFailures) {
+        const newRetryCount = ((item as any).retry_count ?? 0) + 1
+        const newStatus = newRetryCount >= 3 ? "permanently_failed" : "failed"
+        await admin.from("scheduled_notifications").update({ 
+          status: newStatus,
+          retry_count: newRetryCount 
+        }).eq("id", item.id)
+        console.error("/api/notifications/dispatch item marked as", newStatus, { itemId: item.id, retryCount: newRetryCount })
+      } else {
+        await admin.from("scheduled_notifications").update({ status: "sent" }).eq("id", item.id)
+        processed.push(item.id)
 
-      // Simple looping support (minutes-based).
-      const loopRule = item.loop_rule as string | null
-      const minutes =
-        loopRule === "every-5m"
-          ? 5
-          : loopRule === "every-15m"
-            ? 15
-            : loopRule === "every-30m"
-              ? 30
-              : loopRule === "every-60m"
-                ? 60
-                : null
+        // Simple looping support (minutes-based).
+        const loopRule = item.loop_rule as string | null
+        const minutes =
+          loopRule === "every-5m"
+            ? 5
+            : loopRule === "every-15m"
+              ? 15
+              : loopRule === "every-30m"
+                ? 30
+                : loopRule === "every-60m"
+                  ? 60
+                  : null
 
-      if (minutes) {
-        const next = new Date(Date.now() + minutes * 60 * 1000).toISOString()
-        await admin.from("scheduled_notifications").insert({
-          user_id: item.user_id,
-          task_id: item.task_id,
-          scheduled_for: next,
-          status: "scheduled",
-          loop_rule: loopRule,
-          payload: item.payload ?? null,
-        })
-      } else if (loopRule?.startsWith("every-morning:")) {
-        const timeStr = loopRule.split(":", 2)[1] ?? ""
-        const [h, m] = timeStr.split(":").map((x) => Number(x))
-        if (!Number.isNaN(h) && !Number.isNaN(m)) {
-          const next = new Date()
-          next.setDate(next.getDate() + 1)
-          next.setHours(h, m, 0, 0)
+        if (minutes) {
+          const next = new Date(Date.now() + minutes * 60 * 1000).toISOString()
           await admin.from("scheduled_notifications").insert({
             user_id: item.user_id,
             task_id: item.task_id,
-            scheduled_for: next.toISOString(),
+            scheduled_for: next,
             status: "scheduled",
             loop_rule: loopRule,
             payload: item.payload ?? null,
           })
+        } else if (loopRule?.startsWith("every-morning:")) {
+          const timeStr = loopRule.split(":", 2)[1] ?? ""
+          const [h, m] = timeStr.split(":").map((x) => Number(x))
+          if (!Number.isNaN(h) && !Number.isNaN(m)) {
+            const next = new Date()
+            next.setDate(next.getDate() + 1)
+            next.setHours(h, m, 0, 0)
+            await admin.from("scheduled_notifications").insert({
+              user_id: item.user_id,
+              task_id: item.task_id,
+              scheduled_for: next.toISOString(),
+              status: "scheduled",
+              loop_rule: loopRule,
+              payload: item.payload ?? null,
+          }
         }
       }
     }

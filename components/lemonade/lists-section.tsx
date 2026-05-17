@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { getPlannerTaskDragData, setPlannerTaskDragData } from "@/lib/task-dnd"
+import { TodoItem } from "./todo-item"
 
 export function ListsSection() {
   const { 
@@ -41,7 +42,6 @@ export function ListsSection() {
     toggleListTodo, 
     deleteListTodo,
     preferences,
-    labels,
     searchQuery,
     searchModeActive,
     taskSearchFilters,
@@ -352,9 +352,6 @@ export function ListsSection() {
                 newTodoText={newTodoTexts[list.id] || ""}
                 onNewTodoTextChange={(text) => setNewTodoTexts((prev) => ({ ...prev, [list.id]: text }))}
                 onAddTodo={() => handleAddTodo(list.id)}
-                onToggleTodo={(todoId) => toggleListTodo(list.id, todoId)}
-                onDeleteTodo={(todoId) => deleteListTodo(list.id, todoId)}
-                labels={labels}
                 searchQuery={searchQuery}
                 searchModeActive={searchModeActive}
                 taskSearchFilters={taskSearchFilters}
@@ -398,9 +395,6 @@ interface ListCardProps {
   newTodoText: string
   onNewTodoTextChange: (text: string) => void
   onAddTodo: () => void
-  onToggleTodo: (todoId: string) => void
-  onDeleteTodo: (todoId: string) => void
-  labels: Array<{ id: string; name: string; color: string }>
   searchQuery: string
   searchModeActive: boolean
   taskSearchFilters: TaskSearchFilters
@@ -587,9 +581,6 @@ function ListCard({
   newTodoText, 
   onNewTodoTextChange, 
   onAddTodo,
-  onToggleTodo,
-  onDeleteTodo,
-  labels,
   searchQuery,
   searchModeActive,
   taskSearchFilters,
@@ -812,62 +803,23 @@ function ListCard({
             return (
               <div
                 key={todo.id}
-                className="group/todo flex h-10 items-center gap-2 border-b border-[#e8e8ec] px-2 last:border-b-0 dark:border-white/15"
-                draggable
-                onDragStart={(event) => {
-                  event.stopPropagation()
-                  setPlannerTaskDragData(event, { todoId: todo.id, source: "list", listId: list.id })
-                }}
-                onDragEnd={(event) => {
-                  event.stopPropagation()
-                  setIsTaskDropOver(false)
-                }}
+                className="border-b border-[#e8e8ec] px-2 last:border-b-0 dark:border-white/15"
               >
-                <button
-                  onClick={() => onToggleTodo(todo.id)}
-                  className={cn(
-                    "size-4 rounded-full border border-border flex-shrink-0 flex items-center justify-center opacity-55 transition-opacity group-hover/todo:opacity-100",
-                    todo.completed && "bg-foreground border-foreground"
-                  )}
-                >
-                  {todo.completed && (
-                    <svg className="size-2.5 text-background" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                    </svg>
-                  )}
-                </button>
-                <div className="flex-1 min-w-0">
-                  <div className={cn(
-                    "truncate text-sm text-foreground",
-                    todo.completed && "line-through opacity-50"
-                  )}>
-                    {todo.text}
-                  </div>
-                  {todo.labelIds.length > 0 ? (
-                    <div className="mt-0.5 flex flex-wrap gap-1">
-                      {todo.labelIds.slice(0, 2).map((labelId) => {
-                        const label = labels.find((item) => item.id === labelId)
-                        if (!label) return null
-
-                        return (
-                          <span
-                            key={label.id}
-                            className="rounded-full px-1.5 py-0.5 text-[9px] font-medium text-white"
-                            style={{ backgroundColor: label.color }}
-                          >
-                            {label.name}
-                          </span>
-                        )
-                      })}
-                    </div>
-                  ) : null}
-                </div>
-                <button
-                  onClick={() => onDeleteTodo(todo.id)}
-                  className="opacity-0 text-muted-foreground transition-opacity hover:text-destructive group-hover/todo:opacity-100"
-                >
-                  <Trash2 className="size-3" />
-                </button>
+                <TodoItem
+                  todo={todo}
+                  listId={list.id}
+                  textSizeClass="lemonade-task-text"
+                  draggable
+                  showInlineTaskActions
+                  onDragStart={(event) => {
+                    event.stopPropagation()
+                    setPlannerTaskDragData(event, { todoId: todo.id, source: "list", listId: list.id })
+                  }}
+                  onDragEnd={(event) => {
+                    event.stopPropagation()
+                    setIsTaskDropOver(false)
+                  }}
+                />
               </div>
             )
           }

@@ -5,10 +5,10 @@ import {
   ChevronDown,
   Bell,
   Check,
-  CircleHelp,
   Link2,
   Paperclip,
   ListChecks,
+  NotebookPen,
   Palette,
   Calendar as CalendarIcon,
   Tag,
@@ -31,6 +31,7 @@ import {
   createOptimisticTodoId,
   formatLocalDateKey,
   parseLocalDateKey,
+  type TaskAttachment,
   useLemonadeStore,
 } from "@/lib/store"
 import { addMonths, format, isValid, parseISO } from "date-fns"
@@ -69,6 +70,45 @@ const addDays = (date: Date, amount: number) => {
   const nextDate = new Date(date)
   nextDate.setDate(nextDate.getDate() + amount)
   return nextDate
+}
+
+const readFileAsDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result)
+        return
+      }
+      reject(new Error("Unable to read file"))
+    }
+    reader.onerror = () => reject(reader.error ?? new Error("Unable to read file"))
+    reader.readAsDataURL(file)
+  })
+
+const fileToTaskAttachment = async (file: File): Promise<TaskAttachment> => ({
+  id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${file.name}-${file.lastModified}-${file.size}`,
+  name: file.name,
+  type: file.type,
+  size: file.size,
+  dataUrl: await readFileAsDataUrl(file),
+  createdAt: Date.now(),
+})
+
+const formatAttachmentSize = (bytes: number) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return ""
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+const mergeAttachmentsById = (attachments: TaskAttachment[]) => {
+  const seen = new Set<string>()
+  return attachments.filter((attachment) => {
+    if (seen.has(attachment.id)) return false
+    seen.add(attachment.id)
+    return true
+  })
 }
 
 const optionRowClass = (active: boolean) =>
@@ -271,7 +311,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
   const [quickAddText, setQuickAddText] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [quickAddExpanded, setQuickAddExpanded] = useState(false)
-  const [draftDateKey, setDraftDateKey] = useState<string | null>(selectedCalendarDate)
+  const [draftDateKey, setDraftDateKey] = useState<string | null>(() => formatLocalDateKey(new Date()))
   const [draftListTarget, setDraftListTarget] = useState<
     "this-week" | "next-week" | "this-month" | "next-month" | "this-year" | "next-year" | "someday" | "goals" | null
   >(null)
@@ -292,8 +332,12 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
   const [draftRecurringCustomValue, setDraftRecurringCustomValue] = useState("")
   const [showLinkInput, setShowLinkInput] = useState(false)
   const [draftLink, setDraftLink] = useState("")
-  const [draftAttachments, setDraftAttachments] = useState<Array<{ name: string; type: string; size: number; lastModified: number }>>([])
+  const [showNoteInput, setShowNoteInput] = useState(false)
+  const [draftNoteText, setDraftNoteText] = useState("")
+  const [draftAttachments, setDraftAttachments] = useState<TaskAttachment[]>([])
+  const [isReadingAttachments, setIsReadingAttachments] = useState(false)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
+  const pendingAttachmentReadRef = useRef<Promise<TaskAttachment[]> | null>(null)
   const [showSubtaskInput, setShowSubtaskInput] = useState(false)
   const [draftSubtasks, setDraftSubtasks] = useState<string[]>([])
   const [draftSubtaskText, setDraftSubtaskText] = useState("")
@@ -305,7 +349,6 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
   const [showDraftColorPopover, setShowDraftColorPopover] = useState(false)
   const [draftColor, setDraftColor] = useState<string | undefined>(undefined)
   const [showShortcutDatePopover, setShowShortcutDatePopover] = useState(false)
-  const [showQuickAddTips, setShowQuickAddTips] = useState(false)
   const [parsedPreview, setParsedPreview] = useState<AiParsedTask | null>(null)
   const [editingParsedTask, setEditingParsedTask] = useState<AiParsedTask | null>(null)
   const [searchFiltersExpanded, setSearchFiltersExpanded] = useState(false)
@@ -366,16 +409,17 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
 
   const draftNotes = useMemo(() => {
     const lines: string[] = []
+    const trimmedNote = draftNoteText.trim()
+    if (trimmedNote) {
+      lines.push(trimmedNote)
+    }
     const trimmedLink = draftLink.trim()
     if (trimmedLink) {
       lines.push(trimmedLink)
     }
-    draftAttachments.forEach((file) => {
-      lines.push(`Attachment: ${file.name}`)
-    })
     const joined = lines.join("\n").trim()
     return joined ? joined : undefined
-  }, [draftAttachments, draftLink])
+  }, [draftLink, draftNoteText])
 
   const sessionTodos = useMemo(() => {
     if (quickAddSessionTodoIds.length === 0) return []
@@ -425,6 +469,9 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     activeFilterColor !== null
 
   const resetPerTaskDraft = useCallback(() => {
+    setDraftListTarget(null)
+    setDraftDateKey(formatLocalDateKey(new Date()))
+    setDraftDateTouched(false)
     setShowReminderPopover(false)
     setDraftReminderOffsetMinutes(null)
     setDraftReminderCustomMinutes("")
@@ -441,7 +488,11 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     setShowTimePopover(false)
     setShowLinkInput(false)
     setDraftLink("")
+    setShowNoteInput(false)
+    setDraftNoteText("")
     setDraftAttachments([])
+    setIsReadingAttachments(false)
+    pendingAttachmentReadRef.current = null
     setShowSubtaskInput(false)
     setDraftSubtasks([])
     setDraftSubtaskText("")
@@ -483,10 +534,10 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
 
   const clearDraftDestination = useCallback(() => {
     setDraftListTarget(null)
-    setDraftDateKey(selectedCalendarDate)
+    setDraftDateKey(formatLocalDateKey(new Date()))
     setDraftDateTouched(false)
     focusQuickAddInput()
-  }, [focusQuickAddInput, selectedCalendarDate])
+  }, [focusQuickAddInput])
 
   const resolveListTargetFromPrefix = (raw: string) => {
     const trimmed = raw.trim()
@@ -563,11 +614,11 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     setQuickAddExpanded(false)
     setQuickAddText("")
     resetPerTaskDraft()
-    setDraftDateKey(selectedCalendarDate)
+    setDraftDateKey(formatLocalDateKey(new Date()))
     setDraftDateTouched(false)
     setDraftTime("")
     setShowShortcutDatePopover(false)
-  }, [resetPerTaskDraft, selectedCalendarDate])
+  }, [resetPerTaskDraft])
 
   const openQuickAdd = useCallback(() => {
     setQuickAddExpanded(true)
@@ -617,10 +668,42 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       return
     }
 
-    setDraftAttachments((current) => current.concat(
-      files.map((file) => ({ name: file.name, type: file.type, size: file.size, lastModified: file.lastModified }))
-    ))
+    const readPromise = Promise.all(files.map(fileToTaskAttachment))
+    pendingAttachmentReadRef.current = readPromise
+    setIsReadingAttachments(true)
+
+    void readPromise
+      .then((attachments) => {
+        setDraftAttachments((current) => current.concat(attachments))
+        toast(`${attachments.length === 1 ? "Attachment" : "Attachments"} added`, { duration: 1800 })
+      })
+      .catch(() => toast("Could not attach one or more files", { duration: 2500 }))
+      .finally(() => {
+        if (pendingAttachmentReadRef.current === readPromise) {
+          pendingAttachmentReadRef.current = null
+          setIsReadingAttachments(false)
+        }
+      })
+
     event.target.value = ""
+  }
+
+  const getSettledDraftAttachments = useCallback(async () => {
+    const pendingRead = pendingAttachmentReadRef.current
+    if (!pendingRead) {
+      return draftAttachments
+    }
+
+    try {
+      const pendingAttachments = await pendingRead
+      return mergeAttachmentsById(draftAttachments.concat(pendingAttachments))
+    } catch {
+      return draftAttachments
+    }
+  }, [draftAttachments])
+
+  const removeDraftAttachment = (attachmentId: string) => {
+    setDraftAttachments((current) => current.filter((attachment) => attachment.id !== attachmentId))
   }
 
   const addDraftSubtask = () => {
@@ -838,7 +921,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       : null
   }, [todayKey])
 
-  const createTaskFromParsedPreview = (task: AiParsedTask) => {
+  const createTaskFromParsedPreview = (task: AiParsedTask, attachments: TaskAttachment[] = draftAttachments) => {
     const title = task.title.trim()
     if (!title) return
 
@@ -846,7 +929,15 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     if (routedBucket) {
       const cleaned = stripBucketPrefix(title)
       if (cleaned) {
-        useLemonadeStore.getState().addListTodo(routedBucket, cleaned)
+        const store = useLemonadeStore.getState()
+        store.addListTodo(routedBucket, cleaned)
+        const createdTodo = useLemonadeStore.getState().lists.find((list) => list.id === routedBucket)?.todos.at(-1)
+        if (createdTodo && (draftNotes || attachments.length > 0)) {
+          useLemonadeStore.getState().updateListTodo(routedBucket, createdTodo.id, {
+            notes: draftNotes,
+            attachments,
+          })
+        }
       }
       setQuickAddText("")
       resetPerTaskDraft()
@@ -874,6 +965,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       subtasks: draftSubtasks.map((subtaskTitle) => ({ title: subtaskTitle })),
       color: draftColor,
       notes: notes || undefined,
+      attachments,
       url: task.url ?? (task.phone ? `tel:${task.phone}` : undefined),
       location: task.location ?? undefined,
       durationMinutes: draftDurationMinutes ?? task.duration ?? undefined,
@@ -899,7 +991,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     }
   }
 
-  const createTaskFromEditedParsedDraft = (task: AiParsedTask) => {
+  const createTaskFromEditedParsedDraft = (task: AiParsedTask, attachments: TaskAttachment[] = draftAttachments) => {
     const title = quickAddText.trim()
     if (!title) return
 
@@ -907,7 +999,15 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     if (routedBucket) {
       const cleaned = stripBucketPrefix(title)
       if (cleaned) {
-        useLemonadeStore.getState().addListTodo(routedBucket, cleaned)
+        const store = useLemonadeStore.getState()
+        store.addListTodo(routedBucket, cleaned)
+        const createdTodo = useLemonadeStore.getState().lists.find((list) => list.id === routedBucket)?.todos.at(-1)
+        if (createdTodo && (draftNotes || attachments.length > 0)) {
+          useLemonadeStore.getState().updateListTodo(routedBucket, createdTodo.id, {
+            notes: draftNotes,
+            attachments,
+          })
+        }
       }
       setQuickAddText("")
       resetPerTaskDraft()
@@ -936,6 +1036,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       subtasks: draftSubtasks.map((subtaskTitle) => ({ title: subtaskTitle })),
       color: draftColor,
       notes: notes || undefined,
+      attachments,
       url: trimmedLink || task.url || (task.phone ? `tel:${task.phone}` : undefined),
       location: task.location ?? undefined,
       durationMinutes: draftDurationMinutes ?? task.duration ?? undefined,
@@ -993,6 +1094,8 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       return
     }
 
+    const settledDraftAttachments = await getSettledDraftAttachments()
+
     // Fast path: if user selected a bucket shortcut OR typed bucket language,
     // route immediately to the planning list (skip AI parsing to keep input snappy).
     const routedBucket =
@@ -1002,7 +1105,15 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     if (routedBucket) {
       const cleaned = stripBucketWords(stripBucketPrefix(rawInputString))
       if (cleaned) {
-        useLemonadeStore.getState().addListTodo(routedBucket, cleaned)
+        const store = useLemonadeStore.getState()
+        store.addListTodo(routedBucket, cleaned)
+        const createdTodo = useLemonadeStore.getState().lists.find((list) => list.id === routedBucket)?.todos.at(-1)
+        if (createdTodo && (draftNotes || settledDraftAttachments.length > 0)) {
+          useLemonadeStore.getState().updateListTodo(routedBucket, createdTodo.id, {
+            notes: draftNotes,
+            attachments: settledDraftAttachments,
+          })
+        }
       }
       setQuickAddText("")
       resetPerTaskDraft()
@@ -1012,18 +1123,18 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
     }
 
     if (parsedPreview) {
-      createTaskFromParsedPreview(parsedPreview)
+      createTaskFromParsedPreview(parsedPreview, settledDraftAttachments)
       return
     }
 
     if (editingParsedTask) {
-      createTaskFromEditedParsedDraft(editingParsedTask)
+      createTaskFromEditedParsedDraft(editingParsedTask, settledDraftAttachments)
       return
     }
 
     const deterministicTask = buildDeterministicQuickAddTask(rawInputString)
     if (deterministicTask) {
-      createTaskFromParsedPreview(deterministicTask)
+      createTaskFromParsedPreview(deterministicTask, settledDraftAttachments)
       return
     }
 
@@ -1042,6 +1153,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
         subtasks: draftSubtasks.map((subtaskTitle) => ({ title: subtaskTitle })),
         color: draftColor,
         notes: draftNotes,
+        attachments: settledDraftAttachments,
         durationMinutes: draftDurationMinutes ?? undefined,
         reminderOffsetMinutes: draftReminderOffsetMinutes,
         ...resolveRecurringTodoFields(buildDraftRecurringTask({
@@ -1089,6 +1201,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       subtasks: [...draftSubtasks],
       color: draftColor,
       notes: draftNotes,
+      attachments: [...settledDraftAttachments],
       durationMinutes: draftDurationMinutes,
       reminderOffsetMinutes: draftReminderOffsetMinutes,
       recurring: draftRecurring,
@@ -1129,6 +1242,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
       subtasks: draftSnapshot.subtasks.map((subtaskTitle) => ({ title: subtaskTitle })),
       color: draftSnapshot.color,
       notes: draftSnapshot.notes,
+      attachments: draftSnapshot.attachments,
       durationMinutes: draftSnapshot.durationMinutes ?? undefined,
       reminderOffsetMinutes: draftSnapshot.reminderOffsetMinutes,
       ...resolveRecurringTodoFields(optimisticRecurringTask),
@@ -1392,7 +1506,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
               }
             }}
             className={cn(
-              "h-auto min-w-[120px] flex-[1_1_240px] rounded-full border-0 bg-transparent py-0 pl-1 pr-0 text-[14px] text-foreground shadow-none focus-visible:ring-0 sm:min-w-[180px]",
+              "h-auto min-w-[96px] flex-[0_1_210px] rounded-full border-0 bg-transparent py-0 pl-1 pr-0 text-[14px] text-foreground shadow-none focus-visible:ring-0 sm:min-w-[130px] sm:max-w-[260px]",
               isMobile && "text-[15px]"
             )}
           />
@@ -1472,40 +1586,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
             </div>
           ) : null}
 
-          {!searchModeActive ? (
-            <Popover open={showQuickAddTips} onOpenChange={setShowQuickAddTips}>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="size-8 rounded-full text-muted-foreground hover:text-foreground"
-                  aria-label="Task entry tips"
-                  title="Task entry tips"
-                >
-                  <CircleHelp className="size-4" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent
-                align="end"
-                side="bottom"
-                sideOffset={10}
-                data-quick-add-surface="true"
-                className="z-50 w-[280px] rounded-2xl border border-border/60 p-3 shadow-md"
-              >
-                <div className="space-y-2 text-[12px] leading-5 text-foreground">
-                  <div className="font-medium">Tips for adding details:</div>
-                  <div>📞 <span className="font-medium">call:</span> [number] — phone number</div>
-                  <div>🔗 <span className="font-medium">link:</span> [url] — web address</div>
-                  <div>📍 <span className="font-medium">at:</span> [place] — location</div>
-                  <div>⏱ <span className="font-medium">for:</span> [time] — duration</div>
-                  <div>🔔 <span className="font-medium">remind:</span> [time] — reminder</div>
-                  <div>📝 <span className="font-medium">note:</span> [text] — add a note</div>
-                </div>
-              </PopoverContent>
-            </Popover>
-          ) : null}
-
+          <div className="flex max-w-[126px] flex-none items-center gap-1 overflow-x-auto overscroll-x-contain pl-1 [scrollbar-width:none] sm:max-w-[138px] [&::-webkit-scrollbar]:hidden">
           {searchModeActive ? (
             <>
               <Button
@@ -1572,12 +1653,18 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                 <ChevronDown className={cn("size-4 transition-transform", quickAddExpanded && "rotate-180")} />
               </Button>
 
+            </>
+          )}
+          </div>
+
+          {!searchModeActive ? (
+            <div className="ml-auto flex-none">
               <Popover
                 open={showShortcutDatePopover}
                 onOpenChange={(open) => {
                   setShowShortcutDatePopover(open)
                   if (open) {
-                    setShortcutPickerMonth(parseLocalDateKey(selectedCalendarDate))
+                    setShortcutPickerMonth(parseLocalDateKey(draftDateKey ?? formatLocalDateKey(new Date())))
                   }
                 }}
               >
@@ -1588,7 +1675,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                     size="icon"
                     className={cn(
                       isMobile ? "size-10 rounded-full text-muted-foreground hover:text-foreground" : "size-9 rounded-full text-muted-foreground hover:text-foreground",
-                      draftDateKey !== selectedCalendarDate && "text-foreground"
+                      (draftDateTouched || draftListTarget !== null) && "text-foreground"
                     )}
                     aria-label="Pick a date"
                     title="Pick a date"
@@ -1683,8 +1770,8 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                   </div>
                 </PopoverContent>
               </Popover>
-            </>
-          )}
+            </div>
+          ) : null}
         </div>
 
         {parsedPreview && !searchModeActive ? (
@@ -2504,6 +2591,22 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
               <Button
                 type="button"
                 variant="ghost"
+                size="sm"
+                onClick={() => setShowNoteInput((open) => !open)}
+                className={cn(
+                  "h-8 rounded-full px-2.5 text-muted-foreground hover:text-foreground",
+                  draftNoteText.trim() && "text-foreground"
+                )}
+                aria-label="Add note"
+                title="Note"
+              >
+                <NotebookPen className="mr-1.5 size-4" />
+                <span className="text-[11px] font-medium">Note</span>
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
                 size="icon"
                 onClick={() => setShowLinkInput((open) => !open)}
                 className={cn("size-8 hover:text-foreground", draftLink.trim() && "text-foreground")}
@@ -2700,12 +2803,43 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                 variant="ghost"
                 size="icon"
                 onClick={() => attachmentInputRef.current?.click()}
-                className={cn("size-8 hover:text-foreground", draftAttachments.length > 0 && "text-foreground")}
+                className={cn("size-8 hover:text-foreground", (draftAttachments.length > 0 || isReadingAttachments) && "text-foreground")}
                 aria-label="Attach files"
+                title="Attach files"
               >
                 <Paperclip className="size-4" />
               </Button>
             </div>
+
+            {showNoteInput ? (
+              <div className="mt-2 flex items-center gap-2">
+                <Input
+                  placeholder="Add a note"
+                  value={draftNoteText}
+                  onChange={(event) => setDraftNoteText(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      setShowNoteInput(false)
+                    }
+                  }}
+                  className="h-9"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setDraftNoteText("")
+                    setShowNoteInput(false)
+                  }}
+                  className="size-9 text-muted-foreground hover:text-foreground"
+                  aria-label="Close note input"
+                  title="Close note"
+                >
+                  <X className="size-4" />
+                </Button>
+              </div>
+            ) : null}
 
             {showLinkInput ? (
               <div className="mt-2 flex items-center gap-2">
@@ -2733,6 +2867,54 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                 >
                   <X className="size-4" />
                 </Button>
+              </div>
+            ) : null}
+
+            {draftAttachments.length > 0 || isReadingAttachments ? (
+              <div className="mt-2 rounded-2xl border border-border/70 bg-background/75 p-2">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <div className="text-[11px] font-medium text-muted-foreground">
+                    Attachments
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => attachmentInputRef.current?.click()}
+                    className="text-[10px] font-medium text-foreground/75 hover:text-foreground"
+                  >
+                    Add another
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {draftAttachments.map((attachment) => {
+                    const sizeLabel = formatAttachmentSize(attachment.size)
+
+                    return (
+                      <span
+                        key={attachment.id}
+                        className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border/70 bg-muted/55 px-2 py-1 text-[11px] text-foreground"
+                      >
+                        <Paperclip className="size-3 shrink-0 text-muted-foreground" />
+                        <span className="max-w-[180px] truncate">{attachment.name}</span>
+                        {sizeLabel ? <span className="text-[10px] text-muted-foreground">{sizeLabel}</span> : null}
+                        <button
+                          type="button"
+                          onClick={() => removeDraftAttachment(attachment.id)}
+                          className="text-muted-foreground hover:text-destructive"
+                          aria-label={`Remove ${attachment.name}`}
+                          title="Remove attachment"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </span>
+                    )
+                  })}
+                  {isReadingAttachments ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border px-2 py-1 text-[11px] text-muted-foreground">
+                      <Paperclip className="size-3" />
+                      Uploading...
+                    </span>
+                  ) : null}
+                </div>
               </div>
             ) : null}
 

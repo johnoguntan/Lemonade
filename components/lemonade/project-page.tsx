@@ -196,7 +196,13 @@ export function ProjectPage({ startDate: _startDate }: ProjectPageProps) {
                   })}
                 </div>
                 {todos.map((todo) => (
-                  <TodoItem key={todo.id} todo={todo} textSizeClass="lemonade-task-text" />
+                  <TodoItem
+                    key={todo.id}
+                    todo={todo}
+                    textSizeClass="lemonade-task-text"
+                    showInlineTaskActions
+                    openDetailsOnTextClick
+                  />
                 ))}
               </div>
             ))}

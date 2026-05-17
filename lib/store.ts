@@ -23,6 +23,15 @@ export interface Label {
   color: string
 }
 
+export interface TaskAttachment {
+  id: string
+  name: string
+  type: string
+  size: number
+  dataUrl: string
+  createdAt: number
+}
+
 export interface Todo {
   id: string
   text: string
@@ -57,6 +66,7 @@ export interface Todo {
   storeName?: string
   returnDeadline?: string
   notes?: string
+  attachments?: TaskAttachment[]
 }
 
 export type CalendarTimeframe = "week" | "next-week" | "next-month" | "next-year" | "this-month" | "this-year"
@@ -692,8 +702,9 @@ export const todoMatchesSearchFilters = (
   if (taskSearchFilters.icon && todo.icon !== taskSearchFilters.icon) return false
 
   const notesMetadata = extractTaskNotesMetadata(todo.notes)
-  if (taskSearchFilters.attachment === "yes" && !notesMetadata.hasAttachment) return false
-  if (taskSearchFilters.attachment === "no" && notesMetadata.hasAttachment) return false
+  const hasAttachment = notesMetadata.hasAttachment || (todo.attachments?.length ?? 0) > 0
+  if (taskSearchFilters.attachment === "yes" && !hasAttachment) return false
+  if (taskSearchFilters.attachment === "no" && hasAttachment) return false
   if (taskSearchFilters.url === "yes" && !notesMetadata.hasUrl) return false
   if (taskSearchFilters.url === "no" && notesMetadata.hasUrl) return false
   if (taskSearchFilters.phone === "yes" && !notesMetadata.hasPhone) return false
@@ -723,12 +734,13 @@ const normalizeSubtask = (
 // 0: legacy persisted state before explicit versioning/migrations
 // 1: normalized persisted preferences, todos, lists, weekCount, and calendar expansion
 // 2: normalized task metadata fields including reminders, duration, icons, photos, URLs, and locations
+// 3: normalized downloadable task attachments
 //
 // When you add or rename persisted fields:
 // 1. bump STORAGE_VERSION
 // 2. add the migration branch in `migrate`
 // 3. keep `normalizePersistedState` backward-safe for older payloads
-export const STORAGE_VERSION = 2
+export const STORAGE_VERSION = 3
 export const LEMONADE_STORAGE_KEY = "lemonade-storage"
 
 const normalizeTodo = (todo: Todo, fallbackCreatedAt: number): Todo => {
@@ -781,6 +793,24 @@ const normalizeTodo = (todo: Todo, fallbackCreatedAt: number): Todo => {
     storeName: typeof todo.storeName === "string" ? todo.storeName : undefined,
     returnDeadline: typeof todo.returnDeadline === "string" ? todo.returnDeadline : undefined,
     notes: typeof todo.notes === "string" ? todo.notes : undefined,
+    attachments: Array.isArray(todo.attachments)
+      ? todo.attachments
+          .filter((attachment) =>
+            attachment &&
+            typeof attachment.id === "string" &&
+            typeof attachment.name === "string" &&
+            typeof attachment.dataUrl === "string" &&
+            attachment.dataUrl.trim().length > 0
+          )
+          .map((attachment) => ({
+            id: attachment.id,
+            name: attachment.name.trim(),
+            type: typeof attachment.type === "string" ? attachment.type : "",
+            size: typeof attachment.size === "number" && Number.isFinite(attachment.size) ? attachment.size : 0,
+            dataUrl: attachment.dataUrl,
+            createdAt: typeof attachment.createdAt === "number" ? attachment.createdAt : fallbackCreatedAt,
+          }))
+      : undefined,
   }
 }
 

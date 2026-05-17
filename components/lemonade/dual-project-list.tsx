@@ -169,7 +169,13 @@ export function DualProjectList({ startDate }: DualProjectListProps) {
                   )}
                 </div>
                 {todos.map((todo) => (
-                  <TodoItem key={todo.id} todo={todo} textSizeClass="lemonade-task-text" />
+                  <TodoItem
+                    key={todo.id}
+                    todo={todo}
+                    textSizeClass="lemonade-task-text"
+                    showInlineTaskActions
+                    openDetailsOnTextClick
+                  />
                 ))}
               </div>
             ))}
