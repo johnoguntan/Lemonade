@@ -127,6 +127,14 @@ test("extracts location shortcut while keeping weekday and time context", () => 
   assert.equal(result.inputForModel, "Lunch Thursday at 1pm")
 })
 
+test("keeps plain for month phrases as date context, not duration notes", () => {
+  const result = extractExplicitSignals("buy Busch gardens tix for June")
+
+  assert.equal(result.explicit.duration, null)
+  assert.equal(result.explicit.notes, null)
+  assert.equal(result.inputForModel, "buy Busch gardens tix for June")
+})
+
 test("supports this/next weekday fallback dates", () => {
   assert.equal(detectFallbackDate("Lunch this thursday", "2026-04-28"), "2026-04-30")
   assert.equal(detectFallbackDate("Lunch next thursday", "2026-04-28"), "2026-05-07")

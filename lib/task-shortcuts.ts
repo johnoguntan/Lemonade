@@ -24,7 +24,7 @@ const normalizeWeekdayIndex = (value: string | null | undefined) => {
 const explicitMarkerPattern =
   /(?:\bcall:|📞|\blink:|\burl:|🔗|\bat:|\bloc:|📍|\bduration:|\bfor:|⏱|\bremind:|🔔|\bnote:|📝|\battach:|📎)/i;
 const dateTimeBoundaryPattern =
-  /\s+(?:today|tomorrow|tonight|this\s+(?:week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|next\s+(?:week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|monday|tuesday|wednesday|thursday|friday|saturday|sunday|in\s+\d+\s*(?:minutes?|mins?|m|hours?|hrs?|h|days?)|after\s+\d+\s*(?:minutes?|mins?|m|hours?|hrs?|h|days?)|\d{1,2}(?::\d{2})?\s*(?:am|pm)|\d{1,2}:\d{2}|\d{4}-\d{2}-\d{2})\b/i;
+  /\s+(?:today|tomorrow|tonight|this\s+(?:week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|next\s+(?:week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|monday|tuesday|wednesday|thursday|friday|saturday|sunday|in\s+\d+\s*(?:minutes?|mins?|m|hours?|hrs?|h|days?)|after\s+\d+\s*(?:minutes?|mins?|m|hours?|hrs?|h|days?)|\d{1,2}(?::\d{2})?\s*(?:am|pm)|\d{1,2}:\d{2}|\d{4}-\d{2}-\d{2})\b/i;
 const phonePattern = /(?:\+?\d[\d()\-\s]{6,}\d)/;
 const urlPattern = /(?:https?:\/\/[^\s,;]+|www\.[^\s,;]+|[a-z0-9-]+\.[a-z]{2,}(?:\/[^\s,;]*)?)/i;
 
