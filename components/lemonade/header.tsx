@@ -1587,34 +1587,7 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
           ) : null}
 
           <div className="flex max-w-[126px] flex-none items-center gap-1 overflow-x-auto overscroll-x-contain pl-1 [scrollbar-width:none] sm:max-w-[138px] [&::-webkit-scrollbar]:hidden">
-          {searchModeActive ? (
-            <>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => setSearchFiltersExpanded((current) => !current)}
-                className="size-8 rounded-full text-muted-foreground hover:text-foreground"
-                aria-label={searchFiltersExpanded ? "Collapse filters" : "Expand filters"}
-                title={searchFiltersExpanded ? "Collapse filters" : "Expand filters"}
-              >
-                <ChevronDown className={cn("size-4 transition-transform", searchFiltersExpanded && "rotate-180")} />
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={clearSearchMode}
-                className="size-8 rounded-full text-muted-foreground hover:text-foreground"
-                aria-label="Exit search mode"
-                title="Exit search mode"
-              >
-                <X className="size-4" />
-              </Button>
-            </>
-          ) : (
-            <>
-              {quickAddText.trim() ? (
+              {!searchModeActive && quickAddText.trim() ? (
                 <Button
                   type="button"
                   variant="ghost"
@@ -1632,7 +1605,36 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                   <Check className="size-4" />
                 </Button>
               ) : null}
+          </div>
 
+          <div className="ml-auto flex-none flex items-center gap-0.5">
+            {searchModeActive ? (
+              <>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setSearchFiltersExpanded((current) => !current)}
+                  className="size-8 rounded-full text-muted-foreground hover:text-foreground"
+                  aria-label={searchFiltersExpanded ? "Collapse filters" : "Expand filters"}
+                  title={searchFiltersExpanded ? "Collapse filters" : "Expand filters"}
+                >
+                  <ChevronDown className={cn("size-4 transition-transform", searchFiltersExpanded && "rotate-180")} />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={clearSearchMode}
+                  className="size-8 rounded-full text-muted-foreground hover:text-foreground"
+                  aria-label="Exit search mode"
+                  title="Exit search mode"
+                >
+                  <X className="size-4" />
+                </Button>
+              </>
+            ) : (
+              <>
               <Button
                 type="button"
                 variant="ghost"
@@ -1644,21 +1646,14 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                     openQuickAdd()
                   }
                 }}
-                  className={cn(
-                    isMobile ? "size-10 rounded-full text-muted-foreground hover:text-foreground" : "size-9 rounded-full text-muted-foreground hover:text-foreground"
-                  )}
+                className={cn(
+                  isMobile ? "size-10 rounded-full text-muted-foreground hover:text-foreground" : "size-9 rounded-full text-muted-foreground hover:text-foreground"
+                )}
                 aria-label={quickAddExpanded ? "Collapse" : "Expand"}
                 title={quickAddExpanded ? "Collapse" : "Expand"}
               >
                 <ChevronDown className={cn("size-4 transition-transform", quickAddExpanded && "rotate-180")} />
               </Button>
-
-            </>
-          )}
-          </div>
-
-          {!searchModeActive ? (
-            <div className="ml-auto flex-none">
               <Popover
                 open={showShortcutDatePopover}
                 onOpenChange={(open) => {
@@ -1770,8 +1765,9 @@ export function Header({ onNavigate: _onNavigate, viewMode: _viewMode, onViewMod
                   </div>
                 </PopoverContent>
               </Popover>
-            </div>
-          ) : null}
+              </>
+            )}
+          </div>
         </div>
 
         {parsedPreview && !searchModeActive ? (
