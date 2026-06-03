@@ -1,9 +1,8 @@
+import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
+import { getSupabaseEnv, ALESSANDRO_AUTH_STORAGE_KEY } from "@/lib/supabase"
 
-import { createSupabaseMiddlewareClient } from "@/lib/supabase/middleware"
-
-const PUBLIC_PATH_PREFIXES = ["/auth/login", "/auth/callback", "/_next", "/icons", "/manifest.json", "/icon.svg", "/apple-icon.png"]
-const THIRTY_DAYS_SECONDS = 30 * 24 * 60 * 60
+const PUBLIC_PATH_PREFIXES = ["/login", "/auth/callback", "/_next", "/icons", "/manifest.json", "/icon.svg", "/apple-icon.png"]
 
 function isPublicPath(pathname: string) {
   if (PUBLIC_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
@@ -14,37 +13,61 @@ function isPublicPath(pathname: string) {
 }
 
 export async function middleware(request: NextRequest) {
-  const response = NextResponse.next({
+  const { pathname } = request.nextUrl
+
+  if (pathname === "/auth/login") {
+    const loginUrl = request.nextUrl.clone()
+    loginUrl.pathname = "/login"
+    return NextResponse.redirect(loginUrl)
+  }
+
+  let response = NextResponse.next({
     request: {
       headers: request.headers,
     },
   })
 
-  const supabase = createSupabaseMiddlewareClient(request, response)
+  const { url, anonKey } = getSupabaseEnv()
+  if (!url || !anonKey) {
+    return response
+  }
+
+  const supabase = createServerClient(url, anonKey, {
+    cookieOptions: {
+      name: ALESSANDRO_AUTH_STORAGE_KEY,
+    },
+    cookies: {
+      getAll() {
+        return request.cookies.getAll()
+      },
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
+        response = NextResponse.next({
+          request: {
+            headers: request.headers,
+          },
+        })
+        cookiesToSet.forEach(({ name, value, options }) => {
+          response.cookies.set(name, value, options)
+        })
+      },
+    },
+  })
+
   const {
     data: { session },
   } = await supabase.auth.getSession()
 
-  const { pathname } = request.nextUrl
-
-  // Grace period: if the user had a valid session recently, allow the app shell to load
-  // so the client can silently refresh the session (avoids showing login on refresh).
-  const lastAuthCookie = request.cookies.get("alessandro-auth-last")?.value
-  const lastAuthMs = lastAuthCookie ? Number.parseInt(lastAuthCookie, 10) : NaN
-  const withinGracePeriod = Number.isFinite(lastAuthMs) && Date.now() - lastAuthMs <= THIRTY_DAYS_SECONDS * 1000
-
-  if (!session && !isPublicPath(pathname) && !withinGracePeriod) {
+  if (!session && !isPublicPath(pathname)) {
     const loginUrl = request.nextUrl.clone()
-    loginUrl.pathname = "/auth/login"
-    loginUrl.searchParams.set("next", pathname)
+    loginUrl.pathname = "/login"
     return NextResponse.redirect(loginUrl)
   }
 
-  if (session && pathname === "/auth/login") {
-    const nextUrl = request.nextUrl.clone()
-    nextUrl.pathname = "/"
-    nextUrl.searchParams.delete("next")
-    return NextResponse.redirect(nextUrl)
+  if (session && pathname === "/login") {
+    const homeUrl = request.nextUrl.clone()
+    homeUrl.pathname = "/"
+    return NextResponse.redirect(homeUrl)
   }
 
   return response

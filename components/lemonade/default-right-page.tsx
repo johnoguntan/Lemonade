@@ -69,6 +69,7 @@ export function DefaultRightPage({ startDate, onNavigate: _onNavigate }: Default
   const [renderedDayCount, setRenderedDayCount] = useState(INITIAL_RENDERED_DAYS)
   const pageRef = useRef<HTMLDivElement | null>(null)
   const scrollParentRef = useRef<HTMLElement | null>(null)
+  const [draggedTodoId, setDraggedTodoId] = useState<string | null>(null)
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const loadMoreBottomRef = useRef<HTMLDivElement | null>(null)
   const visibleDays = useMemo(
@@ -144,6 +145,7 @@ export function DefaultRightPage({ startDate, onNavigate: _onNavigate }: Default
 
   const handlePplTodoDragStart = (event: DragEvent<HTMLDivElement>, todoId: string) => {
     setPlannerTaskDragData(event, { todoId, source: "calendar" })
+    setDraggedTodoId(todoId)
   }
 
   return (
@@ -162,8 +164,10 @@ export function DefaultRightPage({ startDate, onNavigate: _onNavigate }: Default
                   key={todo.id}
                   todo={todo}
                   textSizeClass="lemonade-task-text"
+                  isDragging={todo.id === draggedTodoId}
                   draggable
                   onDragStart={(event) => handlePplTodoDragStart(event, todo.id)}
+                  onDragEnd={() => setDraggedTodoId(null)}
                 />
               ))}
               {pplTodos.length === 0 ? (

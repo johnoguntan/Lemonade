@@ -23,6 +23,7 @@ export function DevNotificationDispatcher() {
     if (process.env.NODE_ENV === "production") return
     if (!supabase) return
     if (!process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY) return
+    if (typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)) return
 
     let cancelled = false
 

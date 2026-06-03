@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import type { ReactNode } from 'react'
 import { Analytics } from '@vercel/analytics/next'
+import { AuthProvider } from '@/components/providers/AuthProvider'
 import { ThemeProvider } from '@/components/theme-provider'
 import { AccentColorSync } from '@/components/accent-color-sync'
 import { PwaUpdateBanner } from '@/components/pwa-update-banner'
@@ -84,15 +85,17 @@ export default function RootLayout({
           enableSystem={false}
           disableTransitionOnChange
         >
-          <AccentColorSync />
-          <SessionManager />
-          <CloudSyncManager />
-          <ServiceWorkerManager />
-          <NotificationManager />
-          <DevNotificationDispatcher />
-          {children}
-          <PwaUpdateBanner />
-          <Toaster richColors closeButton />
+          <AuthProvider>
+            <AccentColorSync />
+            <SessionManager />
+            <CloudSyncManager />
+            <ServiceWorkerManager />
+            <NotificationManager />
+            <DevNotificationDispatcher />
+            {children}
+            <PwaUpdateBanner />
+            <Toaster richColors closeButton />
+          </AuthProvider>
         </ThemeProvider>
         <Analytics />
       </body>

@@ -44,6 +44,9 @@ export function CloudSyncManager() {
   const lastPushedAtRef = useRef<number>(0)
 
   useEffect(() => {
+    if (typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)) {
+      return
+    }
     if (!supabase) return
     let cancelled = false
     void getSupabaseBrowserSession(supabase)
@@ -104,6 +107,9 @@ export function CloudSyncManager() {
 
   // Bootstrap (load remote, merge/overwrite local as needed).
   useEffect(() => {
+    if (typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)) {
+      return
+    }
     if (!supabase || !userId || !syncAvailable) return
     if (lastBootstrappedUserRef.current === userId) return
     lastBootstrappedUserRef.current = userId
@@ -142,6 +148,9 @@ export function CloudSyncManager() {
 
   // Background sync: local store is source of truth, push snapshot in the background (debounced).
   useEffect(() => {
+    if (typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)) {
+      return
+    }
     if (!supabase || !userId || !syncAvailable) return
 
     const unsubscribe = useLemonadeStore.subscribe(() => {

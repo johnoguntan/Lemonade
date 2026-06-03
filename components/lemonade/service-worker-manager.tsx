@@ -16,6 +16,7 @@ const urlBase64ToUint8Array = (base64String: string) => {
 export function ServiceWorkerManager() {
   useEffect(() => {
     if (typeof window === "undefined") return
+    if (["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)) return
     if (!("serviceWorker" in navigator)) return
 
     ;(async () => {

@@ -53,6 +53,8 @@ const computeReminderScheduleIso = (todo: {
 
 export function NotificationManager() {
   const calendarTodos = useLemonadeStore((state) => state.calendarTodos)
+  const isLocalDevHost =
+    typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)
   const supabase = useMemo(() => {
     try {
       return createSupabaseBrowserClient()
@@ -209,6 +211,7 @@ export function NotificationManager() {
   }, [notificationsApiAvailable])
 
   useEffect(() => {
+    if (isLocalDevHost) return
     if (!supabase) return
 
     queueMicrotask(() => {
@@ -223,9 +226,10 @@ export function NotificationManager() {
     return () => {
       authSubscription.subscription.unsubscribe()
     }
-  }, [loadSettingsForSession, supabase])
+  }, [isLocalDevHost, loadSettingsForSession, supabase])
 
   useEffect(() => {
+    if (isLocalDevHost) return
     if (!settings || !notificationsApiAvailable) return
     if (askedRef.current) return
     askedRef.current = true
@@ -275,9 +279,10 @@ export function NotificationManager() {
       })
     }
     // denied -> never ask again
-  }, [ensureSubscribed, notificationsApiAvailable, settings, updateSettings])
+  }, [ensureSubscribed, isLocalDevHost, notificationsApiAvailable, settings, updateSettings])
 
   useEffect(() => {
+    if (isLocalDevHost) return
     if (!supabase) return
 
     let cancelled = false
@@ -361,9 +366,10 @@ export function NotificationManager() {
     return () => {
       cancelled = true
     }
-  }, [calendarTodos, supabase])
+  }, [calendarTodos, isLocalDevHost, supabase])
 
   useEffect(() => {
+    if (isLocalDevHost) return
     const intervalId = window.setInterval(() => {
       const now = Date.now()
       const todos = useLemonadeStore.getState().calendarTodos
@@ -388,7 +394,7 @@ export function NotificationManager() {
     return () => {
       window.clearInterval(intervalId)
     }
-  }, [])
+  }, [isLocalDevHost])
 
   const handleEnable = async () => {
     if (typeof Notification === "undefined") return

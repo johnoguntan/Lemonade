@@ -3,6 +3,7 @@
 import { useMemo } from "react"
 import { formatLocalDateKey, useLemonadeStore, type Todo } from "@/lib/store"
 import { TodoItem } from "./todo-item"
+import { setPlannerTaskDragData } from "@/lib/task-dnd"
 
 const parseTimeToMinutes = (value?: string) => {
   if (!value) return null
@@ -97,7 +98,15 @@ export function TodayView() {
             </div>
             <div className="space-y-1">
               {overdue.map((todo) => (
-                <TodoItem key={todo.id} todo={todo} textSizeClass="lemonade-task-text" />
+                <TodoItem
+                  key={todo.id}
+                  todo={todo}
+                  textSizeClass="lemonade-task-text"
+                  draggable
+                  onDragStart={(event) => {
+                    setPlannerTaskDragData(event, { todoId: todo.id, source: "calendar" })
+                  }}
+                />
               ))}
             </div>
           </section>
@@ -110,7 +119,15 @@ export function TodayView() {
             </div>
             <div className="space-y-1">
               {today.map((todo) => (
-                <TodoItem key={todo.id} todo={todo} textSizeClass="lemonade-task-text" />
+                <TodoItem
+                  key={todo.id}
+                  todo={todo}
+                  textSizeClass="lemonade-task-text"
+                  draggable
+                  onDragStart={(event) => {
+                    setPlannerTaskDragData(event, { todoId: todo.id, source: "calendar" })
+                  }}
+                />
               ))}
             </div>
           </section>

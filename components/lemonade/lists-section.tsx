@@ -340,7 +340,10 @@ export function ListsSection() {
                 onMoveToTab={(tabId) => moveListToTab(list.id, tabId)}
                 onAddListLeft={() => addListAdjacent(list.id, "left")}
                 onAddListRight={() => addListAdjacent(list.id, "right")}
-                onDragStart={() => setDraggedListId(list.id)}
+                onDragStart={(event) => {
+                  event.dataTransfer.setData("text/plain", list.id)
+                  setDraggedListId(list.id)
+                }}
                 onDragEnd={() => setDraggedListId(null)}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={() => {
@@ -388,7 +391,7 @@ interface ListCardProps {
   onMoveToTab: (tabId: string) => void
   onAddListLeft: () => void
   onAddListRight: () => void
-  onDragStart: () => void
+  onDragStart: (event: DragEvent<HTMLDivElement>) => void
   onDragEnd: () => void
   onDragOver: (event: DragEvent<HTMLDivElement>) => void
   onDrop: () => void
