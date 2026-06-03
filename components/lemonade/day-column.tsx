@@ -380,8 +380,8 @@ export function DayColumn({ date, isToday, anchorId, afterTodosContent }: DayCol
 
   return (
     <div id={anchorId} className="w-full">
-      <div className="w-full px-2">
-        <div className="lemonade-day-header pb-3 pt-3">
+      <div className="w-full px-4">
+        <div className="lemonade-day-header mb-2 pb-3 pt-3">
           <div
             className={cn("lemonade-day-date font-semibold tracking-[0.08em]", dateFontSize)}
             style={{ color: "#A4A4A4" }}
@@ -389,8 +389,10 @@ export function DayColumn({ date, isToday, anchorId, afterTodosContent }: DayCol
             {month} {day}, {year}
           </div>
           <div className={cn(
-            "lemonade-day-label font-heading uppercase text-[20px] leading-[20px]",
-            isToday ? "text-[var(--accent-color)]" : "text-foreground"
+            "lemonade-day-label inline-block font-heading uppercase text-[20px] leading-[20px] transition-colors",
+            isToday 
+              ? "border-b-2 border-[var(--accent-color)] text-foreground" 
+              : "text-foreground"
           )}>
             {dayName}
           </div>
@@ -411,11 +413,12 @@ export function DayColumn({ date, isToday, anchorId, afterTodosContent }: DayCol
           onDragLeave={() => setIsDragOver(false)}
           onDrop={handleColumnDrop}
         >
-          <div className="flex flex-col">
+          <div className="flex flex-col border-t border-[#e8e8ec] dark:border-white/15">
             {todosForDay.map((todo) => (
               <div
                 key={todo.id}
                 className={cn(
+                  "border-b border-[#e8e8ec] dark:border-white/15",
                   dropIndicator?.targetId === todo.id && dropIndicator.position === "before" && "relative before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:bg-[var(--accent-color)]",
                   dropIndicator?.targetId === todo.id && dropIndicator.position === "after" && "relative after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-[var(--accent-color)]"
                 )}
@@ -482,7 +485,7 @@ export function DayColumn({ date, isToday, anchorId, afterTodosContent }: DayCol
             ) : null}
 
             <div
-              className="lemonade-task-row flex h-[42px] items-center px-0 transition-colors cursor-text hover:bg-accent/20"
+              className="lemonade-task-row flex min-h-[42px] items-center border-b border-[#e8e8ec] dark:border-white/15 px-0 transition-colors cursor-text hover:bg-accent/20"
               onClick={handleStartAdding}
             >
               {isAdding ? (
@@ -547,7 +550,7 @@ export function DayColumn({ date, isToday, anchorId, afterTodosContent }: DayCol
             {Array.from({ length: fillerRowCount }).map((_, index) => (
               <div
                 key={`${dateStr}-line-${index}`}
-                className="lemonade-task-row flex h-[42px] items-center px-0 transition-colors cursor-text hover:bg-accent/20"
+                className="lemonade-task-row flex h-[42px] items-center border-b border-[#e8e8ec] dark:border-white/15 px-0 transition-colors cursor-text hover:bg-accent/20"
                 onClick={handleStartAdding}
               />
             ))}

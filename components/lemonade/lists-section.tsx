@@ -799,7 +799,7 @@ function ListCard({
           setIsTaskDropOver(false)
         }}
       >
-        {Array.from({ length: Math.max(visibleTodos.length + 1, 8) }).map((_, index) => {
+        {Array.from({ length: Math.max(visibleTodos.length + 1, 9) }).map((_, index) => {
           const todo = visibleTodos[index]
 
           if (todo) {

@@ -96,18 +96,25 @@ export function TodayView() {
             <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
               Carried over
             </div>
-            <div className="space-y-1">
-              {overdue.map((todo) => (
-                <TodoItem
-                  key={todo.id}
-                  todo={todo}
-                  textSizeClass="lemonade-task-text"
-                  draggable
-                  onDragStart={(event) => {
-                    setPlannerTaskDragData(event, { todoId: todo.id, source: "calendar" })
-                  }}
-                />
-              ))}
+            <div className="flex flex-col overflow-hidden rounded-2xl border border-border/50 bg-transparent">
+              {Array.from({ length: Math.max(overdue.length, 9) }).map((_, index) => {
+                const todo = overdue[index]
+                if (todo) {
+                  return (
+                    <div key={todo.id} className="border-b border-[#e8e8ec] px-2 last:border-b-0 dark:border-white/15">
+                      <TodoItem
+                        todo={todo}
+                        textSizeClass="lemonade-task-text"
+                        draggable
+                        onDragStart={(event) => {
+                          setPlannerTaskDragData(event, { todoId: todo.id, source: "calendar" })
+                        }}
+                      />
+                    </div>
+                  )
+                }
+                return <div key={`filler-overdue-${index}`} className="h-11 border-b border-[#e8e8ec] last:border-b-0 dark:border-white/15" />
+              })}
             </div>
           </section>
         ) : null}

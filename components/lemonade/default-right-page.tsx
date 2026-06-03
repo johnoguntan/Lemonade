@@ -158,23 +158,27 @@ export function DefaultRightPage({ startDate, onNavigate: _onNavigate }: Default
                 PPL
               </div>
             </div>
-            <div className="space-y-1">
-              {pplTodos.map((todo) => (
-                <TodoItem
-                  key={todo.id}
-                  todo={todo}
-                  textSizeClass="lemonade-task-text"
-                  isDragging={todo.id === draggedTodoId}
-                  draggable
-                  onDragStart={(event) => handlePplTodoDragStart(event, todo.id)}
-                  onDragEnd={() => setDraggedTodoId(null)}
-                />
-              ))}
-              {pplTodos.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-border/70 bg-background/60 px-5 py-10 text-center text-sm text-muted-foreground dark:bg-[rgba(19,19,19,0.5)]">
-                  No procrastination tasks yet.
-                </div>
-              ) : null}
+            <div className="flex flex-col overflow-hidden rounded-2xl border border-border/50 bg-transparent">
+              {Array.from({ length: Math.max(pplTodos.length, 9) }).map((_, index) => {
+                const todo = pplTodos[index]
+                if (todo) {
+                  return (
+                    <div key={todo.id} className="border-b border-[#e8e8ec] px-2 last:border-b-0 dark:border-white/15">
+                      <TodoItem
+                        todo={todo}
+                        textSizeClass="lemonade-task-text"
+                        isDragging={todo.id === draggedTodoId}
+                        draggable
+                        onDragStart={(event) => handlePplTodoDragStart(event, todo.id)}
+                        onDragEnd={() => setDraggedTodoId(null)}
+                      />
+                    </div>
+                  )
+                }
+                return (
+                  <div key={`filler-ppl-${index}`} className="h-11 border-b border-[#e8e8ec] last:border-b-0 dark:border-white/15" />
+                )
+              })}
             </div>
           </div>
         ) : (
