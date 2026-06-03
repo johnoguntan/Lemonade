@@ -501,75 +501,91 @@ function ShoppingReturnsSection({
           </div>
 
           <div className="divide-y divide-border/60">
-            {items.length > 0 ? (
-              items.map((todo) => {
-          <div className="flex flex-col overflow-hidden rounded-2xl border border-border/50 bg-transparent">
-            {Array.from({ length: Math.max(items.length, 9) }).map((_, index) => {
-              const todo = items[index]
-              if (todo) {
-                const isOverdue = !!todo.returnDeadline && !todo.completed && todo.returnDeadline < todayKey
-
-                return (
-                  <div key={todo.id} className="grid grid-cols-[minmax(82px,1.2fr)_minmax(78px,0.85fr)_minmax(96px,112px)_minmax(82px,1fr)_72px] gap-2 px-4 py-4">
-                  <div key={todo.id} className="grid grid-cols-[minmax(82px,1.2fr)_minmax(78px,0.85fr)_minmax(96px,112px)_minmax(82px,1fr)_72px] gap-2 border-b border-[#e8e8ec] px-4 py-4 last:border-b-0 dark:border-white/15">
-                    <Input
-                      value={todo.text}
-                      onChange={(event) => onUpdateItem(todo.id, { text: event.target.value })}
-                      placeholder="Item name"
-                    />
-                    <Input
-                      value={todo.storeName ?? ""}
-                      onChange={(event) => onUpdateItem(todo.id, { storeName: event.target.value || undefined })}
-                      placeholder="Store"
-                    />
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="date"
-                        value={todo.returnDeadline ?? ""}
-                        onChange={(event) => onUpdateItem(todo.id, { returnDeadline: event.target.value || undefined })}
-                        className={cn(isOverdue && "border-destructive text-destructive")}
+            {items.length > 0 || !list ? (
+              <div className="flex flex-col">
+                {Array.from({ length: Math.max(items.length, 9) }).map((_, index) => {
+                  const todo = items[index]
+                  if (!todo) {
+                    return (
+                      <div
+                        key={`filler-returns-${index}`}
+                        className="h-16 border-b border-[#e8e8ec] last:border-b-0 dark:border-white/15"
                       />
-                      {isOverdue ? <AlertTriangle className="size-4 text-destructive" /> : null}
+                    )
+                  }
+                  const isOverdue = !!todo.returnDeadline && !todo.completed && todo.returnDeadline < todayKey
+                  return (
+                    <div
+                      key={todo.id}
+                      className="grid grid-cols-[minmax(82px,1.2fr)_minmax(78px,0.85fr)_minmax(96px,112px)_minmax(82px,1fr)_72px] gap-2 border-b border-[#e8e8ec] px-4 py-4 last:border-b-0 dark:border-white/15"
+                    >
+                      <Input
+                        value={todo.text}
+                        onChange={(event) => onUpdateItem(todo.id, { text: event.target.value })}
+                        placeholder="Item name"
+                      />
+                      <Input
+                        value={todo.storeName ?? ""}
+                        onChange={(event) =>
+                          onUpdateItem(todo.id, { storeName: event.target.value || undefined })
+                        }
+                        placeholder="Store"
+                      />
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="date"
+                          value={todo.returnDeadline ?? ""}
+                          onChange={(event) =>
+                            onUpdateItem(todo.id, { returnDeadline: event.target.value || undefined })
+                          }
+                          className={cn(isOverdue && "border-destructive text-destructive")}
+                        />
+                        {isOverdue ? <AlertTriangle className="size-4 text-destructive" /> : null}
+                      </div>
+                      <Input
+                        value={todo.notes ?? ""}
+                        onChange={(event) => onUpdateItem(todo.id, { notes: event.target.value || undefined })}
+                        placeholder="Notes"
+                      />
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onToggleReturned(todo.id)}
+                          className={cn(
+                            "flex size-4 items-center justify-center rounded-full border border-border",
+                            todo.completed && "border-foreground bg-foreground"
+                          )}
+                          aria-label={todo.completed ? "Mark as not returned" : "Mark as returned"}
+                        >
+                          {todo.completed ? (
+                            <svg
+                              className="size-2.5 text-background"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                            </svg>
+                          ) : null}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDeleteItem(todo.id)}
+                          className="text-muted-foreground hover:text-destructive"
+                          aria-label="Delete return"
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      </div>
                     </div>
-                    <Input
-                      value={todo.notes ?? ""}
-                      onChange={(event) => onUpdateItem(todo.id, { notes: event.target.value || undefined })}
-                      placeholder="Notes"
-                    />
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => onToggleReturned(todo.id)}
-                        className={cn(
-                          "size-4 rounded-full border border-border flex items-center justify-center",
-                          todo.completed && "bg-foreground border-foreground"
-                        )}
-                      >
-                        {todo.completed ? (
-                          <svg className="size-2.5 text-background" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                          </svg>
-                        ) : null}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onDeleteItem(todo.id)}
-                        className="text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 className="size-4" />
-                      </button>
-                    </div>
-                  </div>
-                )
-              })
+                  )
+                })}
+              </div>
             ) : (
               <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-                {list ? "No return items yet." : "Shopping returns list unavailable."}
+                No return items yet.
               </div>
             )}
-              }
-              return <div key={`filler-returns-${index}`} className="h-16 border-b border-[#e8e8ec] last:border-b-0 dark:border-white/15" />
-            })}
           </div>
         </div>
       </div>
