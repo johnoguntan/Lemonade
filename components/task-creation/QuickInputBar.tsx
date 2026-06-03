@@ -222,7 +222,7 @@ export function QuickInputBar() {
                   <Flag size={17} />
                 </button>
                 {openPanel === "priority" ? (
-                  <div className="absolute left-0 top-full z-50 mt-2">
+                  <div className="absolute left-0 top-full z-[60] mt-2">
                     <PriorityDropdown value={draft} onChange={updateDraft} />
                   </div>
                 ) : null}

@@ -503,10 +503,15 @@ function ShoppingReturnsSection({
           <div className="divide-y divide-border/60">
             {items.length > 0 ? (
               items.map((todo) => {
+          <div className="flex flex-col overflow-hidden rounded-2xl border border-border/50 bg-transparent">
+            {Array.from({ length: Math.max(items.length, 9) }).map((_, index) => {
+              const todo = items[index]
+              if (todo) {
                 const isOverdue = !!todo.returnDeadline && !todo.completed && todo.returnDeadline < todayKey
 
                 return (
                   <div key={todo.id} className="grid grid-cols-[minmax(82px,1.2fr)_minmax(78px,0.85fr)_minmax(96px,112px)_minmax(82px,1fr)_72px] gap-2 px-4 py-4">
+                  <div key={todo.id} className="grid grid-cols-[minmax(82px,1.2fr)_minmax(78px,0.85fr)_minmax(96px,112px)_minmax(82px,1fr)_72px] gap-2 border-b border-[#e8e8ec] px-4 py-4 last:border-b-0 dark:border-white/15">
                     <Input
                       value={todo.text}
                       onChange={(event) => onUpdateItem(todo.id, { text: event.target.value })}
@@ -562,6 +567,9 @@ function ShoppingReturnsSection({
                 {list ? "No return items yet." : "Shopping returns list unavailable."}
               </div>
             )}
+              }
+              return <div key={`filler-returns-${index}`} className="h-16 border-b border-[#e8e8ec] last:border-b-0 dark:border-white/15" />
+            })}
           </div>
         </div>
       </div>

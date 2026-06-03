@@ -3,6 +3,7 @@
 import { useMemo } from "react"
 import { DailySection } from "@/components/daily/DailySection"
 import { QuickInputBar } from "@/components/task-creation/QuickInputBar"
+import { TaskEntryLines } from "@/components/task-creation/TaskEntryLines"
 import { useLemonadeStore, type Todo } from "@/lib/store"
 
 type DailySectionKey = "urgent" | "schedule" | "allday"
@@ -97,6 +98,7 @@ export function DailyView() {
     <section className="flex h-full w-full flex-col overflow-y-auto border-r border-black/10 bg-[#fcfcfa] text-gray-900">
       <div className="border-b border-black/10 px-12 py-5">
         <QuickInputBar />
+        <TaskEntryLines />
       </div>
 
       <div className="flex-1 px-12 py-7">

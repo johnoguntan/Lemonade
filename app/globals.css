@@ -689,3 +689,10 @@
     box-shadow: none !important;
   }
 }
+
+.color-picker-panel.open-to-left {
+  left: auto !important;
+  right: 100% !important;
+  margin-left: 0 !important;
+  margin-right: 16px !important;
+}

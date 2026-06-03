@@ -100,6 +100,34 @@ export function ColorPicker({ value, onChange, onClose }: ColorPickerProps) {
     return () => window.removeEventListener("mousedown", handleOutside)
   }, [onClose])
 
+  const PANEL_WIDTH = 336 // 320px panel + 16px margin
+  const SAFETY = 16
+
+  const measureRef = (node: HTMLDivElement | null) => {
+    containerRef.current = node
+    if (!node || typeof window === "undefined") return
+    const rect = node.getBoundingClientRect()
+    const overflowsRight = rect.right + PANEL_WIDTH + SAFETY > window.innerWidth
+    if (overflowsRight) {
+      node.classList.add("open-to-left")
+    } else {
+      node.classList.remove("open-to-left")
+    }
+  }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const handleResize = () => {
+      const node = containerRef.current
+      if (!node) return
+      const rect = node.getBoundingClientRect()
+      const overflowsRight = rect.right + PANEL_WIDTH + SAFETY > window.innerWidth
+      node.classList.toggle("open-to-left", overflowsRight)
+    }
+    window.addEventListener("resize", handleResize)
+    return () => window.removeEventListener("resize", handleResize)
+  }, [])
+
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -170,7 +198,10 @@ export function ColorPicker({ value, onChange, onClose }: ColorPickerProps) {
   }
 
   return (
-    <div ref={containerRef} className="absolute left-full top-0 z-[70] ml-4 w-[320px] rounded-2xl border border-gray-200 bg-white shadow-2xl">
+    <div
+      ref={measureRef}
+      className="color-picker-panel absolute top-0 z-[80] w-[320px] rounded-2xl border border-gray-200 bg-white shadow-2xl left-full ml-4"
+    >
       <div className="border-b border-gray-100 px-4 py-2">
         <div className="mb-2 flex gap-1">
           <span className="h-3 w-3 rounded-full bg-[#ff5f57]" />
