@@ -33,6 +33,7 @@ export type TaskDraftState = {
   address: string
   attachmentFile: File | null
   attachmentName: string | null
+  attachmentDataUrl: string | null
   notes: string
 }
 
@@ -59,6 +60,7 @@ const createDefaultDraft = (): TaskDraftState => ({
   address: "",
   attachmentFile: null,
   attachmentName: null,
+  attachmentDataUrl: null,
   notes: "",
 })
 
@@ -183,6 +185,23 @@ export function QuickInputBar() {
 
     const dueDateKey = draft.dueDate ? formatLocalDateKey(draft.dueDate) : undefined
 
+    // Persist a chosen attachment (data URL captured by AttachmentDropdown).
+    const attachments =
+      draft.attachmentName && draft.attachmentDataUrl && draft.attachmentFile
+        ? [
+            {
+              id: globalThis.crypto.randomUUID(),
+              name: draft.attachmentName,
+              type: draft.attachmentFile.type || "application/octet-stream",
+              size: draft.attachmentFile.size,
+              dataUrl: draft.attachmentDataUrl,
+              createdAt: Date.now(),
+            },
+          ]
+        : []
+    const attachmentPhoto =
+      attachments[0] && attachments[0].type.startsWith("image/") ? attachments[0].dataUrl : undefined
+
     const hasScheduledTime = Boolean(time)
     const resolvedSection: TaskSection =
       effectivePriority === "urgent" ? "urgent" : hasScheduledTime ? "schedule" : "allday"
@@ -195,6 +214,8 @@ export function QuickInputBar() {
       durationMinutes: draft.duration ?? parsed?.duration ?? undefined,
       reminderOffsetMinutes: reminderOffset,
       dueDate: dueDateKey,
+      attachments: attachments.length ? attachments : undefined,
+      photoDataUrl: attachmentPhoto,
       notes: [draft.notes, parsed?.notes, url, phone, address].filter(Boolean).join("\n") || undefined,
       location: address || undefined,
       url: url || undefined,

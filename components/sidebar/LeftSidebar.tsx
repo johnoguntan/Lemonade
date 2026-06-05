@@ -30,6 +30,11 @@ export function LeftSidebar() {
 
   const handleIconClick = (icon: SidebarIconName) => {
     setActiveIcon(icon)
+    if (icon === "search") {
+      // Focus the in-view task search instead of navigating.
+      window.dispatchEvent(new Event("allsenadro:focus-search"))
+      return
+    }
     router.push(iconRoutes[icon])
   }
 

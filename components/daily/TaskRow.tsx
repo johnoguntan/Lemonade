@@ -13,6 +13,7 @@ import {
   CornerLeftUp,
   GitMerge,
   GripHorizontal,
+  Paperclip,
   Pencil,
   Scissors,
   Share2,
@@ -149,6 +150,35 @@ function TaskRowComponent({
 
   const subtitle = [typedTodo.location, typedTodo.notes].filter(Boolean).join(" · ")
   const overdueLabel = showOverdueActions ? formatOverdueLabel(typedTodo.date) : null
+
+  const formatDueShort = (key?: string | null) => {
+    if (!key) return ""
+    const [y, m, d] = key.split("-").map(Number)
+    if (!y || !m || !d) return key
+    return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+  }
+  const attachmentList = typedTodo.attachments ?? []
+  const dueLabel = typedTodo.dueDate ? `Due ${formatDueShort(typedTodo.dueDate)}` : null
+  const metaRow =
+    typedTodo.photoDataUrl || attachmentList.length > 0 || dueLabel || typedTodo.isRecurring ? (
+      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+        {typedTodo.photoDataUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={typedTodo.photoDataUrl} alt="" className="h-8 w-8 rounded-md border border-black/10 object-cover" />
+        ) : null}
+        {dueLabel ? (
+          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">{dueLabel}</span>
+        ) : null}
+        {typedTodo.isRecurring ? (
+          <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-medium text-sky-700">Repeats</span>
+        ) : null}
+        {attachmentList.length > 0 && !typedTodo.photoDataUrl ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2 py-0.5 text-[10px] text-black/60">
+            <Paperclip size={10} /> {attachmentList[0].name}
+          </span>
+        ) : null}
+      </div>
+    ) : null
   const scheduleColor = schedulePalette[(typedTodo.createdAt ?? 0) % schedulePalette.length]
   const showScheduleStyle = sectionTitle === "SCHEDULE"
   const priorityMarkerColor = priorityMarkerColors[normalizeTodoPriority(typedTodo.priority)]
@@ -456,6 +486,7 @@ function TaskRowComponent({
             {collapsedSubtaskCount}
           </div>
           {subtitle ? <p className="ml-[1px] text-[11px] leading-4 text-black/56">{subtitle}</p> : null}
+          {metaRow}
           {subtaskList}
         </div>
         {utilityActions}
@@ -474,6 +505,7 @@ function TaskRowComponent({
           </div>
           {typedTodo.time ? <p className="mt-1 text-[12px] leading-4 text-black/62">{typedTodo.time}</p> : null}
           {subtitle ? <p className="text-[12px] leading-4 text-black/62">{subtitle}</p> : null}
+          {metaRow}
           {overdueLabel ? <p className="mt-1 text-[11px] leading-4 text-[#ff4f46]">{overdueLabel}</p> : null}
           {subtaskList}
         </div>
@@ -493,11 +525,12 @@ function TaskRowComponent({
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-1.5">
             {subtaskToggle}
-            <p onDoubleClick={() => setIsEditing(true)} className="cursor-text text-[13px] leading-[1.32] text-black">{typedTodo.text}</p>
+            <p onDoubleClick={() => setIsEditing(true)} className={`cursor-text text-[13px] leading-[1.32] ${typedTodo.completed ? "text-black/40 line-through" : "text-black"}`}>{typedTodo.text}</p>
             {collapsedSubtaskCount}
           </div>
           {typedTodo.time ? <p className="mt-0.5 text-[11px] leading-4 text-black/75">{typedTodo.time}</p> : null}
           {subtitle ? <p className="text-[11px] leading-4 text-black/75">{subtitle}</p> : null}
+          {metaRow}
           {overdueLabel ? <p className="mt-0.5 text-[11px] leading-4 text-[#ff4f46]">{overdueLabel}</p> : null}
           {subtaskList}
         </div>

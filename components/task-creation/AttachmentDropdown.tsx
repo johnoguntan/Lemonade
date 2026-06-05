@@ -97,7 +97,23 @@ export function AttachmentDropdown({ value, onChange }: AttachmentDropdownProps)
           hidden
           onChange={(event) => {
             const file = event.target.files?.[0] ?? null
-            onChange({ attachmentFile: file, attachmentName: file?.name ?? null })
+            if (!file) {
+              onChange({ attachmentFile: null, attachmentName: null, attachmentDataUrl: null })
+              return
+            }
+            // Cap at ~2MB so a base64 attachment can't blow the localStorage quota.
+            if (file.size > 2 * 1024 * 1024) {
+              onChange({ attachmentFile: file, attachmentName: `${file.name} (too large to store)`, attachmentDataUrl: null })
+              return
+            }
+            const reader = new FileReader()
+            reader.onload = () =>
+              onChange({
+                attachmentFile: file,
+                attachmentName: file.name,
+                attachmentDataUrl: typeof reader.result === "string" ? reader.result : null,
+              })
+            reader.readAsDataURL(file)
           }}
         />
         {value.attachmentName ? <p className="mt-2 text-sm text-gray-400">{value.attachmentName}</p> : null}
