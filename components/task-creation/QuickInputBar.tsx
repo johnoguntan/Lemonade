@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { CalendarDays, Flag, Link2, ListChecks, Loader2, Paperclip, Phone, Plus, X } from "lucide-react"
+import { CalendarDays, Flag, Loader2, Paperclip, Plus } from "lucide-react"
 import { CalendarDropdown } from "@/components/task-creation/CalendarDropdown"
 import { AttachmentDropdown } from "@/components/task-creation/AttachmentDropdown"
 import { PriorityDropdown } from "@/components/task-creation/PriorityDropdown"
@@ -272,17 +272,6 @@ export function QuickInputBar() {
   }
 
   const iconButtonClass = "text-[#8e8e8e] transition-all duration-200 hover:text-[#3d3d3d]"
-  const fieldButtonClass = (active: boolean) =>
-    active ? "text-[#111] transition-all duration-200" : iconButtonClass
-
-  const addSubtaskLine = () => updateDraft({ subtasks: [...draft.subtasks, ""] })
-  const updateSubtaskLine = (index: number, value: string) =>
-    updateDraft({ subtasks: draft.subtasks.map((line, i) => (i === index ? value : line)) })
-  const removeSubtaskLine = (index: number) =>
-    updateDraft({ subtasks: draft.subtasks.filter((_, i) => i !== index) })
-
-  const inlineFieldClass =
-    "w-full rounded-lg border border-black/10 bg-white px-3 py-1.5 text-[13px] text-black outline-none focus:border-black/30"
 
   return (
     <div ref={containerRef} className="relative" onKeyDown={handleContainerKeyDown}>
@@ -379,101 +368,7 @@ export function QuickInputBar() {
                   </div>
                 ) : null}
               </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (openPanel === "subtasks") {
-                    setOpenPanel(null)
-                  } else {
-                    setOpenPanel("subtasks")
-                    if (draft.subtasks.length === 0) addSubtaskLine()
-                  }
-                }}
-                className={fieldButtonClass(openPanel === "subtasks" || draft.subtasks.some((line) => line.trim()))}
-                aria-label="Subtasks"
-              >
-                <ListChecks size={17} />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setOpenPanel((current) => (current === "url" ? null : "url"))}
-                className={fieldButtonClass(openPanel === "url" || Boolean(draft.url.trim()))}
-                aria-label="Link"
-              >
-                <Link2 size={17} />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setOpenPanel((current) => (current === "phone" ? null : "phone"))}
-                className={fieldButtonClass(openPanel === "phone" || Boolean(draft.phone.trim()))}
-                aria-label="Phone"
-              >
-                <Phone size={17} />
-              </button>
             </div>
-
-            {openPanel === "url" ? (
-              <input
-                value={draft.url}
-                onChange={(event) => updateDraft({ url: event.target.value })}
-                placeholder="https://example.com"
-                inputMode="url"
-                autoFocus
-                className={`mt-2 ${inlineFieldClass}`}
-              />
-            ) : null}
-
-            {openPanel === "phone" ? (
-              <input
-                value={draft.phone}
-                onChange={(event) => updateDraft({ phone: event.target.value })}
-                placeholder="Phone number"
-                inputMode="tel"
-                autoFocus
-                className={`mt-2 ${inlineFieldClass}`}
-              />
-            ) : null}
-
-            {openPanel === "subtasks" ? (
-              <div className="mt-2 space-y-1.5">
-                {draft.subtasks.map((line, index) => (
-                  <div key={index} className="flex items-center gap-2">
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-black/30" aria-hidden="true" />
-                    <input
-                      value={line}
-                      onChange={(event) => updateSubtaskLine(index, event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault()
-                          addSubtaskLine()
-                        }
-                      }}
-                      placeholder="Subtask"
-                      autoFocus={index === draft.subtasks.length - 1}
-                      className={inlineFieldClass}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeSubtaskLine(index)}
-                      className="shrink-0 text-black/30 transition hover:text-[#a32020]"
-                      aria-label="Remove subtask"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={addSubtaskLine}
-                  className="flex items-center gap-1 text-[12px] text-black/45 transition hover:text-black/70"
-                >
-                  <Plus size={13} /> Add subtask
-                </button>
-              </div>
-            ) : null}
           </div>
         </div>
       </div>
