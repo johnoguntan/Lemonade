@@ -9,12 +9,11 @@ import { SidebarIcons } from "@/components/sidebar/SidebarIcons"
 import { SolairBoard } from "@/components/sidebar/SolairBoard"
 import { useLemonadeStore } from "@/lib/store"
 
-type SidebarIconName = "home" | "search" | "notifications" | "settings"
+type SidebarIconName = "home" | "search" | "settings"
 
 const iconRoutes: Record<SidebarIconName, string> = {
   home: "/",
   search: "/",
-  notifications: "/settings",
   settings: "/settings",
 }
 

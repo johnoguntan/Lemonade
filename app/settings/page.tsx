@@ -12,6 +12,7 @@ import { ColorPickerPanel } from "@/components/lemonade/color-picker-panel"
 import { DEFAULT_COLOR_PALETTE } from "@/lib/colors"
 import { createSupabaseBrowserClient, getSupabaseBrowserSession } from "@/lib/supabase/client"
 import { MinimalTimePicker } from "@/components/lemonade/minimal-time-picker"
+import { toast } from "sonner"
 import {
   Dialog,
   DialogContent,
@@ -140,23 +141,43 @@ export default function SettingsPage() {
       quiet_hours_start: next.quietHoursStart,
       quiet_hours_end: next.quietHoursEnd,
     }
-    const response = await fetch("/api/notifications/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
+    let response: Response
+    try {
+      response = await fetch("/api/notifications/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+    } catch {
+      toast.error("Couldn't save notification settings — check your connection.")
+      await refreshNotificationData()
+      return
+    }
     if (!response.ok) {
+      toast.error("Couldn't save notification settings.")
+      await refreshNotificationData()
       return
     }
     await refreshNotificationData()
   }
 
   const clearAllScheduledReminders = async () => {
-    const response = await fetch("/api/notifications/schedule", { method: "DELETE" })
-    if (!response.ok) {
+    // Destructive + irreversible — confirm before wiping every scheduled reminder.
+    if (typeof window !== "undefined" && !window.confirm("Clear all scheduled reminders? This can't be undone.")) {
+      return
+    }
+    try {
+      const response = await fetch("/api/notifications/schedule", { method: "DELETE" })
+      if (!response.ok) {
+        toast.error("Couldn't clear reminders.")
+        return
+      }
+    } catch {
+      toast.error("Couldn't clear reminders — check your connection.")
       return
     }
     await refreshNotificationData()
+    toast.success("All scheduled reminders cleared.")
   }
 
   const sendTestNotification = async () => {
@@ -201,6 +222,7 @@ export default function SettingsPage() {
     addLabel(trimmedName, newLabelColor)
     setNewLabelName("")
     setNewLabelColor(DEFAULT_LABEL_COLOR)
+    toast.success(`Label "${trimmedName}" created.`)
   }
 
   const startEditingLabel = (label: Label) => {
@@ -618,7 +640,9 @@ export default function SettingsPage() {
               variant="destructive"
               onClick={() => {
                 if (labelToDelete) {
+                  const name = labelToDelete.name
                   deleteLabel(labelToDelete.id)
+                  toast.success(`Label "${name}" deleted.`)
                 }
                 setLabelToDelete(null)
               }}

@@ -72,29 +72,39 @@ export function DateCollection({ collection, todos }: DateCollectionProps) {
       byDate.set(todo.date, existing)
     })
 
-    return dates
-      .map((date) => ({
-        date,
-        todos: byDate.get(formatLocalDateKey(date)) ?? [],
-      }))
-      .filter((entry) => entry.todos.length > 0)
+    return dates.map((date) => ({
+      date,
+      todos: byDate.get(formatLocalDateKey(date)) ?? [],
+    }))
   }, [collection, todos])
+
+  const nonEmpty = grouped.filter((entry) => entry.todos.length > 0)
 
   return (
     <section>
       {collection.name ? (
-        <h2 className="mb-1 mt-6 text-xs tracking-widest uppercase text-gray-400">{collection.name}</h2>
+        <h2 className="mb-3 mt-8 text-xs tracking-widest uppercase text-gray-400">{collection.name}</h2>
       ) : null}
 
-      {grouped.map((entry, index) => (
+      {nonEmpty.length > 0 ? (
+        nonEmpty.map((entry, index) => (
+          <CollectionDayBlock
+            key={entry.date.toISOString()}
+            date={entry.date}
+            todos={entry.todos}
+            featured={index === 0}
+            showEmpty
+          />
+        ))
+      ) : (
         <CollectionDayBlock
-          key={entry.date.toISOString()}
-          date={entry.date}
-          todos={entry.todos}
-          featured={index === 0}
+          key={`empty-${collection.id}`}
+          date={grouped[0]?.date ?? new Date()}
+          todos={[]}
+          featured
           showEmpty
         />
-      ))}
+      )}
     </section>
   )
 }

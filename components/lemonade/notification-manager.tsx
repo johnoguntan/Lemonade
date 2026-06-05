@@ -370,7 +370,8 @@ export function NotificationManager() {
 
   useEffect(() => {
     if (isLocalDevHost) return
-    const intervalId = window.setInterval(() => {
+
+    const checkDueReminders = () => {
       const now = Date.now()
       const todos = useLemonadeStore.getState().calendarTodos
 
@@ -389,10 +390,33 @@ export function NotificationManager() {
           description: todo.location ? `Location: ${todo.location}` : "Reminder",
         })
       }
-    }, 15_000)
+    }
+
+    let intervalId: number | null = null
+    const start = () => {
+      if (intervalId !== null) return
+      checkDueReminders()
+      intervalId = window.setInterval(checkDueReminders, 15_000)
+    }
+    const stop = () => {
+      if (intervalId !== null) {
+        window.clearInterval(intervalId)
+        intervalId = null
+      }
+    }
+
+    // Only poll while the tab is visible — saves battery/CPU on the mobile PWA.
+    const handleVisibility = () => {
+      if (document.hidden) stop()
+      else start()
+    }
+
+    if (!document.hidden) start()
+    document.addEventListener("visibilitychange", handleVisibility)
 
     return () => {
-      window.clearInterval(intervalId)
+      document.removeEventListener("visibilitychange", handleVisibility)
+      stop()
     }
   }, [isLocalDevHost])
 

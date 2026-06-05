@@ -198,6 +198,14 @@
   .celebration-sparkle-4 { transform: translate(-50%, -50%) translate(-24px, 0); }
 }
 
+/* Liquid-fill duration pills — keyframes only; the element styles are applied
+   inline (in CalendarDropdown) so Tailwind's layer processing can't drop them. */
+@keyframes liquid-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1.5px); } }
+@keyframes liquid-wave-move { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) {
+  [data-liquid-anim] { animation: none !important; }
+}
+
 @layer base {
   html {
     font-size: 12px;

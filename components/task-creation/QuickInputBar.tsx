@@ -1,10 +1,13 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import { CalendarDays, Flag, Paperclip, Plus } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { CalendarDays, Flag, Link2, ListChecks, Loader2, Paperclip, Phone, Plus, X } from "lucide-react"
 import { CalendarDropdown } from "@/components/task-creation/CalendarDropdown"
 import { AttachmentDropdown } from "@/components/task-creation/AttachmentDropdown"
 import { PriorityDropdown } from "@/components/task-creation/PriorityDropdown"
+import { toast } from "sonner"
+import { aiParseSingleTask, type AiParsedTask } from "@/lib/ai-task-parser"
+import { resolveParsedRecurringTodoFields } from "@/lib/task-shortcuts"
 import { formatLocalDateKey, useLemonadeStore, type Todo } from "@/lib/store"
 
 export type TaskPriority = "none" | "urgent" | "high" | "medium" | "low"
@@ -59,19 +62,48 @@ const createDefaultDraft = (): TaskDraftState => ({
   notes: "",
 })
 
+// Cheap check for whether the text is worth parsing. Plain titles ("Buy milk")
+// skip parsing entirely so they create instantly with no API round-trip.
+const PARSE_SIGNAL_RE =
+  /\b(today|tomorrow|tonight|tmr|tmrw|next|mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|noon|midnight|every|daily|weekly|monthly|yearly)\b|\d{1,2}:\d{2}|\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\bin\s+\d+\s*(?:m|min|mins|minute|minutes|h|hr|hrs|hour|hours)\b|[#!@]|https?:\/\//i
+
+const looksParseable = (text: string) => PARSE_SIGNAL_RE.test(text)
+
+// Map the Alert dropdown labels to reminder offsets (minutes before the event).
+const ALERT_OFFSET_MINUTES: Record<string, number> = {
+  "At time of event": 0,
+  "5 min before": 5,
+  "10 min before": 10,
+  "15 min before": 15,
+  "30 min before": 30,
+  "1 hour before": 60,
+  "1 day before": 1440,
+}
+
 export function QuickInputBar() {
   const [draft, setDraft] = useState<TaskDraftState>(() => createDefaultDraft())
-  const [openPanel, setOpenPanel] = useState<"calendar" | "priority" | "attachment" | null>(null)
+  const [openPanel, setOpenPanel] = useState<
+    "calendar" | "priority" | "attachment" | "subtasks" | "url" | "phone" | null
+  >(null)
   const [isFocused, setIsFocused] = useState(false)
+  const [isParsing, setIsParsing] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  // Always points at the latest draft so submit works even when triggered from
+  // a deferred handler (e.g. after committing a field on Enter).
+  const draftRef = useRef(draft)
+  draftRef.current = draft
 
   const addCalendarTodoBase = useLemonadeStore((state) => state.addCalendarTodo)
   const addCalendarTodo = addCalendarTodoBase as unknown as (todo: Partial<StoreTodoWithDailyFields>) => string
   const ensureLabelIds = useLemonadeStore((state) => state.ensureLabelIds)
+  const selectedCalendarDate = useLemonadeStore((state) => state.selectedCalendarDate)
 
   useEffect(() => {
     const handleOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null
+      // Ignore clicks inside the portaled color picker (rendered on <body>).
+      if (target?.closest?.(".color-picker-panel")) return
       if (!containerRef.current?.contains(event.target as Node)) {
         setOpenPanel(null)
       }
@@ -93,33 +125,82 @@ export function QuickInputBar() {
 
   const isTyping = draft.title.trim().length > 0
   const isExpanded = isFocused || isTyping || openPanel !== null
-  const scheduleDateKey = useMemo(() => formatLocalDateKey(draft.scheduleDate ?? new Date()), [draft.scheduleDate])
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    const draft = draftRef.current
     const trimmed = draft.title.trim()
-    if (!trimmed) return
+    if (!trimmed || isParsing) return
 
-    const hasScheduledTime = Boolean(draft.scheduleTime?.trim())
-    const labelIds = ensureLabelIds(draft.collections)
+    // Parse natural language ("call mom tomorrow 3pm #urgent") into fields.
+    // Heuristic-first, AI fallback — only for inputs that actually carry signals.
+    let parsed: AiParsedTask | null = null
+    if (looksParseable(trimmed)) {
+      setIsParsing(true)
+      try {
+        parsed = await aiParseSingleTask(trimmed)
+      } catch {
+        parsed = null
+        // The task is still created as plain text — tell the user why the
+        // date/time/priority weren't auto-filled instead of failing silently.
+        toast.info("Added as a plain task — couldn't auto-detect details.")
+      } finally {
+        setIsParsing(false)
+      }
+    }
+
+    // Explicit values picked via the dropdowns always win; parsed fills the gaps.
+    const title = parsed?.title?.trim() || trimmed
+    const dateKey = draft.scheduleDate ? formatLocalDateKey(draft.scheduleDate) : parsed?.date ?? selectedCalendarDate
+    const time = draft.scheduleTime ?? parsed?.time ?? undefined
+    const effectivePriority = draft.priority !== "none" ? draft.priority : parsed?.priority ?? "normal"
+    const url = draft.url || parsed?.url || ""
+    const phone = draft.phone || parsed?.phone || ""
+    const address = draft.address || parsed?.location || ""
+    const labelIds = ensureLabelIds(Array.from(new Set([...draft.collections, ...(parsed?.labels ?? [])])))
+    const recurringFields = parsed ? resolveParsedRecurringTodoFields(parsed as unknown as Record<string, unknown>) : {}
+
+    // An explicit Repeat choice from the dropdown wins over NLP-detected recurrence.
+    const repeatFields: Partial<Todo> = draft.repeat
+      ? {
+          isRecurring: true,
+          recurringFrequency:
+            draft.repeat.frequency === "daily" ||
+            draft.repeat.frequency === "weekly" ||
+            draft.repeat.frequency === "monthly"
+              ? draft.repeat.frequency
+              : undefined,
+          recurringInterval: draft.repeat.interval > 1 ? draft.repeat.interval : undefined,
+          recurringDays: draft.repeat.daysOfWeek?.length ? draft.repeat.daysOfWeek : undefined,
+          recurringCustomText: draft.repeat.frequency === "yearly" ? "yearly" : undefined,
+        }
+      : {}
+
+    // Explicit Alert dropdown choice wins over NLP-detected reminder.
+    const reminderOffset =
+      draft.alert && draft.alert in ALERT_OFFSET_MINUTES
+        ? ALERT_OFFSET_MINUTES[draft.alert]
+        : parsed?.reminder ?? undefined
+
+    const dueDateKey = draft.dueDate ? formatLocalDateKey(draft.dueDate) : undefined
+
+    const hasScheduledTime = Boolean(time)
     const resolvedSection: TaskSection =
-      draft.priority === "urgent"
-        ? "urgent"
-        : hasScheduledTime
-          ? "schedule"
-          : "allday"
+      effectivePriority === "urgent" ? "urgent" : hasScheduledTime ? "schedule" : "allday"
 
     addCalendarTodo({
-      text: trimmed,
+      text: title,
       completed: false,
-      date: scheduleDateKey,
-      time: draft.scheduleTime ?? undefined,
-      durationMinutes: draft.duration ?? undefined,
-      notes: [draft.notes, draft.url, draft.phone, draft.address].filter(Boolean).join("\n") || undefined,
-      location: draft.address || undefined,
-      url: draft.url || undefined,
+      date: dateKey,
+      time,
+      durationMinutes: draft.duration ?? parsed?.duration ?? undefined,
+      reminderOffsetMinutes: reminderOffset,
+      dueDate: dueDateKey,
+      notes: [draft.notes, parsed?.notes, url, phone, address].filter(Boolean).join("\n") || undefined,
+      location: address || undefined,
+      url: url || undefined,
       color: draft.color || undefined,
       icon: draft.icon || undefined,
-      priority: draft.priority === "none" ? "normal" : draft.priority,
+      priority: effectivePriority,
       labelIds,
       subtasks: draft.subtasks.filter((item) => item.trim()).map((title) => ({
         id: globalThis.crypto.randomUUID(),
@@ -131,16 +212,59 @@ export function QuickInputBar() {
       endOfDay: resolvedSection === "allday",
       rollover: false,
       dismissed: false,
+      ...recurringFields,
+      ...repeatFields,
     })
 
     setDraft(createDefaultDraft())
     setOpenPanel(null)
   }
 
+  // Enter should add the task no matter where focus is inside the quick-add —
+  // including while a dropdown (Schedule/Priority/etc.) is open.
+  const handleContainerKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      setOpenPanel(null)
+      return
+    }
+    if (event.key !== "Enter" || event.shiftKey) return
+
+    const target = event.target as HTMLElement
+    const tag = target.tagName
+
+    // Let multi-line notes keep their newlines.
+    if (tag === "TEXTAREA") return
+
+    // If a dropdown's own text field has focus (e.g. the Schedule date input),
+    // commit it first (its onBlur parses the value), then submit on the next
+    // tick so the parsed value is in the draft.
+    if (tag === "INPUT" && target.getAttribute("data-quick-task-input") !== "true") {
+      event.preventDefault()
+      ;(target as HTMLInputElement).blur()
+      window.setTimeout(() => void handleSubmit(), 0)
+      return
+    }
+
+    // Title input, a panel button, or the panel surface itself → just submit.
+    event.preventDefault()
+    void handleSubmit()
+  }
+
   const iconButtonClass = "text-[#8e8e8e] transition-all duration-200 hover:text-[#3d3d3d]"
+  const fieldButtonClass = (active: boolean) =>
+    active ? "text-[#111] transition-all duration-200" : iconButtonClass
+
+  const addSubtaskLine = () => updateDraft({ subtasks: [...draft.subtasks, ""] })
+  const updateSubtaskLine = (index: number, value: string) =>
+    updateDraft({ subtasks: draft.subtasks.map((line, i) => (i === index ? value : line)) })
+  const removeSubtaskLine = (index: number) =>
+    updateDraft({ subtasks: draft.subtasks.filter((_, i) => i !== index) })
+
+  const inlineFieldClass =
+    "w-full rounded-lg border border-black/10 bg-white px-3 py-1.5 text-[13px] text-black outline-none focus:border-black/30"
 
   return (
-    <div ref={containerRef} className="relative">
+    <div ref={containerRef} className="relative" onKeyDown={handleContainerKeyDown}>
       <div className="transition-all duration-200">
         <div className="flex items-center gap-3 text-[#8e8e8e]">
           <input
@@ -156,21 +280,12 @@ export function QuickInputBar() {
               }, 0)
             }}
             onChange={(event) => updateDraft({ title: event.target.value })}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault()
-                handleSubmit()
-              }
-              if (event.key === "Escape") {
-                setOpenPanel(null)
-              }
-            }}
             placeholder="Add New Task"
-            className="h-7 flex-1 bg-transparent text-[15px] font-light text-[#666] outline-none placeholder:text-[#b9b9b9]"
+            className="h-7 flex-1 bg-transparent text-[15px] font-normal text-[#111] outline-none placeholder:font-light placeholder:text-[#b9b9b9]"
           />
 
-          <button type="button" onClick={handleSubmit} className={iconButtonClass} aria-label="Add task">
-            <Plus size={17} />
+          <button type="button" onClick={() => void handleSubmit()} disabled={isParsing} className={iconButtonClass} aria-label="Add task">
+            {isParsing ? <Loader2 size={17} className="animate-spin" /> : <Plus size={17} />}
           </button>
 
           {!isExpanded ? (
@@ -243,7 +358,101 @@ export function QuickInputBar() {
                   </div>
                 ) : null}
               </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (openPanel === "subtasks") {
+                    setOpenPanel(null)
+                  } else {
+                    setOpenPanel("subtasks")
+                    if (draft.subtasks.length === 0) addSubtaskLine()
+                  }
+                }}
+                className={fieldButtonClass(openPanel === "subtasks" || draft.subtasks.some((line) => line.trim()))}
+                aria-label="Subtasks"
+              >
+                <ListChecks size={17} />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setOpenPanel((current) => (current === "url" ? null : "url"))}
+                className={fieldButtonClass(openPanel === "url" || Boolean(draft.url.trim()))}
+                aria-label="Link"
+              >
+                <Link2 size={17} />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setOpenPanel((current) => (current === "phone" ? null : "phone"))}
+                className={fieldButtonClass(openPanel === "phone" || Boolean(draft.phone.trim()))}
+                aria-label="Phone"
+              >
+                <Phone size={17} />
+              </button>
             </div>
+
+            {openPanel === "url" ? (
+              <input
+                value={draft.url}
+                onChange={(event) => updateDraft({ url: event.target.value })}
+                placeholder="https://example.com"
+                inputMode="url"
+                autoFocus
+                className={`mt-2 ${inlineFieldClass}`}
+              />
+            ) : null}
+
+            {openPanel === "phone" ? (
+              <input
+                value={draft.phone}
+                onChange={(event) => updateDraft({ phone: event.target.value })}
+                placeholder="Phone number"
+                inputMode="tel"
+                autoFocus
+                className={`mt-2 ${inlineFieldClass}`}
+              />
+            ) : null}
+
+            {openPanel === "subtasks" ? (
+              <div className="mt-2 space-y-1.5">
+                {draft.subtasks.map((line, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-black/30" aria-hidden="true" />
+                    <input
+                      value={line}
+                      onChange={(event) => updateSubtaskLine(index, event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault()
+                          addSubtaskLine()
+                        }
+                      }}
+                      placeholder="Subtask"
+                      autoFocus={index === draft.subtasks.length - 1}
+                      className={inlineFieldClass}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeSubtaskLine(index)}
+                      className="shrink-0 text-black/30 transition hover:text-[#a32020]"
+                      aria-label="Remove subtask"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addSubtaskLine}
+                  className="flex items-center gap-1 text-[12px] text-black/45 transition hover:text-black/70"
+                >
+                  <Plus size={13} /> Add subtask
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

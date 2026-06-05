@@ -34,8 +34,10 @@ test("daily recurring tasks generate a long future window without duplicates", (
   const initialChildren = state.calendarTodos.filter((todo) => todo.parentId === parentId)
   const uniqueDates = new Set(initialChildren.map((todo) => todo.date))
 
-  assert.equal(initialChildren.length, 730)
-  assert.equal(uniqueDates.size, 730)
+  // Matches RECURRING_GENERATION_DAYS in lib/store.ts.
+  const WINDOW = 180
+  assert.equal(initialChildren.length, WINDOW)
+  assert.equal(uniqueDates.size, WINDOW)
   assert.ok(initialChildren.every((todo) => todo.text === "Daily test"))
   assert.ok(initialChildren.every((todo) => todo.completed === false))
   assert.ok(initialChildren.every((todo) => todo.isRecurring === true))
@@ -44,7 +46,7 @@ test("daily recurring tasks generate a long future window without duplicates", (
   state = useLemonadeStore.getState()
 
   const regeneratedChildren = state.calendarTodos.filter((todo) => todo.parentId === parentId)
-  assert.equal(regeneratedChildren.length, 730)
+  assert.equal(regeneratedChildren.length, WINDOW)
 })
 
 test("monthly recurring tasks roll over month-end correctly", () => {
@@ -136,7 +138,15 @@ test("updating an optimistic task into a future monthly recurring task generates
 })
 
 test("weekly recurring tasks can generate on multiple selected weekdays", () => {
-  const parentDate = new Date("2026-05-14T12:00:00")
+  // Use dates relative to "now" so the test doesn't rot: generation only emits
+  // instances on/after today, so hardcoded past dates would always fail.
+  const parentDate = new Date()
+  parentDate.setHours(12, 0, 0, 0)
+  // Two distinct weekdays that are not today (offset start is 1, so today is
+  // never generated anyway).
+  const dayA = (parentDate.getDay() + 2) % 7
+  const dayB = (parentDate.getDay() + 4) % 7
+
   const parentId = useLemonadeStore.getState().addCalendarTodo({
     text: "Water Plants",
     completed: false,
@@ -144,14 +154,22 @@ test("weekly recurring tasks can generate on multiple selected weekdays", () => 
     labelIds: [],
     isRecurring: true,
     recurringFrequency: "weekly",
-    recurringDays: [4, 0],
+    recurringDays: [dayA, dayB],
   })
+
+  const nextOccurrence = (weekday: number) => {
+    for (let offset = 1; offset <= 14; offset += 1) {
+      const candidate = addDays(parentDate, offset)
+      if (candidate.getDay() === weekday) return formatLocalDateKey(candidate)
+    }
+    throw new Error(`no upcoming occurrence found for weekday ${weekday}`)
+  }
 
   const state = useLemonadeStore.getState()
   const childDates = state.calendarTodos
     .filter((todo) => todo.parentId === parentId)
     .map((todo) => todo.date)
 
-  assert.ok(childDates.includes("2026-05-17"))
-  assert.ok(childDates.includes("2026-05-21"))
+  assert.ok(childDates.includes(nextOccurrence(dayA)))
+  assert.ok(childDates.includes(nextOccurrence(dayB)))
 })

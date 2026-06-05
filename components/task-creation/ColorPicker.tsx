@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { Brush, Droplets, Image as ImageIcon, Palette, Pipette, SlidersHorizontal } from "lucide-react"
 
 type ColorPickerProps = {
@@ -68,12 +69,22 @@ const rgbToHsb = (r: number, g: number, b: number) => {
   }
 }
 
-export function ColorPicker({ value, onChange, onClose }: ColorPickerProps) {
+export function ColorPicker({ value, onChange, onClose, anchorRef }: ColorPickerProps & { anchorRef?: { current: HTMLElement | null } }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const lastEmittedRef = useRef<string | null>(value)
+  // Only propagate a color once the user actually interacts — opening the
+  // picker must not overwrite the task's color on its own.
+  const hasInteractedRef = useRef(false)
+  // Keep a stable handle to onChange so the emit effect doesn't re-run (and
+  // re-emit) every time the parent passes a new inline callback.
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
+  const [position, setPosition] = useState<{ left: number; top: number; openToLeft: boolean } | null>(null)
+  const [mounted, setMounted] = useState(false)
   const { h: initialHue, s: initialSaturation, b: initialBrightness } = useMemo(() => {
-    if (!value) return { h: 0, s: 0, b: 0 }
+    // Default to full brightness so the wheel renders in color, not black.
+    if (!value) return { h: 0, s: 0, b: 1 }
     const rgb = hexToRgb(value)
     return rgbToHsb(rgb.r, rgb.g, rgb.b)
   }, [value])
@@ -84,6 +95,9 @@ export function ColorPicker({ value, onChange, onClose }: ColorPickerProps) {
   const [opacity, setOpacity] = useState(100)
 
   useEffect(() => {
+    // Ignore the parent echoing back the color we just emitted — re-syncing
+    // internal state from our own output causes an infinite update loop.
+    if (value === lastEmittedRef.current) return
     setHue(initialHue)
     setSaturation(initialSaturation)
     setBrightness(initialBrightness)
@@ -91,94 +105,130 @@ export function ColorPicker({ value, onChange, onClose }: ColorPickerProps) {
   }, [initialBrightness, initialHue, initialSaturation, value])
 
   useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  const PANEL_WIDTH = 320
+  const PANEL_GAP = 16
+  const PANEL_HEIGHT_FALLBACK = 420
+
+  const computePosition = () => {
+    if (typeof window === "undefined") return
+    const anchor = anchorRef?.current
+    if (!anchor) {
+      setPosition({ left: window.innerWidth / 2 - PANEL_WIDTH / 2, top: 100, openToLeft: false })
+      return
+    }
+    const rect = anchor.getBoundingClientRect()
+    const wouldOverflowRight = rect.right + PANEL_WIDTH + PANEL_GAP > window.innerWidth
+    const openToLeft = wouldOverflowRight && rect.left - PANEL_WIDTH - PANEL_GAP >= 0
+    const left = openToLeft
+      ? rect.left - PANEL_WIDTH - PANEL_GAP
+      : Math.min(rect.right + PANEL_GAP, window.innerWidth - PANEL_WIDTH - 8)
+    const top = Math.max(
+      8,
+      Math.min(rect.top, window.innerHeight - PANEL_HEIGHT_FALLBACK - 8)
+    )
+    setPosition({ left, top, openToLeft })
+  }
+
+  useLayoutEffect(() => {
+    computePosition()
+    if (typeof window === "undefined") return
+    const handleResize = () => computePosition()
+    window.addEventListener("resize", handleResize)
+    window.addEventListener("scroll", handleResize, true)
+    return () => {
+      window.removeEventListener("resize", handleResize)
+      window.removeEventListener("scroll", handleResize, true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchorRef?.current])
+
+  useEffect(() => {
     const handleOutside = (event: MouseEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) {
+      if (!containerRef.current?.contains(event.target as Node) &&
+          !(anchorRef?.current?.contains(event.target as Node))) {
         onClose?.()
       }
     }
     window.addEventListener("mousedown", handleOutside)
     return () => window.removeEventListener("mousedown", handleOutside)
-  }, [onClose])
-
-  const PANEL_WIDTH = 336 // 320px panel + 16px margin
-  const SAFETY = 16
+  }, [onClose, anchorRef])
 
   const measureRef = (node: HTMLDivElement | null) => {
     containerRef.current = node
-    if (!node || typeof window === "undefined") return
-    const rect = node.getBoundingClientRect()
-    const overflowsRight = rect.right + PANEL_WIDTH + SAFETY > window.innerWidth
-    if (overflowsRight) {
-      node.classList.add("open-to-left")
-    } else {
-      node.classList.remove("open-to-left")
-    }
   }
 
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    const handleResize = () => {
-      const node = containerRef.current
-      if (!node) return
-      const rect = node.getBoundingClientRect()
-      const overflowsRight = rect.right + PANEL_WIDTH + SAFETY > window.innerWidth
-      node.classList.toggle("open-to-left", overflowsRight)
-    }
-    window.addEventListener("resize", handleResize)
-    return () => window.removeEventListener("resize", handleResize)
-  }, [])
+  const WHEEL_SIZE = 320
 
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
 
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
+    // Throttle the ~100k-pixel redraw to one paint frame, coalescing rapid
+    // brightness-slider changes so dragging it doesn't block the main thread.
+    const frame = requestAnimationFrame(() => {
+      const ctx = canvas.getContext("2d")
+      if (!ctx) return
 
-    const { width, height } = canvas
-    const imageData = ctx.createImageData(width, height)
-    const radius = width / 2
+      const size = WHEEL_SIZE
+      canvas.width = size
+      canvas.height = size
 
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        const dx = x - radius
-        const dy = y - radius
-        const distance = Math.sqrt(dx * dx + dy * dy)
-        const index = (y * width + x) * 4
+      const imageData = ctx.createImageData(size, size)
+      const radius = size / 2
 
-        if (distance > radius) {
-          imageData.data[index + 3] = 0
-          continue
+      for (let y = 0; y < size; y += 1) {
+        for (let x = 0; x < size; x += 1) {
+          const dx = x - radius
+          const dy = y - radius
+          const distance = Math.sqrt(dx * dx + dy * dy)
+          const index = (y * size + x) * 4
+
+          if (distance > radius) {
+            imageData.data[index + 3] = 0
+            continue
+          }
+
+          const angle = (Math.atan2(dy, dx) * 180) / Math.PI
+          const nextHue = (angle + 360) % 360
+          const nextSaturation = clamp(distance / radius, 0, 1)
+          const color = hsbToHex(nextHue, nextSaturation, brightness)
+          const rgb = hexToRgb(color)
+
+          imageData.data[index] = rgb.r
+          imageData.data[index + 1] = rgb.g
+          imageData.data[index + 2] = rgb.b
+          imageData.data[index + 3] = 255
         }
-
-        const angle = (Math.atan2(dy, dx) * 180) / Math.PI
-        const nextHue = (angle + 360) % 360
-        const nextSaturation = clamp(distance / radius, 0, 1)
-        const color = hsbToHex(nextHue, nextSaturation, brightness)
-        const rgb = hexToRgb(color)
-
-        imageData.data[index] = rgb.r
-        imageData.data[index + 1] = rgb.g
-        imageData.data[index + 2] = rgb.b
-        imageData.data[index + 3] = 255
       }
-    }
 
-    ctx.putImageData(imageData, 0, 0)
-  }, [brightness])
+      ctx.putImageData(imageData, 0, 0)
+    })
+
+    return () => cancelAnimationFrame(frame)
+    // Depend on mounted/position too: the canvas only exists once the panel is
+    // rendered, so without these the wheel would draw before the canvas mounts
+    // and never re-run — leaving it blank.
+  }, [brightness, mounted, position])
 
   useEffect(() => {
+    if (!hasInteractedRef.current) {
+      return
+    }
     const nextColor = hsbToHex(hue, saturation, brightness)
     if (lastEmittedRef.current === nextColor) {
       return
     }
     lastEmittedRef.current = nextColor
-    onChange(nextColor)
-  }, [brightness, hue, onChange, saturation])
+    onChangeRef.current(nextColor)
+  }, [brightness, hue, saturation])
 
   const handleCanvasPointer = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current
     if (!canvas) return
+    hasInteractedRef.current = true
     const bounds = canvas.getBoundingClientRect()
     const x = clientX - bounds.left
     const y = clientY - bounds.top
@@ -197,10 +247,15 @@ export function ColorPicker({ value, onChange, onClose }: ColorPickerProps) {
     top: `${50 + Math.sin((hue * Math.PI) / 180) * saturation * 50}%`,
   }
 
-  return (
+  if (!mounted || !position) {
+    return null
+  }
+
+  const panel = (
     <div
       ref={measureRef}
-      className="color-picker-panel absolute top-0 z-[80] w-[320px] rounded-2xl border border-gray-200 bg-white shadow-2xl left-full ml-4"
+      className="color-picker-panel fixed z-[2147483000] w-[320px] rounded-2xl border border-gray-200 bg-white shadow-2xl"
+      style={{ left: position.left, top: position.top }}
     >
       <div className="border-b border-gray-100 px-4 py-2">
         <div className="mb-2 flex gap-1">
@@ -247,7 +302,10 @@ export function ColorPicker({ value, onChange, onClose }: ColorPickerProps) {
             min={0}
             max={100}
             value={brightness * 100}
-            onChange={(event) => setBrightness(Number(event.target.value) / 100)}
+            onChange={(event) => {
+              hasInteractedRef.current = true
+              setBrightness(Number(event.target.value) / 100)
+            }}
             className="h-2 w-full appearance-none rounded-full bg-gradient-to-r from-black via-gray-500 to-white"
           />
         </div>
@@ -276,6 +334,7 @@ export function ColorPicker({ value, onChange, onClose }: ColorPickerProps) {
                 key={swatch}
                 type="button"
                 onClick={() => {
+                  hasInteractedRef.current = true
                   const rgb = hexToRgb(swatch)
                   const converted = rgbToHsb(rgb.r, rgb.g, rgb.b)
                   setHue(converted.h)
@@ -291,4 +350,6 @@ export function ColorPicker({ value, onChange, onClose }: ColorPickerProps) {
       </div>
     </div>
   )
+
+  return createPortal(panel, document.body)
 }

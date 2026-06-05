@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { addMinutes, format, isValid } from "date-fns";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   buildHeuristicParsedTask,
   cleanShortcutTitle,
@@ -276,6 +277,18 @@ export async function POST(req: Request) {
   let body: Record<string, unknown> | null = null;
 
   try {
+    // Require an authenticated user — this route spends OpenAI credits, so it
+    // must not be callable anonymously.
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { session },
+      error: authError,
+    } = await supabase.auth.getSession();
+    if (authError) throw authError;
+    if (!session?.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     body = await req.json();
     const input = body?.input;
     const nowIso = typeof body?.now === "string" ? body.now : null;
@@ -284,6 +297,11 @@ export async function POST(req: Request) {
 
     if (!input || typeof input !== "string" || input.trim() === "") {
       return NextResponse.json({ error: "Missing input" }, { status: 400 });
+    }
+
+    // Cap input length to bound token cost / abuse.
+    if (input.length > 2000) {
+      return NextResponse.json({ error: "Input too long" }, { status: 413 });
     }
 
     const now = nowIso ? new Date(nowIso) : new Date();

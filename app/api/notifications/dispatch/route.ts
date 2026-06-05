@@ -70,12 +70,16 @@ export async function POST(request: Request) {
     })
 
     const requiredSecret = process.env.NOTIFICATIONS_CRON_SECRET
-    if (requiredSecret) {
-      const provided = request.headers.get("x-cron-secret")
-      if (provided !== requiredSecret) {
-        console.error("/api/notifications/dispatch unauthorized cron secret")
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-      }
+    if (!requiredSecret) {
+      // Fail closed: without a configured secret this endpoint would let anyone
+      // trigger mass push dispatch and mutate every user's scheduled_notifications.
+      console.error("/api/notifications/dispatch missing NOTIFICATIONS_CRON_SECRET; refusing to run")
+      return NextResponse.json({ error: "Endpoint not configured" }, { status: 503 })
+    }
+    const provided = request.headers.get("x-cron-secret")
+    if (provided !== requiredSecret) {
+      console.error("/api/notifications/dispatch unauthorized cron secret")
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
     ensureWebPushConfigured()

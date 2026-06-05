@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "lucide-react"
+import { ChevronDown, ChevronUp } from "lucide-react"
 
 type CalendarWidgetProps = {
   selectedDate?: Date
@@ -79,23 +79,25 @@ export function CalendarWidget({ selectedDate, onDateSelect }: CalendarWidgetPro
         })}
       </div>
 
-      <div className="mt-10 flex items-center justify-between">
-        <button type="button" onClick={() => changeMonth(-1)} aria-label="Previous month" className="text-[#6f6f6f] hover:text-white">
-          <ChevronLeft size={18} />
-        </button>
-        <h2 className="text-[22px] tracking-[0.16em] text-white">{MONTH_LABELS[currentMonth]}</h2>
-        <button type="button" onClick={() => changeMonth(1)} aria-label="Next month" className="text-[#6f6f6f] hover:text-white">
-          <ChevronRight size={18} />
-        </button>
+      <div className="mt-10 flex items-center gap-2 text-[18px] font-light tracking-[0.16em] text-white">
+        <span>{MONTH_LABELS[currentMonth]}</span>
+        <div className="flex flex-col text-[#6d6d6d]">
+          <button type="button" onClick={() => changeMonth(1)} aria-label="Next month">
+            <ChevronUp size={12} />
+          </button>
+          <button type="button" onClick={() => changeMonth(-1)} aria-label="Previous month">
+            <ChevronDown size={12} />
+          </button>
+        </div>
       </div>
 
-      <div className="mt-6 grid grid-cols-7 gap-y-2 text-center text-[12px] tracking-[0.16em] text-[#696969]">
+      <div className="mt-6 grid grid-cols-7 place-items-center gap-y-2 text-center text-[11px] font-medium tracking-[0.14em] text-[#7c7c7c]">
         {DAY_LABELS.map((day, index) => (
           <span key={`${day}-${index}`}>{day}</span>
         ))}
       </div>
 
-      <div className="mt-4 grid grid-cols-7 gap-y-1.5 text-center text-[14px]">
+      <div className="mt-3 grid grid-cols-7 place-items-center gap-y-2.5 text-center text-[13px]">
         {monthDays.map((date) => {
           const inMonth = date.getMonth() === currentMonth
           const isToday = isSameDay(date, today)
@@ -106,15 +108,17 @@ export function CalendarWidget({ selectedDate, onDateSelect }: CalendarWidgetPro
               key={date.toISOString()}
               type="button"
               onClick={() => onDateSelect(new Date(date))}
-              className="flex justify-center"
+              className="flex items-center justify-center"
+              aria-current={isToday ? "date" : undefined}
+              aria-pressed={isSelected}
             >
               <span
                 className={[
-                  "flex h-7 w-7 items-center justify-center rounded-full transition-colors",
-                  inMonth ? "text-white" : "text-[#313131]",
-                  isToday ? "bg-[#f6f6f6] text-black" : "",
-                  isSelected && !isToday ? "bg-[#0b3e69] ring-1 ring-[#144f87] text-white" : "",
-                  !isToday && !isSelected ? "hover:bg-[#171717]" : "",
+                  "flex h-8 w-8 items-center justify-center rounded-full tabular-nums transition-all duration-150",
+                  inMonth ? "text-sky-50/85" : "text-white/15",
+                  inMonth && !isToday && !isSelected ? "bg-sky-500/12 hover:bg-sky-500/30 hover:text-white" : "",
+                  isSelected && !isToday ? "bg-sky-500/25 font-semibold text-white ring-[1.5px] ring-sky-400" : "",
+                  isToday ? "bg-sky-500 font-semibold text-white shadow-[0_2px_10px_rgba(14,165,233,0.55)]" : "",
                 ].join(" ")}
               >
                 {date.getDate()}

@@ -2,7 +2,43 @@
 
 import { addDays, addMonths, format, isValid, parseISO } from 'date-fns'
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
+import { toast } from 'sonner'
+
+// localStorage wrapper that fails loudly (a toast) instead of silently dropping
+// writes when the quota is exceeded — otherwise users can lose work with no clue.
+let storageQuotaWarned = false
+const safeLocalStorage = {
+  getItem: (name: string): string | null => {
+    try {
+      return typeof window !== 'undefined' ? window.localStorage.getItem(name) : null
+    } catch {
+      return null
+    }
+  },
+  setItem: (name: string, value: string): void => {
+    try {
+      if (typeof window === 'undefined') return
+      window.localStorage.setItem(name, value)
+      storageQuotaWarned = false
+    } catch (error) {
+      console.error('Failed to persist app state to localStorage:', error)
+      if (!storageQuotaWarned && typeof window !== 'undefined') {
+        storageQuotaWarned = true
+        toast.error("Couldn't save your changes — local storage is full.", {
+          description: 'Recent changes may not survive a refresh. Remove large attachments or free up space.',
+        })
+      }
+    }
+  },
+  removeItem: (name: string): void => {
+    try {
+      if (typeof window !== 'undefined') window.localStorage.removeItem(name)
+    } catch {
+      /* ignore */
+    }
+  },
+}
 
 export type ThemeColor = 
   | 'green' | 'lime' | 'teal' | 'cyan' | 'blue' | 'indigo' | 'violet' | 'purple'
@@ -36,7 +72,9 @@ export interface Todo {
   id: string
   text: string
   completed: boolean
+  completedAt?: number | null // epoch ms when last marked complete
   date: string | null // ISO date string
+  dueDate?: string | null // ISO date string for the due/deadline date
   createdAt: number
   endOfDay: boolean
   isSyncing?: boolean
@@ -242,6 +280,7 @@ interface LemonadeStore {
   skipRecurringOccurrence: (todoId: string) => void
   splitCalendarTodo: (todoId: string, titles: string[]) => void
   convertTodoToSubtask: (todoId: string, parentId: string) => void
+  promoteSubtaskToTask: (todoId: string, subtaskId: string) => void
   selectedTaskIds: string[]
   toggleTaskSelection: (todoId: string) => void
   clearTaskSelection: () => void
@@ -1801,7 +1840,11 @@ const mapTodosInStore = (
   })),
 })
 
-const RECURRING_GENERATION_DAYS = 730
+// Window of future instances materialized for each recurring task. Kept modest
+// so a few daily-recurring tasks don't balloon calendarTodos into the thousands
+// (which would slow every filter/render/persist/sync). ~6 months is plenty for
+// the daily + collection views; further-out instances regenerate as time passes.
+const RECURRING_GENERATION_DAYS = 180
 const DEFAULT_LABEL_COLOR = "#6b7280"
 
 const getHolidays = (year: number): Record<string, string> => {
@@ -2195,7 +2238,9 @@ export const useLemonadeStore = create<LemonadeStore>()(
 
         set((state) => {
           const nextTodos = state.calendarTodos.map((todo) =>
-            todo.id === id ? { ...todo, completed: nextCompleted } : todo
+            todo.id === id
+              ? { ...todo, completed: nextCompleted, completedAt: nextCompleted ? Date.now() : null }
+              : todo
           )
 
           let celebrationEvent = state.celebrationEvent
@@ -2687,6 +2732,51 @@ export const useLemonadeStore = create<LemonadeStore>()(
             [parentId]: false,
           },
           selectedTaskIds: state.selectedTaskIds.filter((id) => id !== todoId),
+        }
+      }),
+
+      promoteSubtaskToTask: (todoId, subtaskId) => set((state) => {
+        const parent = state.calendarTodos.find((todo) => todo.id === todoId)
+        if (!parent) return state
+        const subtask = parent.subtasks.find((item) => item.id === subtaskId)
+        if (!subtask) return state
+
+        // New top-level task inherits the parent's placement (date/section/
+        // priority/labels) but drops subtask-specific and recurrence state.
+        const promoted: Todo = {
+          ...parent,
+          id: generateId(),
+          text: subtask.title,
+          completed: subtask.completed,
+          createdAt: parent.createdAt + 1,
+          subtasks: [],
+          parentId: undefined,
+          time: undefined,
+          isRecurring: false,
+          recurringFrequency: undefined,
+          recurringDays: undefined,
+          recurringInterval: undefined,
+          recurringCustomText: undefined,
+          reminderOffsetMinutes: undefined,
+          scheduledNotificationId: undefined,
+        }
+
+        const nextTodos: Todo[] = []
+        state.calendarTodos.forEach((todo) => {
+          if (todo.id === todoId) {
+            nextTodos.push({
+              ...todo,
+              subtasks: todo.subtasks.filter((item) => item.id !== subtaskId),
+            })
+            nextTodos.push(promoted)
+          } else {
+            nextTodos.push(todo)
+          }
+        })
+
+        return {
+          ...pushTaskHistory(state, "promote subtask"),
+          calendarTodos: nextTodos,
         }
       }),
 
@@ -3398,6 +3488,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
     {
       name: LEMONADE_STORAGE_KEY,
       version: STORAGE_VERSION,
+      storage: createJSONStorage(() => safeLocalStorage),
       partialize: (state) => ({
         preferences: state.preferences,
         calendarTodos: state.calendarTodos,

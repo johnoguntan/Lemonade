@@ -13,6 +13,7 @@ import {
   type CloudSnapshot,
 } from "@/lib/cloud-sync"
 import { useLemonadeStore } from "@/lib/store"
+import { toast } from "sonner"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 
@@ -42,6 +43,23 @@ export function CloudSyncManager() {
   const lastBootstrappedUserRef = useRef<string | null>(null)
   const syncTimeoutRef = useRef<number | null>(null)
   const lastPushedAtRef = useRef<number>(0)
+  const prevSyncAvailableRef = useRef(true)
+
+  // Tell the user when cloud sync drops or recovers (once per transition) so
+  // they're not left wondering whether their changes are being backed up.
+  useEffect(() => {
+    if (typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)) {
+      return
+    }
+    if (!userId) return
+    const previouslyAvailable = prevSyncAvailableRef.current
+    prevSyncAvailableRef.current = syncAvailable
+    if (previouslyAvailable && !syncAvailable) {
+      toast.warning("Cloud sync is unavailable — changes are saved on this device and will sync when it reconnects.")
+    } else if (!previouslyAvailable && syncAvailable) {
+      toast.success("Cloud sync reconnected.")
+    }
+  }, [syncAvailable, userId])
 
   useEffect(() => {
     if (typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)) {
@@ -154,14 +172,15 @@ export function CloudSyncManager() {
     if (!supabase || !userId || !syncAvailable) return
 
     const unsubscribe = useLemonadeStore.subscribe(() => {
-        const now = Date.now()
-        // Debounce & avoid rapid-fire sync storms.
-        if (now - lastPushedAtRef.current < 1000) return
+        // Trailing-edge debounce: always (re)schedule so the LAST edit in a burst
+        // is never dropped. Bursts are coalesced because each edit pushes the timer
+        // out; only one push fires once edits settle.
         if (syncTimeoutRef.current) {
           window.clearTimeout(syncTimeoutRef.current)
         }
 
         syncTimeoutRef.current = window.setTimeout(async () => {
+          syncTimeoutRef.current = null
           const snapshot = getCloudSnapshotFromStore()
           const localUpdatedAt = new Date().toISOString()
 
@@ -180,10 +199,31 @@ export function CloudSyncManager() {
         }, 1200)
       })
 
+    // Safety net: if the tab is hidden/closed while a push is still pending in the
+    // debounce window, persist the snapshot to the offline queue so the next
+    // bootstrap flushes it before the server-wins pull (prevents losing the edit).
+    const flushPending = () => {
+      if (!syncTimeoutRef.current) return
+      window.clearTimeout(syncTimeoutRef.current)
+      syncTimeoutRef.current = null
+      try {
+        writePendingCloudQueue({ localUpdatedAt: new Date().toISOString(), snapshot: getCloudSnapshotFromStore() })
+      } catch {
+        // Best effort; nothing more we can do during unload.
+      }
+    }
+    const handleVisibility = () => {
+      if (document.visibilityState === "hidden") flushPending()
+    }
+    document.addEventListener("visibilitychange", handleVisibility)
+    window.addEventListener("pagehide", flushPending)
+
     return () => {
       if (syncTimeoutRef.current) {
         window.clearTimeout(syncTimeoutRef.current)
       }
+      document.removeEventListener("visibilitychange", handleVisibility)
+      window.removeEventListener("pagehide", flushPending)
       unsubscribe()
     }
   }, [supabase, syncAvailable, userId])

@@ -59,10 +59,15 @@ export function PriorityDropdown({ value, onChange }: PriorityDropdownProps) {
   const activePresetId = useAllsenadroStore((state) => state.activePresetId)
   const [query, setQuery] = useState("")
   const [showColorPicker, setShowColorPicker] = useState(false)
+  const colorPickerButtonRef = useRef<HTMLButtonElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const handleOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null
+      // The color picker is portaled to <body>, so a click on the wheel is
+      // technically outside this panel — don't treat that as "click away".
+      if (target?.closest?.(".color-picker-panel")) return
       if (!panelRef.current?.contains(event.target as Node)) {
         setShowColorPicker(false)
       }
@@ -226,6 +231,7 @@ export function PriorityDropdown({ value, onChange }: PriorityDropdownProps) {
           })}
           <button
             type="button"
+            ref={colorPickerButtonRef}
             onClick={() => setShowColorPicker((current) => !current)}
             className="flex h-6 w-6 items-center justify-center rounded-full bg-[conic-gradient(from_180deg_at_50%_50%,#f43f5e,#f59e0b,#eab308,#22c55e,#3b82f6,#8b5cf6,#f43f5e)]"
           >
@@ -256,7 +262,14 @@ export function PriorityDropdown({ value, onChange }: PriorityDropdownProps) {
         </div>
       </div>
 
-      {showColorPicker ? <ColorPicker value={value.color} onChange={(color) => onChange({ color })} onClose={() => setShowColorPicker(false)} /> : null}
+      {showColorPicker ? (
+        <ColorPicker
+          value={value.color}
+          onChange={(color) => onChange({ color })}
+          onClose={() => setShowColorPicker(false)}
+          anchorRef={colorPickerButtonRef}
+        />
+      ) : null}
     </div>
   )
 }

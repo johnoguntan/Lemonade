@@ -66,18 +66,43 @@ export default function Page() {
   }, [initializeAllsenadro, initializedUserId, isLoading])
 
   useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null
+      if (!el) return false
+      const tag = el.tagName
+      return (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        el.isContentEditable
+      )
+    }
+
     const handleKeyDown = (event: KeyboardEvent) => {
+      const editing = isEditableTarget(event.target)
+
+      // Undo / redo — but don't hijack native text-editing undo while typing.
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z" && !event.shiftKey) {
+        if (editing) return
         event.preventDefault()
         undoTaskAction()
+        return
       }
 
       if (
         (event.metaKey || event.ctrlKey) &&
         ((event.shiftKey && event.key.toLowerCase() === "z") || event.key.toLowerCase() === "y")
       ) {
+        if (editing) return
         event.preventDefault()
         redoTaskAction()
+        return
+      }
+
+      // "n" — jump to the new-task input (only when not already typing somewhere).
+      if (!editing && !event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "n") {
+        event.preventDefault()
+        window.dispatchEvent(new Event("allsenadro:new-task-focus"))
       }
     }
 

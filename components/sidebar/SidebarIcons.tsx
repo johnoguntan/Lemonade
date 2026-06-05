@@ -1,8 +1,8 @@
 "use client"
 
-import { Bell, Home, Search, Settings } from "lucide-react"
+import { Home, Search, Settings } from "lucide-react"
 
-type SidebarIconName = "home" | "search" | "notifications" | "settings"
+type SidebarIconName = "home" | "search" | "settings"
 
 type SidebarIconsProps = {
   activeIcon: string
@@ -12,7 +12,6 @@ type SidebarIconsProps = {
 const icons: Array<{ key: SidebarIconName; icon: typeof Home }> = [
   { key: "home", icon: Home },
   { key: "search", icon: Search },
-  { key: "notifications", icon: Bell },
   { key: "settings", icon: Settings },
 ]
 

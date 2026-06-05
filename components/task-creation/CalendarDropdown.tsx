@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3 } from "lucide-react"
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, X } from "lucide-react"
 import { TimeWheelPicker } from "@/components/task-creation/TimeWheelPicker"
 import { RepeatPicker } from "@/components/task-creation/RepeatPicker"
 import type { RepeatConfig } from "@/components/task-creation/RepeatPicker"
 import type { TaskDraftState } from "@/components/task-creation/QuickInputBar"
+import { parseFlexibleDate } from "@/lib/date-parse"
 
 type CalendarDropdownProps = {
   value: TaskDraftState
@@ -24,13 +25,6 @@ const durationOptions = [
 ] as const
 const alertOptions = ["None", "At time of event", "5 min before", "10 min before", "15 min before", "30 min before", "1 hour before", "1 day before"]
 const snoozeOptions = ["None", "Later today", "Tomorrow", "Next week", "Custom"]
-
-const parseNativeDate = (value: string) => {
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  const parsed = new Date(trimmed)
-  return Number.isNaN(parsed.getTime()) ? null : parsed
-}
 
 const formatInputDate = (date: Date | null) => {
   if (!date) return ""
@@ -66,11 +60,13 @@ function MiniCalendar({
   onSelect,
   timeValue,
   onTimeOpen,
+  onClose,
 }: {
   value: Date | null
   onSelect: (date: Date) => void
   timeValue?: string | null
   onTimeOpen?: () => void
+  onClose?: () => void
 }) {
   const today = new Date()
   const [viewDate, setViewDate] = useState(value ?? today)
@@ -89,10 +85,20 @@ function MiniCalendar({
 
   return (
     <div className="w-[272px] rounded-[20px] bg-black p-4 text-white shadow-2xl">
-      <div className="flex items-start gap-2">
+      <div className="flex items-start justify-between gap-2">
         <div className="bg-white px-2 py-1 text-[11px] font-semibold tracking-[0.06em] text-black">
           {formatInputDate(value ?? viewDate)}
         </div>
+        {onClose ? (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close calendar"
+            className="-mr-1 -mt-1 flex h-7 w-7 items-center justify-center rounded-full text-white/70 transition hover:bg-white/10 hover:text-white"
+          >
+            <X size={16} />
+          </button>
+        ) : null}
       </div>
 
       <div className="flex items-center gap-2">
@@ -273,9 +279,11 @@ export function CalendarDropdown({ value, onChange }: CalendarDropdownProps) {
                 value={scheduleInput}
                 onChange={(event) => setScheduleInput(event.target.value)}
                 onBlur={() => {
-                  const parsed = parseNativeDate(scheduleInput)
+                  const parsed = parseFlexibleDate(scheduleInput)
                   if (parsed) onChange({ scheduleDate: parsed })
+                  else setScheduleInput(formatInputDate(value.scheduleDate))
                 }}
+                placeholder="e.g. 2/10/2026 or 4th of July"
                 className="rounded-full bg-[#dfeafe] px-4 py-1 text-sm outline-none"
               />
               <button type="button" onClick={() => setOpenPicker((current) => (current === "schedule" ? null : "schedule"))}>
@@ -290,6 +298,10 @@ export function CalendarDropdown({ value, onChange }: CalendarDropdownProps) {
                       onSelect={(date) => onChange({ scheduleDate: date })}
                       timeValue={value.scheduleTime}
                       onTimeOpen={() => setCalendarTimeOpen((current) => !current)}
+                      onClose={() => {
+                        setOpenPicker(null)
+                        setCalendarTimeOpen(false)
+                      }}
                     />
                     {calendarTimeOpen ? (
                       <div className="absolute left-0 top-full z-30 mt-3 w-[272px] rounded-[20px] border border-black/10 bg-white p-3 shadow-2xl">
@@ -358,9 +370,11 @@ export function CalendarDropdown({ value, onChange }: CalendarDropdownProps) {
                 value={dueInput}
                 onChange={(event) => setDueInput(event.target.value)}
                 onBlur={() => {
-                  const parsed = parseNativeDate(dueInput)
+                  const parsed = parseFlexibleDate(dueInput)
                   if (parsed) onChange({ dueDate: parsed })
+                  else setDueInput(formatInputDate(value.dueDate))
                 }}
+                placeholder="e.g. 2/10/2026 or 4th of July"
                 className="rounded-full bg-[#dfeafe] px-4 py-1 text-sm outline-none"
               />
               <button type="button" onClick={() => setOpenPicker((current) => (current === "dueDate" ? null : "dueDate"))}>
@@ -371,7 +385,11 @@ export function CalendarDropdown({ value, onChange }: CalendarDropdownProps) {
 
           {openPicker === "dueDate" ? (
             <FloatingPopover>
-              <MiniCalendar value={value.dueDate} onSelect={(date) => onChange({ dueDate: date })} />
+              <MiniCalendar
+                value={value.dueDate}
+                onSelect={(date) => onChange({ dueDate: date })}
+                onClose={() => setOpenPicker(null)}
+              />
             </FloatingPopover>
           ) : null}
         </div>
@@ -391,47 +409,91 @@ export function CalendarDropdown({ value, onChange }: CalendarDropdownProps) {
             </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-3">
-            {durationOptions.map(([label, duration]) => (
-              <button
-                key={label}
-                type="button"
-                onClick={() => onChange({ duration })}
-                className="relative h-11 overflow-hidden rounded-full border border-gray-200 text-sm transition-transform duration-200 hover:border-gray-300"
-                style={{ width: `${getDurationPillWidth(duration)}px` }}
-              >
-                <span
+            {durationOptions.map(([label, duration]) => {
+              const isSelected = value.duration === duration
+              // Water level scales with duration (sqrt so 1 Min still shows a
+              // visible splash and 3 Hours nearly fills the pill).
+              const level = Math.round(18 + Math.sqrt(duration / 180) * 78)
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => onChange({ duration })}
                   className={[
-                    "absolute inset-y-0 left-0 rounded-full transition-all duration-300 ease-out",
-                    value.duration === duration ? "opacity-100" : "opacity-0",
+                    "relative h-11 overflow-hidden rounded-full border bg-white text-sm transition-all duration-200 hover:-translate-y-0.5",
+                    isSelected
+                      ? "border-cyan-400/70 shadow-[0_5px_16px_rgba(8,145,178,0.22)]"
+                      : "border-gray-200 hover:border-gray-300",
                   ].join(" ")}
-                  style={{
-                    width: value.duration === duration ? "100%" : "0%",
-                    background:
-                      "linear-gradient(135deg, rgba(15,23,42,0.96) 0%, rgba(31,41,55,0.92) 55%, rgba(71,85,105,0.88) 100%)",
-                  }}
-                />
-                <span
-                  className={[
-                    "absolute inset-y-[5px] left-[8px] rounded-full transition-all duration-500 ease-out",
-                    value.duration === duration ? "opacity-100" : "opacity-0",
-                  ].join(" ")}
-                  style={{
-                    width: value.duration === duration ? "62%" : "0%",
-                    background:
-                      "linear-gradient(90deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.08) 100%)",
-                    filter: "blur(0.5px)",
-                  }}
-                />
-                <span
-                  className={[
-                    "relative z-10 flex h-full items-center justify-center px-4 text-center leading-tight transition-colors duration-200",
-                    value.duration === duration ? "text-white" : "text-gray-600",
-                  ].join(" ")}
+                  style={{ width: `${getDurationPillWidth(duration)}px` }}
                 >
-                  {label}
-                </span>
-              </button>
-            ))}
+                  {isSelected ? (
+                    <span
+                      aria-hidden="true"
+                      data-liquid-anim
+                      style={{
+                        position: "absolute",
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        height: `${level}%`,
+                        animation: "liquid-bob 3.2s ease-in-out infinite",
+                      }}
+                    >
+                      {/* water body */}
+                      <span
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          background: "linear-gradient(180deg, #22d3ee 0%, #0891b2 100%)",
+                        }}
+                      />
+                      {/* back wave crest (lighter, slower) */}
+                      <svg
+                        viewBox="0 0 48 14"
+                        preserveAspectRatio="none"
+                        data-liquid-anim
+                        style={{
+                          position: "absolute",
+                          left: 0,
+                          top: -8,
+                          width: "200%",
+                          height: 12,
+                          opacity: 0.55,
+                          animation: "liquid-wave-move 2.4s linear infinite",
+                        }}
+                      >
+                        <path d="M0 7 Q6 1 12 7 T24 7 T36 7 T48 7 V14 H0 Z" fill="#67e8f9" />
+                      </svg>
+                      {/* front wave crest (darker, faster) */}
+                      <svg
+                        viewBox="0 0 48 14"
+                        preserveAspectRatio="none"
+                        data-liquid-anim
+                        style={{
+                          position: "absolute",
+                          left: 0,
+                          top: -6,
+                          width: "200%",
+                          height: 12,
+                          animation: "liquid-wave-move 1.4s linear infinite reverse",
+                        }}
+                      >
+                        <path d="M0 7 Q6 13 12 7 T24 7 T36 7 T48 7 V14 H0 Z" fill="#06b6d4" />
+                      </svg>
+                    </span>
+                  ) : null}
+                  <span
+                    className={[
+                      "relative z-10 flex h-full items-center justify-center px-4 text-center font-medium leading-tight transition-colors duration-200",
+                      isSelected ? "text-[#06363f]" : "text-gray-600",
+                    ].join(" ")}
+                  >
+                    {label}
+                  </span>
+                </button>
+              )
+            })}
           </div>
 
           {openPicker === "customDuration" ? (

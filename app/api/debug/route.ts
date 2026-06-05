@@ -1,4 +1,10 @@
 export async function GET() {
+  // Only expose configuration diagnostics in development; in production this
+  // would leak deployment recon (which secrets are set) to anonymous callers.
+  if (process.env.NODE_ENV === "production") {
+    return new Response("Not found", { status: 404 })
+  }
+
   return Response.json({
     supabaseUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
     supabaseAnon: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
