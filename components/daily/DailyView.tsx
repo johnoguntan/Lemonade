@@ -22,6 +22,9 @@ function SearchResultRow({ todo }: { todo: Todo }) {
   )
 }
 
+// Task search is hidden for now — flip to true to re-enable the in-view search bar.
+const SHOW_SEARCH = false
+
 type DailySectionKey = "urgent" | "schedule" | "allday"
 
 type DailyTodo = Todo & {
@@ -147,7 +150,7 @@ export function DailyView() {
   )
 
   const trimmedQuery = searchQuery.trim().toLowerCase()
-  const isSearching = trimmedQuery.length > 0
+  const isSearching = SHOW_SEARCH && trimmedQuery.length > 0
   const searchResults = useMemo(() => {
     if (!trimmedQuery) return []
     return calendarTodos
@@ -164,24 +167,26 @@ export function DailyView() {
         <QuickInputBar />
       </div>
 
-      <div className="flex items-center gap-2 border-b border-black/10 px-12 py-2.5">
-        <Search size={15} className="shrink-0 text-black/35" />
-        <input
-          ref={searchInputRef}
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") setSearchQuery("")
-          }}
-          placeholder="Search tasks…"
-          className="h-6 flex-1 bg-transparent text-[13px] text-black outline-none placeholder:text-black/35"
-        />
-        {isSearching ? (
-          <button type="button" onClick={() => setSearchQuery("")} aria-label="Clear search" className="text-black/35 hover:text-black">
-            <X size={14} />
-          </button>
-        ) : null}
-      </div>
+      {SHOW_SEARCH ? (
+        <div className="flex items-center gap-2 border-b border-black/10 px-12 py-2.5">
+          <Search size={15} className="shrink-0 text-black/35" />
+          <input
+            ref={searchInputRef}
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setSearchQuery("")
+            }}
+            placeholder="Search tasks…"
+            className="h-6 flex-1 bg-transparent text-[13px] text-black outline-none placeholder:text-black/35"
+          />
+          {isSearching ? (
+            <button type="button" onClick={() => setSearchQuery("")} aria-label="Clear search" className="text-black/35 hover:text-black">
+              <X size={14} />
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="flex-1 px-12 py-7">
         {isSearching ? (
