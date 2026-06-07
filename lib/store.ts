@@ -1892,7 +1892,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
         autoMoveUndoneToToday: true,
         theme: 'light',
         accentColor: '#2563EB',
-        showCelebrations: false,
+        showCelebrations: true,
         celebrationMode: 'burst',
         celebrationEmoji: '🎉',
         colorPalette: DEFAULT_COLOR_PALETTE,
