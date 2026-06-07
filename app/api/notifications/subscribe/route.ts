@@ -55,13 +55,21 @@ export async function POST(request: Request) {
     const existingResult = await supabase.from("push_subscriptions").select("id, subscription").eq("user_id", user.id)
     if (existingResult.error) return mapErrorToResponse(existingResult.error)
 
-    const duplicateIds = (existingResult.data ?? [])
+    const existing = existingResult.data ?? []
+
+    const duplicateIds = existing
       .filter((row) => getSubscriptionEndpoint(row.subscription) === endpoint)
       .map((row) => row.id)
 
     if (duplicateIds.length > 0) {
       const deleteResult = await supabase.from("push_subscriptions").delete().in("id", duplicateIds)
       if (deleteResult.error) return mapErrorToResponse(deleteResult.error)
+    }
+
+    // Prevent unbounded subscription accumulation (max 10 per user).
+    const remainingCount = existing.length - duplicateIds.length
+    if (remainingCount >= 10) {
+      return NextResponse.json({ error: "Too many push subscriptions" }, { status: 429 })
     }
 
     const insertResult = await supabase.from("push_subscriptions").insert({

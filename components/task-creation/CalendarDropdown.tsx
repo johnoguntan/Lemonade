@@ -250,15 +250,16 @@ export function CalendarDropdown({ value, onChange }: CalendarDropdownProps) {
     const today = startOfDay(new Date())
 
     if (type === "whenever") {
-      onChange({ scheduleDate: null, scheduleTime: null })
+      onChange({ scheduleDate: null, scheduleTime: null, scheduleWhenever: true })
       return
     }
 
-    if (type === "today") onChange({ scheduleDate: today })
-    if (type === "tomorrow") onChange({ scheduleDate: addDays(today, 1) })
-    if (type === "nextWeek") onChange({ scheduleDate: addDays(today, 7), scheduleTime: null })
-    if (type === "nextMonth") onChange({ scheduleDate: addDays(today, 30), scheduleTime: null })
-    if (type === "nextYear") onChange({ scheduleDate: addDays(today, 365), scheduleTime: null })
+    // Any real date clears the "Whenever" flag.
+    if (type === "today") onChange({ scheduleDate: today, scheduleWhenever: false })
+    if (type === "tomorrow") onChange({ scheduleDate: addDays(today, 1), scheduleWhenever: false })
+    if (type === "nextWeek") onChange({ scheduleDate: addDays(today, 7), scheduleTime: null, scheduleWhenever: false })
+    if (type === "nextMonth") onChange({ scheduleDate: addDays(today, 30), scheduleTime: null, scheduleWhenever: false })
+    if (type === "nextYear") onChange({ scheduleDate: addDays(today, 365), scheduleTime: null, scheduleWhenever: false })
   }
 
   const toggleScheduleTime = (anchor: Exclude<TimeAnchor, null>) => {
@@ -295,7 +296,7 @@ export function CalendarDropdown({ value, onChange }: CalendarDropdownProps) {
                   <div className="relative">
                     <MiniCalendar
                       value={value.scheduleDate}
-                      onSelect={(date) => onChange({ scheduleDate: date })}
+                      onSelect={(date) => onChange({ scheduleDate: date, scheduleWhenever: false })}
                       timeValue={value.scheduleTime}
                       onTimeOpen={() => setCalendarTimeOpen((current) => !current)}
                       onClose={() => {
@@ -358,7 +359,7 @@ export function CalendarDropdown({ value, onChange }: CalendarDropdownProps) {
             <RowButton label="Next Week" selected={false} onClick={() => applyShortcut("nextWeek")} />
             <RowButton label="Next Month" selected={false} onClick={() => applyShortcut("nextMonth")} />
             <RowButton label="Next Year" selected={false} onClick={() => applyShortcut("nextYear")} />
-            <RowButton label="Whenever" selected={value.scheduleDate === null} onClick={() => applyShortcut("whenever")} />
+            <RowButton label="Whenever" selected={Boolean(value.scheduleWhenever)} onClick={() => applyShortcut("whenever")} />
           </div>
         </div>
 

@@ -5,6 +5,7 @@ import { RotateCcw, RotateCw, Undo2 } from "lucide-react"
 import { CollectionsPanel } from "@/components/collections/CollectionsPanel"
 import { DailyView } from "@/components/daily/DailyView"
 import { LeftSidebar } from "@/components/sidebar/LeftSidebar"
+import { CelebrationOverlay } from "@/components/lemonade/celebration-overlay"
 import { useAllsenadroStore } from "@/lib/allsenadro-store"
 import type { Collection, HabitWithLog, JournalEntry, PresetWithCollections } from "@/lib/types"
 import { formatLocalDateKey, useLemonadeStore, type Todo } from "@/lib/store"
@@ -535,6 +536,7 @@ export default function Page() {
           </div>
         </div>
       </div>
+    <CelebrationOverlay />
     </main>
   )
 }

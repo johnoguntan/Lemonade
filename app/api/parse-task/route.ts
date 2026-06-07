@@ -16,6 +16,10 @@ import {
 
 export const dynamic = "force-dynamic";
 
+if (!process.env.OPENAI_API_KEY) {
+  console.error("/api/parse-task: OPENAI_API_KEY is not set — AI parsing will be unavailable")
+}
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const SYSTEM_PROMPT = `You are an expert task parser for a smart productivity app 
@@ -287,6 +291,10 @@ export async function POST(req: Request) {
     if (authError) throw authError;
     if (!session?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    if (!process.env.OPENAI_API_KEY) {
+      return NextResponse.json({ error: "AI parsing is not configured" }, { status: 503 });
     }
 
     body = await req.json();

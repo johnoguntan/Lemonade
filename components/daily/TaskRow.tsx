@@ -1,7 +1,41 @@
 "use client"
 
 import { memo, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react"
-import { SunMedium } from "lucide-react"
+
+// ─── Saw-toothed circle checkbox ─────────────────────────────────────────────
+// Paths are pre-computed polygons: 18 teeth (full size) and 12 teeth (small).
+// Each tooth alternates between outer and inner radius with slight jitter so
+// no two teeth are identical — giving an organic, hand-cut feel.
+
+const SAW_PATH_18 =
+  "M 10.00 1.50 L 11.26 3.62 L 12.80 2.29 L 13.22 4.01 L 15.53 3.41 L 14.98 5.99 L 17.01 5.95 L 16.25 7.58 L 18.27 8.54 L 16.80 10.20 L 18.47 11.49 L 16.15 12.10 L 17.10 14.10 L 15.17 14.42 L 15.46 16.51 L 13.42 15.53 L 12.77 17.61 L 11.05 16.72 L 10.00 18.60 L 8.95 16.31 L 7.13 17.89 L 6.48 15.70 L 4.73 16.28 L 4.88 14.47 L 2.64 14.25 L 3.85 12.10 L 2.12 11.39 L 3.20 10.20 L 1.73 8.54 L 3.91 7.72 L 2.55 5.70 L 5.22 5.74 L 4.79 3.80 L 6.48 4.18 L 7.13 2.11 L 8.94 3.59 Z"
+
+const SAW_PATH_12 =
+  "M 10.00 1.30 L 11.93 3.58 L 14.20 2.73 L 14.80 4.90 L 17.53 5.65 L 16.51 8.40 L 18.30 10.00 L 16.81 11.61 L 17.45 14.30 L 14.52 14.80 L 14.35 17.53 L 11.92 16.63 L 10.00 18.40 L 7.99 16.70 L 5.60 17.62 L 5.41 14.88 L 2.81 14.15 L 3.20 11.68 L 1.30 10.00 L 3.49 8.40 L 2.73 5.80 L 5.20 4.90 L 5.65 2.47 L 8.07 3.58 Z"
+
+function RoughCircle({ completed, size = 22 }: { completed: boolean; size?: number }) {
+  const isSmall = size <= 16
+  const d = isSmall ? SAW_PATH_12 : SAW_PATH_18
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 20 20"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      style={{ display: "block" }}
+    >
+      <path
+        d={d}
+        fill={completed ? "rgba(0,0,0,0.68)" : "none"}
+        stroke={completed ? "none" : "rgba(0,0,0,0.30)"}
+        strokeWidth={isSmall ? 0.3 : 0.4}
+        strokeLinejoin="miter"
+        style={{ transition: "fill 0.12s ease, stroke 0.12s ease" }}
+      />
+    </svg>
+  )
+}
 import {
   CalendarPlus,
   Check,
@@ -61,7 +95,7 @@ type TaskRowProps = {
   draggable?: boolean
   isDragging?: boolean
   onDragStart?: (event: DragEvent<HTMLDivElement>, todoId: string) => void
-  onDropOnTask?: (targetTodoId: string, position?: "before" | "after") => void
+  onDropOnTask?: (targetTodoId: string, position: "before" | "after", draggedId: string) => void
 }
 
 const schedulePalette = ["#2f58d8", "#f04da2", "#74be5c", "#f29f3a", "#8a5cf6", "#14b8a6"]
@@ -449,8 +483,9 @@ function TaskRowComponent({
       event.preventDefault()
       event.stopPropagation()
       const position = dropEdge === "top" ? "before" : "after"
+      const draggedId = event.dataTransfer.getData("text/plain")
       setDropEdge(null)
-      onDropOnTask?.(typedTodo.id, position)
+      if (draggedId) onDropOnTask?.(typedTodo.id, position, draggedId)
     },
     onDragEnd: () => {
       setDropEdge(null)
@@ -472,8 +507,8 @@ function TaskRowComponent({
     rowNode = (
       <div {...dragHandlers} className={["group relative flex items-start gap-2 rounded-[10px] py-0.5", isDragging ? "opacity-45" : "", selectionClass].join(" ")}>
         {dropIndicator}
-        <button type="button" onClick={() => toggleCalendarTodo(typedTodo.id)} aria-label={typedTodo.completed ? "Mark incomplete" : "Mark complete"} className="mt-[4px] flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-black/20">
-          <span className={`h-1.5 w-1.5 rounded-full ${typedTodo.completed ? "bg-black" : "bg-transparent"}`} />
+        <button type="button" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); toggleCalendarTodo(typedTodo.id, { x: r.left + r.width / 2, y: r.top + r.height / 2 }) }} aria-label={typedTodo.completed ? "Mark incomplete" : "Mark complete"} className="mt-[4px] flex h-3.5 w-3.5 shrink-0 items-center justify-center transition-opacity hover:opacity-70">
+          <RoughCircle completed={typedTodo.completed} size={14} />
         </button>
         <button type="button" aria-label="Drag to reorder" className={["mt-[2px] shrink-0 text-black/12", draggable ? "cursor-grab" : "opacity-30"].join(" ")}>
           <GripHorizontal size={14} />
@@ -516,8 +551,8 @@ function TaskRowComponent({
     rowNode = (
       <div {...dragHandlers} className={["group relative flex items-start gap-3 py-2", isDragging ? "opacity-45" : "", selectionClass].join(" ")}>
         {dropIndicator}
-        <button type="button" onClick={() => toggleCalendarTodo(typedTodo.id)} aria-label={typedTodo.completed ? "Mark incomplete" : "Mark complete"} className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center text-[#f0b446] transition hover:text-[#de9c2d]">
-          <SunMedium size={16} strokeWidth={1.5} />
+        <button type="button" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); toggleCalendarTodo(typedTodo.id, { x: r.left + r.width / 2, y: r.top + r.height / 2 }) }} aria-label={typedTodo.completed ? "Mark incomplete" : "Mark complete"} className="mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center transition-opacity hover:opacity-60">
+          <RoughCircle completed={typedTodo.completed} size={22} />
         </button>
         <button type="button" aria-label="Drag to reorder" className={["mt-1 shrink-0 text-black/12", draggable ? "cursor-grab" : "opacity-30"].join(" ")}>
           <GripHorizontal size={14} />

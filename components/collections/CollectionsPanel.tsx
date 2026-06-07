@@ -25,6 +25,48 @@ const LOCAL_COLLECTIONS_KEY = "allsenadro-right-column-collections-v1"
 
 const normalizeName = (value: string) => value.trim().toLowerCase()
 
+/**
+ * Ensure the stored collections list is coherent:
+ * 1. Any tag-based collection named "Whenever" gets `tag: "Whenever"` (old saves lacked it).
+ * 2. Any default collection from `defaults` whose ID is missing gets appended.
+ *    This protects against schema changes without wiping user customisations.
+ */
+function migrateCollections(
+  stored: EditableCollection[],
+  defaults: EditableCollection[]
+): EditableCollection[] {
+  // Built-in fallback collections have dates computed at mount time.
+  // Always replace stored copies with the freshly-computed versions so
+  // Tomorrow/Next Week/etc. never show a stale date from an old session.
+  const defaultsById = new Map(defaults.map((d) => [d.id, d]))
+
+  let result = stored.map((collection) => {
+    if (defaultsById.has(collection.id)) {
+      // Use the live-computed version (preserves user sort order position).
+      return defaultsById.get(collection.id)!
+    }
+    // Patch missing `tag` on any non-fallback Whenever entries.
+    if (
+      collection.type === "tag-based" &&
+      normalizeName(collection.name) === "whenever" &&
+      !collection.tag
+    ) {
+      return { ...collection, tag: "Whenever" }
+    }
+    return collection
+  })
+
+  // Append any default whose ID is absent entirely.
+  const storedIds = new Set(result.map((c) => c.id))
+  for (const def of defaults) {
+    if (!storedIds.has(def.id)) {
+      result = [...result, def]
+    }
+  }
+
+  return result
+}
+
 const addDays = (date: Date, amount: number) => {
   const next = new Date(date)
   next.setDate(next.getDate() + amount)
@@ -57,19 +99,25 @@ export function CollectionsPanel() {
   const resolvedActivePresetId = activePresetId || usablePresets[0]?.id || ""
   const activePreset = usablePresets.find((preset) => preset.id === resolvedActivePresetId) ?? null
 
-  const visibleTodos = useMemo(
+  // Todos that are active and have a present/future date — used by date-based collections.
+  const datedActiveTodos = useMemo(() => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const todayKey = `${today.getFullYear()}-${`${today.getMonth() + 1}`.padStart(2, "0")}-${`${today.getDate()}`.padStart(2, "0")}`
+
+    return calendarTodos.filter((todo) => {
+      if (todo.completed || (todo as CollectionTodo).dismissed || todo.isHeading) return false
+      if (typeof todo.date !== "string") return false
+      return todo.date >= todayKey
+    })
+  }, [calendarTodos])
+
+  // All active todos regardless of date — used by tag-based collections (e.g. "Whenever").
+  const allActiveTodos = useMemo(
     () =>
-      calendarTodos.filter((todo) => {
-        if (todo.completed || todo.dismissed || todo.isHeading || typeof todo.date !== "string") {
-          return false
-        }
-
-        const today = new Date()
-        today.setHours(0, 0, 0, 0)
-        const todayKey = `${today.getFullYear()}-${`${today.getMonth() + 1}`.padStart(2, "0")}-${`${today.getDate()}`.padStart(2, "0")}`
-
-        return todo.date >= todayKey
-      }),
+      calendarTodos.filter(
+        (todo) => !todo.completed && !(todo as CollectionTodo).dismissed && !todo.isHeading
+      ),
     [calendarTodos]
   )
 
@@ -181,7 +229,8 @@ export function CollectionsPanel() {
     try {
       const parsed = JSON.parse(stored) as EditableCollection[]
       if (Array.isArray(parsed) && parsed.length > 0) {
-        setLocalCollections(parsed)
+        // Migrate: patch broken Whenever entries + add any missing defaults.
+        setLocalCollections(migrateCollections(parsed, fallbackCollections))
         setLocalCollectionsHydrated(true)
         return
       }
@@ -200,15 +249,31 @@ export function CollectionsPanel() {
 
   const getTodosForCollection = (collection: Collection) => {
     if (collection.type === "date-based") {
-      return visibleTodos.filter((todo) => typeof todo.date === "string")
+      // Filter to only the tasks that fall within this collection's date range so
+      // tasks don't bleed across multiple date-based collections.
+      const start = collection.fixed_start_date
+      const end = collection.fixed_end_date
+
+      if (start && end) {
+        return datedActiveTodos.filter(
+          (todo) => typeof todo.date === "string" && todo.date >= start && todo.date <= end
+        )
+      }
+
+      // Dynamic-range fallback — no explicit range, so return all dated active todos;
+      // DateCollection groups them into the correct day blocks.
+      return datedActiveTodos.filter((todo) => typeof todo.date === "string")
     }
 
+    // Tag-based (e.g. "Whenever"): match on label name.
+    // Use allActiveTodos so undated tasks (date: null) are included — that's the
+    // whole point of Whenever.
     const targetName = normalizeName(((collection as TagLikeCollection).tag || collection.name) ?? collection.name)
     if (!targetName) {
       return []
     }
 
-    return visibleTodos.filter((todo) =>
+    return allActiveTodos.filter((todo) =>
       todo.labelIds.some((labelId) => normalizeName(labelsById.get(labelId)?.name ?? "") === targetName)
     )
   }

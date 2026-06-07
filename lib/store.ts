@@ -170,6 +170,8 @@ export interface UserPreferences {
   theme: 'light' | 'dark'
   accentColor: string
   showCelebrations: boolean
+  celebrationMode: 'burst' | 'confetti' | 'firework' | 'stars' | 'emoji' | 'ripple' | 'minimal' | 'off'
+  celebrationEmoji: string
   colorPalette: string[]
   showDotGridBackground: boolean
   defaultLabelId: string | null
@@ -239,6 +241,8 @@ type CelebrationEvent = {
   dayCompleted: boolean
   date: string | null
   createdAt: number
+  originX: number | null
+  originY: number | null
 }
 
 interface LemonadeStore {
@@ -261,7 +265,7 @@ interface LemonadeStore {
   updateCalendarTodo: (id: string, updates: Partial<Todo>) => void
   updateCalendarTodoInstance: (id: string, updates: Partial<Todo>) => void
   deleteCalendarTodo: (id: string) => void
-  toggleCalendarTodo: (id: string) => void
+  toggleCalendarTodo: (id: string, origin?: { x: number; y: number }) => void
   toggleEndOfDay: (id: string) => void
   addSubtask: (todoId: string, text: string) => void
   editSubtask: (todoId: string, subtaskId: string, title: string) => void
@@ -882,6 +886,11 @@ const normalizePersistedPreferences = (
         ? "#2563EB"
         : preferences.accentColor
       : fallbackPreferences.accentColor,
+  showCelebrations: preferences?.showCelebrations ?? fallbackPreferences.showCelebrations,
+  celebrationMode: preferences?.celebrationMode ?? fallbackPreferences.celebrationMode,
+  celebrationEmoji: typeof preferences?.celebrationEmoji === 'string' && preferences.celebrationEmoji.trim().length > 0
+    ? preferences.celebrationEmoji
+    : fallbackPreferences.celebrationEmoji,
   colorPalette: preferences?.colorPalette ?? fallbackPreferences.colorPalette,
   showDotGridBackground: preferences?.showDotGridBackground ?? fallbackPreferences.showDotGridBackground,
   defaultLabelId:
@@ -1015,7 +1024,9 @@ export const migratePersistedLemonadeState = (
     autoMoveUndoneToToday: true,
     theme: "light",
     accentColor: "#2563EB",
-    showCelebrations: false,
+    showCelebrations: true,
+    celebrationMode: 'burst',
+    celebrationEmoji: '🎉',
     colorPalette: DEFAULT_COLOR_PALETTE,
     showDotGridBackground: true,
     defaultLabelId: null,
@@ -1882,12 +1893,14 @@ export const useLemonadeStore = create<LemonadeStore>()(
         theme: 'light',
         accentColor: '#2563EB',
         showCelebrations: false,
+        celebrationMode: 'burst',
+        celebrationEmoji: '🎉',
         colorPalette: DEFAULT_COLOR_PALETTE,
         showDotGridBackground: true,
         defaultLabelId: null,
         displayName: "Alessandro User",
       },
-      
+
       setPreferences: (prefs) => set((state) => ({
         preferences: { ...state.preferences, ...prefs }
       })),
@@ -2228,7 +2241,7 @@ export const useLemonadeStore = create<LemonadeStore>()(
           }
         }),
       
-      toggleCalendarTodo: (id) => {
+      toggleCalendarTodo: (id, origin) => {
         const target = get().calendarTodos.find((todo) => todo.id === id)
         if (!target) {
           return
@@ -2244,7 +2257,8 @@ export const useLemonadeStore = create<LemonadeStore>()(
           )
 
           let celebrationEvent = state.celebrationEvent
-          if (nextCompleted && state.preferences.showCelebrations) {
+          const mode = state.preferences.celebrationMode ?? 'burst'
+          if (nextCompleted && state.preferences.showCelebrations && mode !== 'off') {
             const dateKey = target.date ?? null
             const dayTodos =
               dateKey
@@ -2258,6 +2272,8 @@ export const useLemonadeStore = create<LemonadeStore>()(
               dayCompleted,
               date: dateKey,
               createdAt: Date.now(),
+              originX: origin?.x ?? null,
+              originY: origin?.y ?? null,
             }
           }
 

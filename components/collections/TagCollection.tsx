@@ -18,7 +18,10 @@ export function TagCollection({ collection, todos }: TagCollectionProps) {
   ) => string
   const ensureLabelIds = useLemonadeStore((state) => state.ensureLabelIds)
 
-  const tagNames = useMemo(() => [collection.name], [collection.name])
+  // Prefer the explicit `tag` field when available (e.g. the "Whenever" fallback
+  // collection sets `tag: "Whenever"`), fall back to the collection name.
+  const effectiveTag = (collection as Collection & { tag?: string | null }).tag ?? collection.name
+  const tagNames = useMemo(() => [effectiveTag], [effectiveTag])
   const addHandler = useMemo(
     () =>
       buildCalendarAddHandler({

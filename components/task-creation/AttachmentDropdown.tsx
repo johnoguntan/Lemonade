@@ -101,6 +101,16 @@ export function AttachmentDropdown({ value, onChange }: AttachmentDropdownProps)
               onChange({ attachmentFile: null, attachmentName: null, attachmentDataUrl: null })
               return
             }
+            // Whitelist safe MIME types — block executables, scripts, and arbitrary HTML.
+            const ALLOWED_MIME_TYPES = [
+              "image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml",
+              "application/pdf",
+              "text/plain",
+            ]
+            if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+              onChange({ attachmentFile: file, attachmentName: `${file.name} (unsupported file type)`, attachmentDataUrl: null })
+              return
+            }
             // Cap at ~2MB so a base64 attachment can't blow the localStorage quota.
             if (file.size > 2 * 1024 * 1024) {
               onChange({ attachmentFile: file, attachmentName: `${file.name} (too large to store)`, attachmentDataUrl: null })

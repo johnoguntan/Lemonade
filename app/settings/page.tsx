@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useLemonadeStore, type Label } from "@/lib/store"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ArrowLeft, Download, Moon, PencilLine, Shield, Sun, Tag, Trash2, User } from "lucide-react"
+import { ArrowLeft, Download, Gift, Minus, Moon, PencilLine, Radio, Shield, Smile, Sparkles, Star, Sun, Tag, Trash2, User, X, Zap } from "lucide-react"
 import Link from "next/link"
 import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
@@ -23,6 +23,19 @@ import {
 } from "@/components/ui/dialog"
 
 const DEFAULT_LABEL_COLOR = DEFAULT_COLOR_PALETTE[1]
+
+const CELEBRATION_MODES = [
+  { id: "burst",    label: "Burst",    Icon: Sparkles },
+  { id: "confetti", label: "Confetti", Icon: Gift },
+  { id: "firework", label: "Firework", Icon: Zap },
+  { id: "stars",    label: "Stars",    Icon: Star },
+  { id: "emoji",    label: "Emoji",    Icon: Smile },
+  { id: "ripple",   label: "Ripple",   Icon: Radio },
+  { id: "minimal",  label: "Minimal",  Icon: Minus },
+  { id: "off",      label: "Off",      Icon: X },
+] as const
+
+const QUICK_EMOJIS = ["🎉", "🎊", "✨", "🌟", "💫", "🏆", "🎯", "🔥", "💎", "🌈", "🦄", "🚀", "❤️", "🎈", "👏"]
 
 export default function SettingsPage() {
   const {
@@ -330,6 +343,129 @@ export default function SettingsPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </section>
+
+        {/* ── Celebrations ─────────────────────────────────────────────────── */}
+        <section className="mb-8">
+          <div className="mb-4 flex items-center gap-2">
+            <Sparkles className="size-5 text-muted-foreground" />
+            <h3 className="text-lg font-semibold">Celebrations</h3>
+          </div>
+          <div className="space-y-5 rounded-2xl border border-border/70 bg-card/60 p-5">
+            {/* On/off toggle */}
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="font-medium">Task celebrations</p>
+                <p className="text-sm text-muted-foreground">Animate when you mark a task complete.</p>
+              </div>
+              <button
+                type="button"
+                className={cn(
+                  "relative h-7 w-12 rounded-full border transition-colors",
+                  preferences.showCelebrations
+                    ? "border-[var(--accent-color)] bg-[var(--accent-color)]"
+                    : "border-border bg-transparent"
+                )}
+                onClick={() => setPreferences({ showCelebrations: !preferences.showCelebrations })}
+                aria-label="Toggle celebrations"
+              >
+                <span
+                  className={cn(
+                    "absolute top-1/2 size-5 -translate-y-1/2 rounded-full bg-background shadow transition-all",
+                    preferences.showCelebrations ? "right-1" : "left-1"
+                  )}
+                />
+              </button>
+            </div>
+
+            {preferences.showCelebrations && (
+              <>
+                <div className="h-px bg-border/60" />
+
+                {/* Mode grid */}
+                <div>
+                  <p className="mb-3 text-sm font-medium">Animation style</p>
+                  <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+                    {CELEBRATION_MODES.map(({ id, label, Icon }) => {
+                      const active = (preferences.celebrationMode ?? "burst") === id
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => setPreferences({ celebrationMode: id })}
+                          className={cn(
+                            "flex flex-col items-center gap-1.5 rounded-xl border py-3 text-[11px] font-medium transition-colors",
+                            active
+                              ? "border-[var(--accent-color)] bg-[var(--accent-color)]/8 text-foreground"
+                              : "border-border text-muted-foreground hover:border-border/80 hover:text-foreground"
+                          )}
+                        >
+                          <Icon className="size-4" />
+                          {label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Emoji picker — only when emoji mode is active */}
+                {(preferences.celebrationMode ?? "burst") === "emoji" && (
+                  <>
+                    <div className="h-px bg-border/60" />
+                    <div>
+                      <p className="mb-3 text-sm font-medium">Choose your emoji</p>
+
+                      {/* Quick-pick swatches */}
+                      <div className="mb-3 flex flex-wrap gap-2">
+                        {QUICK_EMOJIS.map((emoji) => (
+                          <button
+                            key={emoji}
+                            type="button"
+                            onClick={() => setPreferences({ celebrationEmoji: emoji })}
+                            className={cn(
+                              "flex h-9 w-9 items-center justify-center rounded-lg border text-lg transition-colors",
+                              (preferences.celebrationEmoji ?? "🎉") === emoji
+                                ? "border-[var(--accent-color)] bg-[var(--accent-color)]/10"
+                                : "border-border hover:border-border/80"
+                            )}
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Custom input */}
+                      <div className="flex items-center gap-3">
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border text-xl">
+                          {preferences.celebrationEmoji ?? "🎉"}
+                        </span>
+                        <input
+                          type="text"
+                          value={preferences.celebrationEmoji ?? "🎉"}
+                          onChange={(e) => {
+                            const raw = e.target.value
+                            let first = raw
+                            if (typeof Intl !== "undefined" && "Segmenter" in Intl) {
+                              const seg = new (Intl as unknown as { Segmenter: new (l: string, o: object) => { segment: (s: string) => Iterable<{ segment: string }> } }).Segmenter("en", { granularity: "grapheme" })
+                              const segs = [...seg.segment(raw)]
+                              first = segs[0]?.segment ?? raw
+                            } else {
+                              first = [...raw][0] ?? raw
+                            }
+                            if (first) setPreferences({ celebrationEmoji: first })
+                          }}
+                          placeholder="Paste any emoji…"
+                          className="h-10 flex-1 rounded-lg border border-border bg-background px-3 text-sm focus:border-[var(--accent-color)] focus:outline-none"
+                          maxLength={8}
+                        />
+                        <p className="text-xs text-muted-foreground">or paste any emoji</p>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
           </div>
         </section>
 

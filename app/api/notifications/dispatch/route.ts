@@ -62,10 +62,9 @@ const nextQuietHoursEnd = (now: Date, end: string) => {
 // It sends all due notifications and marks them as sent (and optionally schedules loops).
 export async function POST(request: Request) {
   try {
-    console.error("/api/notifications/dispatch start", {
+    console.log("/api/notifications/dispatch start", {
       hasPublicVapidKey: Boolean(VAPID_PUBLIC_KEY),
       hasPrivateVapidKey: Boolean(VAPID_PRIVATE_KEY),
-      webPushImportType: typeof webpush,
       hasSendNotification: typeof webpush?.sendNotification === "function",
     })
 
@@ -84,7 +83,7 @@ export async function POST(request: Request) {
 
     ensureWebPushConfigured()
     const admin = createSupabaseAdminClient()
-    console.error("/api/notifications/dispatch admin ready")
+    console.log("/api/notifications/dispatch admin ready")
 
     const now = new Date().toISOString()
     const { data: due, error } = await admin
@@ -103,14 +102,13 @@ export async function POST(request: Request) {
       item.status === "scheduled" || (item.status === "failed" && (item.retry_count ?? 0) < 3)
     )
 
-    console.error("/api/notifications/dispatch due count", { count: itemsToProcess.length })
+    console.log("/api/notifications/dispatch due count", { count: itemsToProcess.length })
 
     const processed: string[] = []
 
     for (const item of itemsToProcess) {
-      console.error("/api/notifications/dispatch processing item", {
+      console.log("/api/notifications/dispatch processing item", {
         id: item.id,
-        userId: item.user_id,
         taskId: item.task_id,
         loopRule: item.loop_rule,
       })
@@ -128,7 +126,7 @@ export async function POST(request: Request) {
         .eq("user_id", item.user_id)
         .maybeSingle()
 
-      console.error("/api/notifications/dispatch notification settings", {
+      console.log("/api/notifications/dispatch notification settings", {
         itemId: item.id,
         enabled: settings?.enabled ?? true,
         permission: settings?.permission ?? "default",
@@ -153,7 +151,7 @@ export async function POST(request: Request) {
         .select("id, subscription")
         .eq("user_id", item.user_id)
 
-      console.error("/api/notifications/dispatch subscriptions loaded", {
+      console.log("/api/notifications/dispatch subscriptions loaded", {
         itemId: item.id,
         count: subs?.length ?? 0,
       })
@@ -174,7 +172,7 @@ export async function POST(request: Request) {
         (subs ?? []).map(async (row) => {
           try {
             await webpush.sendNotification(row.subscription as any, payload)
-            console.error("/api/notifications/dispatch push sent", {
+            console.log("/api/notifications/dispatch push sent", {
               itemId: item.id,
               subscriptionId: row.id,
             })
@@ -202,7 +200,7 @@ export async function POST(request: Request) {
           status: newStatus,
           retry_count: newRetryCount 
         }).eq("id", item.id)
-        console.error("/api/notifications/dispatch item marked as", newStatus, { itemId: item.id, retryCount: newRetryCount })
+        console.log("/api/notifications/dispatch item marked as", newStatus, { itemId: item.id, retryCount: newRetryCount })
       } else {
         await admin.from("scheduled_notifications").update({ status: "sent" }).eq("id", item.id)
         processed.push(item.id)

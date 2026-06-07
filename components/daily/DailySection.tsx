@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, type DragEvent } from "react"
+import { useCallback, useRef, useState, type DragEvent } from "react"
 import { useLemonadeStore, type Todo } from "@/lib/store"
 import { TaskRow } from "@/components/daily/TaskRow"
 import { SectionLines, buildCalendarAddHandler } from "@/components/daily/SectionLines"
@@ -40,6 +40,7 @@ export function DailySection({ title, todos, showOverdueActions = false }: Daily
   const draggedIdRef = useRef<string | null>(null)
   const todosRef = useRef<Todo[]>(todos)
   todosRef.current = todos
+  const [draggingId, setDraggingId] = useState<string | null>(null)
 
   const sectionKey = SECTION_KEY_MAP[title] ?? null
 
@@ -106,13 +107,22 @@ export function DailySection({ title, todos, showOverdueActions = false }: Daily
 
   const handleTaskDragStart = useCallback((_event: DragEvent<HTMLDivElement>, todoId: string) => {
     draggedIdRef.current = todoId
+    setDraggingId(todoId)
   }, [])
 
   const handleTaskDrop = useCallback(
-    (targetTodoId: string, position: "before" | "after" = "after") => {
-      const draggedId = draggedIdRef.current
+    (targetTodoId: string, position: "before" | "after" = "after", transferredId?: string) => {
+      // Prefer the ID passed directly from the TaskRow's dataTransfer read —
+      // this works even when the drag started in a different section (where
+      // draggedIdRef would be null).
+      const existsInStore = transferredId
+        ? useLemonadeStore.getState().calendarTodos.some((t) => t.id === transferredId)
+        : false
+      const draggedId = draggedIdRef.current ?? (existsInStore ? transferredId : null)
+      draggedIdRef.current = null
+      setDraggingId(null)
       if (!draggedId || draggedId === targetTodoId) {
-        draggedIdRef.current = null
+        setHighlight(false)
         return
       }
       // Only rewrite section/priority/time when the task is moving INTO this
@@ -122,7 +132,6 @@ export function DailySection({ title, todos, showOverdueActions = false }: Daily
         applyDropOnSection(draggedId)
       }
       reorderCalendarTodo(draggedId, targetTodoId, position)
-      draggedIdRef.current = null
       setHighlight(false)
     },
     [applyDropOnSection, reorderCalendarTodo, setHighlight]
@@ -166,6 +175,7 @@ export function DailySection({ title, todos, showOverdueActions = false }: Daily
 
   const handleSectionDragEnd = useCallback(() => {
     draggedIdRef.current = null
+    setDraggingId(null)
     setHighlight(false)
   }, [setHighlight])
 
@@ -201,6 +211,7 @@ export function DailySection({ title, todos, showOverdueActions = false }: Daily
               sectionTitle={title}
               showOverdueActions={showOverdueActions}
               draggable={true}
+              isDragging={todo.id === draggingId}
               onDragStart={handleTaskDragStart}
               onDropOnTask={handleTaskDrop}
             />

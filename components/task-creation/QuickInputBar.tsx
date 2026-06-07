@@ -17,6 +17,7 @@ export type TaskDraftState = {
   title: string
   section: TaskSection
   scheduleDate: Date | null
+  scheduleWhenever: boolean   // true when user explicitly chose "Whenever" (date: null)
   scheduleTime: string | null
   dueDate: Date | null
   duration: number | null
@@ -44,6 +45,7 @@ const createDefaultDraft = (): TaskDraftState => ({
   title: "",
   section: "allday",
   scheduleDate: null,
+  scheduleWhenever: false,
   scheduleTime: null,
   dueDate: null,
   duration: null,
@@ -152,7 +154,13 @@ export function QuickInputBar() {
 
     // Explicit values picked via the dropdowns always win; parsed fills the gaps.
     const title = parsed?.title?.trim() || trimmed
-    const dateKey = draft.scheduleDate ? formatLocalDateKey(draft.scheduleDate) : parsed?.date ?? selectedCalendarDate
+    // "Whenever" = user explicitly wants no date (null).
+    // Unset (scheduleWhenever false, scheduleDate null) falls back to parsed date or selected calendar day.
+    const dateKey = draft.scheduleWhenever
+      ? null
+      : draft.scheduleDate
+        ? formatLocalDateKey(draft.scheduleDate)
+        : parsed?.date ?? selectedCalendarDate
     const time = draft.scheduleTime ?? parsed?.time ?? undefined
     const effectivePriority = draft.priority !== "none" ? draft.priority : parsed?.priority ?? "normal"
     const url = draft.url || parsed?.url || ""

@@ -176,7 +176,6 @@ async function requireUser() {
   logStep("auth check result", {
     authenticated: Boolean(session?.user),
     userId: session?.user?.id ?? null,
-    email: session?.user?.email ?? null,
   })
 
   return { user: session?.user ?? null }
@@ -394,6 +393,25 @@ export async function POST(request: Request) {
     logStep("POST admin client ready", { userId: user.id })
 
     const payload = (await request.json()) as Omit<CloudSnapshot, "latestUpdatedAt">
+
+    // Hard cap: reject absurdly large payloads before touching the DB.
+    const LIMITS = { tasks: 5000, labels: 500, lists: 500, listItems: 10000, shoppingReturns: 1000 }
+    if (
+      (payload.tasks?.length ?? 0) > LIMITS.tasks ||
+      (payload.labels?.length ?? 0) > LIMITS.labels ||
+      (payload.lists?.length ?? 0) > LIMITS.lists ||
+      (payload.listItems?.length ?? 0) > LIMITS.listItems ||
+      (payload.shoppingReturns?.length ?? 0) > LIMITS.shoppingReturns
+    ) {
+      logStep("POST payload exceeds limits", {
+        tasks: payload.tasks?.length,
+        labels: payload.labels?.length,
+        lists: payload.lists?.length,
+        listItems: payload.listItems?.length,
+        shoppingReturns: payload.shoppingReturns?.length,
+      })
+      return NextResponse.json({ error: "Payload too large" }, { status: 413 })
+    }
 
     logStep("POST payload parsed", {
       userId: user.id,
