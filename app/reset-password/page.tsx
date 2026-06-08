@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState, useEffect, type FormEvent } from "react"
+import type { AuthChangeEvent, Session } from "@supabase/supabase-js"
 import { useRouter } from "next/navigation"
 import { createSupabaseBrowserClient } from "@/lib/supabase/client"
 
@@ -19,7 +20,7 @@ export default function ResetPasswordPage() {
   // Supabase fires PASSWORD_RECOVERY once the callback route has exchanged the
   // recovery code and the user lands here with an active recovery session.
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
       if (event === "PASSWORD_RECOVERY") {
         setPageState("form")
       } else if (event === "SIGNED_IN" && session) {
@@ -31,7 +32,8 @@ export default function ResetPasswordPage() {
     })
 
     // Also check for an existing recovery session on first load
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data }: { data: { session: Session | null } }) => {
+      const { session } = data
       if (session) {
         setPageState("form")
       } else {
