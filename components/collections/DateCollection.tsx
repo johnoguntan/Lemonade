@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useCallback, useMemo, useRef, type DragEvent } from "react"
 import type { Collection } from "@/lib/types"
 import { formatLocalDateKey, useLemonadeStore, type Todo } from "@/lib/store"
 import { CollectionDayBlock } from "@/components/collections/CollectionDayBlock"
@@ -62,8 +62,14 @@ function MultiDayDateCollection({ collection, todos }: DateCollectionProps) {
     todo: Partial<Todo & { section?: "urgent" | "schedule" | "allday"; rollover?: boolean; dismissed?: boolean }>
   ) => string
   const ensureLabelIds = useLemonadeStore((state) => state.ensureLabelIds)
+  const updateCalendarTodoBase = useLemonadeStore((state) => state.updateCalendarTodo)
+  const updateCalendarTodo = updateCalendarTodoBase as unknown as (
+    id: string, updates: Partial<Todo & { rollover?: boolean; dismissed?: boolean }>
+  ) => void
+  const sectionRef = useRef<HTMLElement | null>(null)
 
   const addDateKey = useMemo(() => getAddDateKey(collection), [collection])
+  const dropDateKey = collection.fixed_start_date ?? addDateKey
 
   const addHandler = useMemo(
     () =>
@@ -76,14 +82,44 @@ function MultiDayDateCollection({ collection, todos }: DateCollectionProps) {
     [addCalendarTodo, ensureLabelIds, addDateKey]
   )
 
+  const setHighlight = useCallback((on: boolean) => {
+    if (on) sectionRef.current?.setAttribute("data-drag-over", "true")
+    else sectionRef.current?.removeAttribute("data-drag-over")
+  }, [])
+
+  const handleDragOver = useCallback((e: DragEvent<HTMLElement>) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = "move"
+    setHighlight(true)
+  }, [setHighlight])
+
+  const handleDragLeave = useCallback((e: DragEvent<HTMLElement>) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return
+    setHighlight(false)
+  }, [setHighlight])
+
+  const handleDrop = useCallback((e: DragEvent<HTMLElement>) => {
+    e.preventDefault()
+    setHighlight(false)
+    const taskId = e.dataTransfer.getData("text/plain")
+    if (!taskId) return
+    updateCalendarTodo(taskId, { date: dropDateKey, rollover: false, dismissed: false })
+  }, [updateCalendarTodo, setHighlight, dropDateKey])
+
   return (
-    <section>
+    <section
+      ref={sectionRef}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className="px-8 transition-colors [&[data-drag-over=true]]:bg-sky-50/60"
+    >
       <h2 className="mb-3 mt-8 text-xs tracking-widest uppercase text-gray-400">{collection.name}</h2>
 
       {todos.length > 0 ? (
         <div className="space-y-2">
           {todos.map((todo) => (
-            <TaskRow key={todo.id} todo={todo} appearance="collection" />
+            <TaskRow key={todo.id} todo={todo} appearance="collection" draggable={true} />
           ))}
         </div>
       ) : null}

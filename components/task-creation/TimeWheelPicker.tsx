@@ -65,39 +65,59 @@ type WheelColumnProps = {
   onSelect: (value: string) => void
 }
 
+// Number of copies to render for infinite illusion — 9 copies gives plenty of
+// room to scroll in either direction before the user could ever hit an edge.
+const LOOP_COPIES = 9
+const MID_COPY = Math.floor(LOOP_COPIES / 2)
+
 function WheelColumn({ options, selected, onSelect }: WheelColumnProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
-  const timeoutRef = useRef<number | null>(null)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Flag to suppress the scroll handler while we silently re-center.
+  const silentRef = useRef(false)
+  const n = options.length
   const selectedIndex = Math.max(0, options.indexOf(selected))
 
+  // Local index for immediate visual highlight while scrolling (before debounce fires).
+  const [localIdx, setLocalIdx] = useState(selectedIndex)
+
+  // Looped options: 9 × the real list.
+  const loopedOptions = useMemo(
+    () => Array.from({ length: LOOP_COPIES }, () => options).flat(),
+    [options]
+  )
+
+  // Jump to the center copy's position whenever the external `selected` changes.
   useEffect(() => {
     const node = scrollRef.current
     if (!node) return
-
-    node.scrollTop = selectedIndex * ITEM_HEIGHT
-  }, [selectedIndex])
-
-  useEffect(() => {
-    return () => {
-      if (timeoutRef.current) {
-        window.clearTimeout(timeoutRef.current)
-      }
-    }
-  }, [])
+    silentRef.current = true
+    node.scrollTop = (MID_COPY * n + selectedIndex) * ITEM_HEIGHT
+    setLocalIdx(selectedIndex)
+    requestAnimationFrame(() => { silentRef.current = false })
+  }, [n, selectedIndex])
 
   const handleScroll = () => {
+    if (silentRef.current) return
     const node = scrollRef.current
     if (!node) return
 
-    if (timeoutRef.current) {
-      window.clearTimeout(timeoutRef.current)
-    }
+    // Immediate visual feedback — update the highlighted row as the user scrolls.
+    const rawIndex = Math.round(node.scrollTop / ITEM_HEIGHT)
+    const actualIndex = ((rawIndex % n) + n) % n
+    setLocalIdx(actualIndex)
 
-    timeoutRef.current = window.setTimeout(() => {
-      const index = Math.min(options.length - 1, Math.max(0, Math.round(node.scrollTop / ITEM_HEIGHT)))
-      node.scrollTo({ top: index * ITEM_HEIGHT, behavior: "smooth" })
-      onSelect(options[index])
-    }, 90)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      const raw = Math.round(node.scrollTop / ITEM_HEIGHT)
+      const actual = ((raw % n) + n) % n
+      onSelect(options[actual] ?? selected)
+      // Silently snap back to the center copy so there is always room to scroll
+      // in either direction without hitting the end of the list.
+      silentRef.current = true
+      node.scrollTop = (MID_COPY * n + actual) * ITEM_HEIGHT
+      requestAnimationFrame(() => { silentRef.current = false })
+    }, 120)
   }
 
   return (
@@ -106,16 +126,25 @@ function WheelColumn({ options, selected, onSelect }: WheelColumnProps) {
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="h-full overflow-y-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="h-full overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         <div style={{ paddingTop: ITEM_HEIGHT * PADDING_ITEMS, paddingBottom: ITEM_HEIGHT * PADDING_ITEMS }}>
-          {options.map((option) => {
-            const active = option === selected
+          {loopedOptions.map((option, index) => {
+            const active = option === options[localIdx]
             return (
               <button
-                key={option}
+                key={`${option}-${index}`}
                 type="button"
-                onClick={() => onSelect(option)}
+                onClick={() => {
+                  const actualIndex = options.indexOf(option)
+                  onSelect(option)
+                  setLocalIdx(actualIndex)
+                  silentRef.current = true
+                  if (scrollRef.current) {
+                    scrollRef.current.scrollTop = (MID_COPY * n + actualIndex) * ITEM_HEIGHT
+                  }
+                  requestAnimationFrame(() => { silentRef.current = false })
+                }}
                 className={[
                   "flex h-10 w-full items-center justify-center transition-all",
                   active ? "text-lg font-semibold text-gray-900" : "text-sm text-gray-300",

@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState, type FormEvent } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { createSupabaseBrowserClient } from "@/lib/supabase/client"
 
@@ -120,7 +121,17 @@ export default function LoginPage() {
           </label>
 
           <label className="block space-y-2">
-            <span className="text-sm font-medium text-[#4E473F]">Password</span>
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-[#4E473F]">Password</span>
+              {mode === "signin" ? (
+                <Link
+                  href="/forgot-password"
+                  className="text-xs text-[#6F675D] underline underline-offset-2 hover:text-[#1A1A1A]"
+                >
+                  Forgot password?
+                </Link>
+              ) : null}
+            </div>
             <input
               type="password"
               value={password}

@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useRef, useState, type DragEvent } from "react"
 import { useLemonadeStore, type Todo } from "@/lib/store"
 import { TaskRow } from "@/components/daily/TaskRow"
 import { SectionLines, buildCalendarAddHandler } from "@/components/daily/SectionLines"
@@ -48,8 +48,43 @@ export function CollectionDayBlock({
   const addCalendarTodo = addCalendarTodoBase as unknown as (
     todo: Partial<Todo & { section?: "urgent" | "schedule" | "allday"; rollover?: boolean; dismissed?: boolean }>
   ) => string
+  const updateCalendarTodoBase = useLemonadeStore((state) => state.updateCalendarTodo)
+  const updateCalendarTodo = updateCalendarTodoBase as unknown as (
+    id: string, updates: Partial<Todo & { rollover?: boolean; dismissed?: boolean }>
+  ) => void
   const [draggedTodoId, setDraggedTodoId] = useState<string | null>(null)
   const [lineVersion, setLineVersion] = useState(0)
+  const sectionRef = useRef<HTMLElement | null>(null)
+
+  const setHighlight = useCallback((on: boolean) => {
+    if (on) sectionRef.current?.setAttribute("data-drag-over", "true")
+    else sectionRef.current?.removeAttribute("data-drag-over")
+  }, [])
+
+  const handleDragOver = useCallback((e: DragEvent<HTMLElement>) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = "move"
+    setHighlight(true)
+  }, [setHighlight])
+
+  const handleDragLeave = useCallback((e: DragEvent<HTMLElement>) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return
+    setHighlight(false)
+  }, [setHighlight])
+
+  const dateKey = useMemo(() => formatDateKey(date), [date])
+
+  const handleDrop = useCallback((e: DragEvent<HTMLElement>) => {
+    e.preventDefault()
+    setHighlight(false)
+    const taskId = e.dataTransfer.getData("text/plain")
+    if (!taskId) return
+    updateCalendarTodo(taskId, {
+      date: formatDateKey(date),
+      rollover: false,
+      dismissed: false,
+    })
+  }, [updateCalendarTodo, setHighlight, date])
 
   if (todos.length === 0 && !showEmpty) {
     return null
@@ -62,8 +97,6 @@ export function CollectionDayBlock({
   const firstColumnTodos = sortedTodos.slice(0, firstColumnTaskCount)
   const secondColumnTodos = sortedTodos.slice(firstColumnTaskCount)
   const MIN_SLOTS_PER_COLUMN = 5
-
-  const dateKey = useMemo(() => formatDateKey(date), [date])
 
   const renderTask = (todo: CollectionTodo) => (
     <TaskRow
@@ -99,8 +132,12 @@ export function CollectionDayBlock({
 
   return (
     <section
+      ref={sectionRef}
       key={lineVersion}
-      className="grid min-h-[258px] grid-cols-[112px_1fr_1fr] gap-x-3 border-t border-black/8 bg-[#f7f7f4] px-6 py-9 first:border-t-0"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className="grid min-h-[258px] grid-cols-[112px_1fr_1fr] gap-x-3 border-t border-black/8 bg-[#f7f7f4] px-8 py-9 first:border-t-0 transition-colors [&[data-drag-over=true]]:bg-sky-50/60"
     >
       <div className="flex items-start justify-start pt-1 text-left">
         {featured ? (

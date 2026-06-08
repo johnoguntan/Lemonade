@@ -34,6 +34,7 @@ export function DailySection({ title, todos, showOverdueActions = false }: Daily
   const addCalendarTodo = addCalendarTodoBase as unknown as (
     todo: Partial<Todo & { section?: DailySectionKey; rollover?: boolean; dismissed?: boolean }>
   ) => string
+  const ensureLabelIds = useLemonadeStore((state) => state.ensureLabelIds)
   const selectedCalendarDate = useLemonadeStore((state) => state.selectedCalendarDate)
 
   const sectionRef = useRef<HTMLElement | null>(null)
@@ -65,6 +66,7 @@ export function DailySection({ title, todos, showOverdueActions = false }: Daily
 
       if (title === "URGENT") {
         updateCalendarTodo(draggedId, {
+          date: selectedCalendarDate,
           section: "urgent",
           priority: "urgent",
           rollover: false,
@@ -73,6 +75,7 @@ export function DailySection({ title, todos, showOverdueActions = false }: Daily
         })
       } else if (title === "ALL DAY") {
         updateCalendarTodo(draggedId, {
+          date: selectedCalendarDate,
           section: undefined,
           priority: draggedTodo.priority === "urgent" ? "normal" : draggedTodo.priority,
           endOfDay: true,
@@ -82,6 +85,7 @@ export function DailySection({ title, todos, showOverdueActions = false }: Daily
       } else if (title === "SCHEDULE") {
         const needsTime = !draggedTodo.time && !draggedTodo.rollover
         updateCalendarTodo(draggedId, {
+          date: selectedCalendarDate,
           section: undefined,
           priority: draggedTodo.priority === "urgent" ? "normal" : draggedTodo.priority,
           endOfDay: false,
@@ -102,7 +106,7 @@ export function DailySection({ title, todos, showOverdueActions = false }: Daily
         })
       }
     },
-    [title, updateCalendarTodo]
+    [title, updateCalendarTodo, selectedCalendarDate]
   )
 
   const handleTaskDragStart = useCallback((_event: DragEvent<HTMLDivElement>, todoId: string) => {
@@ -185,7 +189,7 @@ export function DailySection({ title, todos, showOverdueActions = false }: Daily
     sectionKey && sectionKey !== "overdue"
       ? buildCalendarAddHandler({
           addCalendarTodo,
-          ensureLabelIds: () => [],
+          ensureLabelIds,
           selectedCalendarDate,
           kind: sectionKey,
         })

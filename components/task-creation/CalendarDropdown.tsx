@@ -55,7 +55,7 @@ const startOfDay = (date: Date) => {
   return next
 }
 
-function MiniCalendar({
+export function MiniCalendar({
   value,
   onSelect,
   timeValue,

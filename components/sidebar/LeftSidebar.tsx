@@ -22,6 +22,18 @@ export function LeftSidebar() {
   const [activeIcon, setActiveIcon] = useState<SidebarIconName>("home")
   const selectedCalendarDate = useLemonadeStore((state) => state.selectedCalendarDate)
   const setSelectedCalendarDate = useLemonadeStore((state) => state.setSelectedCalendarDate)
+  const calendarTodos = useLemonadeStore((state) => state.calendarTodos)
+
+  // Build a set of "YYYY-MM-DD" keys for days that have at least one incomplete task.
+  const taskDateKeys = useMemo(
+    () =>
+      new Set(
+        calendarTodos
+          .filter((t) => !t.completed && !(t as { dismissed?: boolean }).dismissed && t.date)
+          .map((t) => t.date as string)
+      ),
+    [calendarTodos]
+  )
 
   const selectedDate = useMemo(() => {
     const [year, month, day] = selectedCalendarDate.split("-").map(Number)
@@ -46,6 +58,7 @@ export function LeftSidebar() {
         <div className="px-2 py-3">
           <CalendarWidget
             selectedDate={selectedDate}
+            taskDateKeys={taskDateKeys}
             onDateSelect={(date) => {
               const year = date.getFullYear()
               const month = `${date.getMonth() + 1}`.padStart(2, "0")

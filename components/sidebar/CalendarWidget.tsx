@@ -6,6 +6,8 @@ import { ChevronDown, ChevronUp } from "lucide-react"
 type CalendarWidgetProps = {
   selectedDate?: Date
   onDateSelect: (date: Date) => void
+  /** Set of "YYYY-MM-DD" strings for days that have at least one task. */
+  taskDateKeys?: Set<string>
 }
 
 const MONTH_LABELS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
@@ -17,7 +19,7 @@ const isSameDay = (left?: Date, right?: Date) =>
   left!.getMonth() === right!.getMonth() &&
   left!.getDate() === right!.getDate()
 
-export function CalendarWidget({ selectedDate, onDateSelect }: CalendarWidgetProps) {
+export function CalendarWidget({ selectedDate, onDateSelect, taskDateKeys }: CalendarWidgetProps) {
   const today = new Date()
   const [viewDate, setViewDate] = useState(() => selectedDate ?? today)
 
@@ -102,13 +104,15 @@ export function CalendarWidget({ selectedDate, onDateSelect }: CalendarWidgetPro
           const inMonth = date.getMonth() === currentMonth
           const isToday = isSameDay(date, today)
           const isSelected = isSameDay(date, selectedDate)
+          const dateKey = `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, "0")}-${`${date.getDate()}`.padStart(2, "0")}`
+          const hasTasks = Boolean(taskDateKeys?.has(dateKey))
 
           return (
             <button
               key={date.toISOString()}
               type="button"
               onClick={() => onDateSelect(new Date(date))}
-              className="flex items-center justify-center"
+              className="flex flex-col items-center gap-0.5"
               aria-current={isToday ? "date" : undefined}
               aria-pressed={isSelected}
             >
@@ -116,13 +120,26 @@ export function CalendarWidget({ selectedDate, onDateSelect }: CalendarWidgetPro
                 className={[
                   "flex h-8 w-8 items-center justify-center rounded-full tabular-nums transition-all duration-150",
                   inMonth ? "text-sky-50/85" : "text-white/15",
-                  inMonth && !isToday && !isSelected ? "bg-sky-500/12 hover:bg-sky-500/30 hover:text-white" : "",
+                  // Task days: brighter background + subtle ring (overrides default)
+                  inMonth && hasTasks && !isToday && !isSelected
+                    ? "bg-sky-400/22 ring-[1.5px] ring-sky-400/40 hover:bg-sky-400/40 hover:text-white"
+                    : inMonth && !isToday && !isSelected
+                      ? "bg-sky-500/12 hover:bg-sky-500/30 hover:text-white"
+                      : "",
                   isSelected && !isToday ? "bg-sky-500/25 font-semibold text-white ring-[1.5px] ring-sky-400" : "",
                   isToday ? "bg-sky-500 font-semibold text-white shadow-[0_2px_10px_rgba(14,165,233,0.55)]" : "",
                 ].join(" ")}
               >
                 {date.getDate()}
               </span>
+              {/* Small dot below task days for extra clarity */}
+              <span
+                className={[
+                  "h-1 w-1 rounded-full transition-all duration-150",
+                  hasTasks && inMonth ? (isToday || isSelected ? "bg-sky-200/70" : "bg-sky-400/60") : "bg-transparent",
+                ].join(" ")}
+                aria-hidden="true"
+              />
             </button>
           )
         })}

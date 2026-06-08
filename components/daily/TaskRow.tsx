@@ -13,9 +13,11 @@ const SAW_PATH_18 =
 const SAW_PATH_12 =
   "M 10.00 1.30 L 11.93 3.58 L 14.20 2.73 L 14.80 4.90 L 17.53 5.65 L 16.51 8.40 L 18.30 10.00 L 16.81 11.61 L 17.45 14.30 L 14.52 14.80 L 14.35 17.53 L 11.92 16.63 L 10.00 18.40 L 7.99 16.70 L 5.60 17.62 L 5.41 14.88 L 2.81 14.15 L 3.20 11.68 L 1.30 10.00 L 3.49 8.40 L 2.73 5.80 L 5.20 4.90 L 5.65 2.47 L 8.07 3.58 Z"
 
-function RoughCircle({ completed, size = 22 }: { completed: boolean; size?: number }) {
+function RoughCircle({ completed, size = 22, color }: { completed: boolean; size?: number; color?: string | null }) {
   const isSmall = size <= 16
   const d = isSmall ? SAW_PATH_12 : SAW_PATH_18
+  const fillColor = completed ? (color ?? "rgba(0,0,0,0.68)") : "none"
+  const strokeColor = completed ? "none" : "rgba(0,0,0,0.30)"
   return (
     <svg
       width={size}
@@ -27,8 +29,8 @@ function RoughCircle({ completed, size = 22 }: { completed: boolean; size?: numb
     >
       <path
         d={d}
-        fill={completed ? "rgba(0,0,0,0.68)" : "none"}
-        stroke={completed ? "none" : "rgba(0,0,0,0.30)"}
+        fill={fillColor}
+        stroke={strokeColor}
         strokeWidth={isSmall ? 0.3 : 0.4}
         strokeLinejoin="miter"
         style={{ transition: "fill 0.12s ease, stroke 0.12s ease" }}
@@ -47,6 +49,7 @@ import {
   CornerLeftUp,
   GitMerge,
   GripHorizontal,
+  Palette,
   Paperclip,
   Pencil,
   Scissors,
@@ -58,6 +61,9 @@ import { toast } from "sonner"
 import { formatLocalDateKey, normalizeTodoPriority, useLemonadeStore, type Todo } from "@/lib/store"
 import { downloadTaskIcs } from "@/lib/ics"
 import { parseFlexibleDate } from "@/lib/date-parse"
+import { MiniCalendar } from "@/components/task-creation/CalendarDropdown"
+import { TimeWheelPicker } from "@/components/task-creation/TimeWheelPicker"
+import { ColorPicker } from "@/components/task-creation/ColorPicker"
 import {
   ContextMenu,
   ContextMenuCheckboxItem,
@@ -142,6 +148,8 @@ function TaskRowComponent({
   const toggleSubtask = useLemonadeStore((state) => state.toggleSubtask)
   const promoteSubtaskToTask = useLemonadeStore((state) => state.promoteSubtaskToTask)
   const deleteSubtask = useLemonadeStore((state) => state.deleteSubtask)
+  const editSubtask = useLemonadeStore((state) => state.editSubtask)
+  const addSubtask = useLemonadeStore((state) => state.addSubtask)
   const toggleSubtasksCollapsed = useLemonadeStore((state) => state.toggleSubtasksCollapsed)
   // Narrow selectors so a change to one task (or the selection) doesn't re-render
   // every other row — only the rows whose own derived value actually changed.
@@ -154,18 +162,33 @@ function TaskRowComponent({
     updates: Partial<Todo> & { rollover?: boolean; dismissed?: boolean; section?: DailySectionKey }
   ) => void
 
-  const formatTodoDate = (value?: string | null) => {
-    if (!value) return ""
-    const [y, m, d] = value.split("-")
-    return y && m && d ? `${m}/${d}/${y}` : value
-  }
-
   const [isEditing, setIsEditing] = useState(false)
   const [draftText, setDraftText] = useState(typedTodo.text)
-  const [draftDate, setDraftDate] = useState(formatTodoDate(typedTodo.date))
-  const [draftTime, setDraftTime] = useState(typedTodo.time ?? "")
+  // Use Date | null so we can pass directly to MiniCalendar
+  const [draftDate, setDraftDate] = useState<Date | null>(() => {
+    if (!typedTodo.date) return null
+    const [y, m, d] = typedTodo.date.split("-").map(Number)
+    return new Date(y, (m ?? 1) - 1, d ?? 1)
+  })
+  const [draftTime, setDraftTime] = useState<string | null>(typedTodo.time ?? null)
   const [draftLocation, setDraftLocation] = useState(typedTodo.location ?? "")
   const [draftNotes, setDraftNotes] = useState(typedTodo.notes ?? "")
+  const [showDatePicker, setShowDatePicker] = useState(false)
+  const [showTimePicker, setShowTimePicker] = useState(false)
+  const [showColorPicker, setShowColorPicker] = useState(false)
+  const [draftColor, setDraftColor] = useState<string | null>(typedTodo.color ?? null)
+  const colorAnchorRef = useRef<HTMLButtonElement | null>(null)
+  // Text shadows for typed entry — kept in sync with picker selections
+  const [draftDateText, setDraftDateText] = useState(() => {
+    if (!typedTodo.date) return ""
+    const [y, m, d] = typedTodo.date.split("-")
+    return y && m && d ? `${m}/${d}/${y}` : ""
+  })
+  const [draftTimeText, setDraftTimeText] = useState(typedTodo.time ?? "")
+  const [newSubtaskText, setNewSubtaskText] = useState("")
+  // subtask inline editing: subtaskId → draft title
+  const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null)
+  const [editingSubtaskDraft, setEditingSubtaskDraft] = useState("")
 
   // Power-action dialog state.
   const [splitOpen, setSplitOpen] = useState(false)
@@ -236,15 +259,40 @@ function TaskRowComponent({
   const saveEdit = () => {
     const trimmed = draftText.trim()
     if (!trimmed) return
-    // Flexible date entry: "4th of July", "2/10/2026", "next friday", etc.
-    const parsedDate = draftDate.trim() ? parseFlexibleDate(draftDate) : null
     updateCalendarTodo(typedTodo.id, {
       text: trimmed,
-      time: draftTime.trim() || undefined,
+      time: draftTime ?? undefined,
       location: draftLocation.trim() || undefined,
       notes: draftNotes.trim() || undefined,
-      ...(parsedDate ? { date: formatLocalDateKey(parsedDate) } : {}),
+      color: draftColor ?? undefined,
+      ...(draftDate ? { date: formatLocalDateKey(draftDate) } : {}),
     })
+    setShowDatePicker(false)
+    setShowTimePicker(false)
+    setShowColorPicker(false)
+    setIsEditing(false)
+  }
+
+  const cancelEdit = () => {
+    setDraftText(typedTodo.text)
+    setDraftDate(() => {
+      if (!typedTodo.date) return null
+      const [y, m, d] = typedTodo.date.split("-").map(Number)
+      return new Date(y, (m ?? 1) - 1, d ?? 1)
+    })
+    setDraftTime(typedTodo.time ?? null)
+    setDraftDateText(() => {
+      if (!typedTodo.date) return ""
+      const [y, m, d] = typedTodo.date.split("-")
+      return y && m && d ? `${m}/${d}/${y}` : ""
+    })
+    setDraftTimeText(typedTodo.time ?? "")
+    setDraftLocation(typedTodo.location ?? "")
+    setDraftNotes(typedTodo.notes ?? "")
+    setDraftColor(typedTodo.color ?? null)
+    setShowDatePicker(false)
+    setShowTimePicker(false)
+    setShowColorPicker(false)
     setIsEditing(false)
   }
 
@@ -339,15 +387,49 @@ function TaskRowComponent({
             >
               {subtask.completed ? <Check size={9} /> : null}
             </button>
-            <span
-              className={[
-                "text-[11px] leading-4",
-                subtask.completed ? "text-black/35 line-through" : "text-black/70",
-              ].join(" ")}
-            >
-              {subtask.title}
-            </span>
+
+            {editingSubtaskId === subtask.id ? (
+              <input
+                autoFocus
+                value={editingSubtaskDraft}
+                onChange={(e) => setEditingSubtaskDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const trimmed = editingSubtaskDraft.trim()
+                    if (trimmed) editSubtask(typedTodo.id, subtask.id, trimmed)
+                    setEditingSubtaskId(null)
+                  } else if (e.key === "Escape") {
+                    setEditingSubtaskId(null)
+                  }
+                }}
+                onBlur={() => {
+                  const trimmed = editingSubtaskDraft.trim()
+                  if (trimmed) editSubtask(typedTodo.id, subtask.id, trimmed)
+                  setEditingSubtaskId(null)
+                }}
+                className="min-w-0 flex-1 rounded border border-black/15 bg-white px-1.5 py-0.5 text-[11px] text-black outline-none"
+              />
+            ) : (
+              <span
+                className={[
+                  "min-w-0 flex-1 text-[11px] leading-4",
+                  subtask.completed ? "text-black/35 line-through" : "text-black/70",
+                ].join(" ")}
+              >
+                {subtask.title}
+              </span>
+            )}
+
             <span className="ml-auto flex items-center gap-1 opacity-0 transition group-hover/subtask:opacity-100 [@media(hover:none)]:opacity-100">
+              <button
+                type="button"
+                onClick={() => { setEditingSubtaskId(subtask.id); setEditingSubtaskDraft(subtask.title) }}
+                className="text-black/30 transition hover:text-black/70"
+                aria-label="Edit subtask"
+                title="Edit"
+              >
+                <Pencil size={11} />
+              </button>
               <button
                 type="button"
                 onClick={() => promoteSubtaskToTask(typedTodo.id, subtask.id)}
@@ -404,19 +486,206 @@ function TaskRowComponent({
     return (
       <div className="group rounded-[16px] border border-black/10 bg-white px-3 py-2.5">
         <div className="space-y-2">
-          <input value={draftText} onChange={(event) => setDraftText(event.target.value)} className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-[13px] text-black outline-none" />
+          {/* Title */}
+          <input
+            autoFocus
+            value={draftText}
+            onChange={(e) => setDraftText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveEdit() } else if (e.key === "Escape") cancelEdit() }}
+            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-[13px] text-black outline-none"
+          />
+
+          {/* Date + Time pickers */}
           <div className="grid grid-cols-2 gap-2">
-            <input value={draftDate} onChange={(event) => setDraftDate(event.target.value)} placeholder="Date (e.g. 4th of July)" className="rounded-xl border border-black/10 bg-white px-3 py-2 text-[12px] text-black outline-none" />
-            <input value={draftTime} onChange={(event) => setDraftTime(event.target.value)} placeholder="Time" className="rounded-xl border border-black/10 bg-white px-3 py-2 text-[12px] text-black outline-none" />
+            {/* Date: type freely or click calendar icon */}
+            <div className="relative">
+              <div className="flex items-center rounded-xl border border-black/10 px-3 py-2 focus-within:border-black/25">
+                <input
+                  value={draftDateText}
+                  onChange={(e) => setDraftDateText(e.target.value)}
+                  onBlur={() => {
+                    const parsed = parseFlexibleDate(draftDateText)
+                    if (parsed) {
+                      setDraftDate(parsed)
+                      setDraftDateText(parsed.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" }))
+                    } else if (!draftDateText.trim()) {
+                      setDraftDate(null)
+                    }
+                  }}
+                  placeholder="Date"
+                  className="min-w-0 flex-1 bg-transparent text-[12px] text-black outline-none placeholder:text-black/30"
+                />
+                <button
+                  type="button"
+                  onClick={() => { setShowDatePicker((v) => !v); setShowTimePicker(false) }}
+                  className="ml-1 shrink-0 text-black/35 transition hover:text-black/70"
+                  aria-label="Open calendar"
+                >
+                  <CalendarPlus size={13} />
+                </button>
+              </div>
+              {showDatePicker ? (
+                <div className="absolute left-0 top-full z-50 mt-1">
+                  <MiniCalendar
+                    value={draftDate}
+                    onSelect={(d) => {
+                      setDraftDate(d)
+                      setDraftDateText(d.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" }))
+                      setShowDatePicker(false)
+                    }}
+                    onClose={() => setShowDatePicker(false)}
+                  />
+                </div>
+              ) : null}
+            </div>
+
+            {/* Time: type freely or click clock icon */}
+            <div className="relative">
+              <div className="flex items-center rounded-xl border border-black/10 px-3 py-2 focus-within:border-black/25">
+                <input
+                  value={draftTimeText}
+                  onChange={(e) => setDraftTimeText(e.target.value)}
+                  onBlur={() => {
+                    const trimmed = draftTimeText.trim()
+                    setDraftTime(trimmed || null)
+                  }}
+                  placeholder="Time"
+                  className="min-w-0 flex-1 bg-transparent text-[12px] text-black outline-none placeholder:text-black/30"
+                />
+                <button
+                  type="button"
+                  onClick={() => { setShowTimePicker((v) => !v); setShowDatePicker(false) }}
+                  className="ml-1 shrink-0 text-black/35 transition hover:text-black/70"
+                  aria-label="Open time picker"
+                >
+                  <Clock3 size={13} />
+                </button>
+              </div>
+              {showTimePicker ? (
+                <div className="absolute left-0 top-full z-50 mt-1 w-[236px] rounded-2xl border border-black/10 bg-white p-3 shadow-xl">
+                  <TimeWheelPicker
+                    value={draftTime}
+                    onChange={(t) => { setDraftTime(t); setDraftTimeText(t); setShowTimePicker(false) }}
+                  />
+                </div>
+              ) : null}
+            </div>
           </div>
-          <input value={draftLocation} onChange={(event) => setDraftLocation(event.target.value)} placeholder="Location" className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-[12px] text-black outline-none" />
-          <textarea value={draftNotes} onChange={(event) => setDraftNotes(event.target.value)} placeholder="Notes" rows={2} className="w-full resize-none rounded-xl border border-black/10 bg-white px-3 py-2 text-[12px] text-black outline-none" />
+
+          <input value={draftLocation} onChange={(e) => setDraftLocation(e.target.value)} placeholder="Location" className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-[12px] text-black outline-none" />
+
+          {/* Notes */}
+          <textarea
+            value={draftNotes}
+            onChange={(e) => setDraftNotes(e.target.value)}
+            placeholder="Add a note…"
+            rows={2}
+            className="w-full resize-none rounded-xl border border-black/10 bg-white px-3 py-2 text-[12px] text-black outline-none"
+          />
+
+          {/* Subtask management inside the edit form */}
+          <div className="rounded-xl border border-black/10 bg-black/[0.02] px-3 py-2 space-y-1.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-black/35">Subtasks</p>
+            {subtasks.map((subtask) => (
+              <div key={subtask.id} className="group/esub flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => toggleSubtask(typedTodo.id, subtask.id)}
+                  className="flex h-3 w-3 shrink-0 items-center justify-center rounded-[4px] border border-black/20 text-black"
+                >
+                  {subtask.completed ? <Check size={9} /> : null}
+                </button>
+                {editingSubtaskId === subtask.id ? (
+                  <input
+                    autoFocus
+                    value={editingSubtaskDraft}
+                    onChange={(e) => setEditingSubtaskDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        const t = editingSubtaskDraft.trim()
+                        if (t) editSubtask(typedTodo.id, subtask.id, t)
+                        setEditingSubtaskId(null)
+                      } else if (e.key === "Escape") { setEditingSubtaskId(null) }
+                    }}
+                    onBlur={() => {
+                      const t = editingSubtaskDraft.trim()
+                      if (t) editSubtask(typedTodo.id, subtask.id, t)
+                      setEditingSubtaskId(null)
+                    }}
+                    className="min-w-0 flex-1 rounded border border-black/15 bg-white px-1.5 py-0.5 text-[11px] text-black outline-none"
+                  />
+                ) : (
+                  <span className={["min-w-0 flex-1 text-[11px]", subtask.completed ? "text-black/35 line-through" : "text-black/65"].join(" ")}>
+                    {subtask.title}
+                  </span>
+                )}
+                <span className="flex items-center gap-1 opacity-0 transition group-hover/esub:opacity-100">
+                  <button type="button" onClick={() => { setEditingSubtaskId(subtask.id); setEditingSubtaskDraft(subtask.title) }} className="text-black/30 hover:text-black/70" title="Edit">
+                    <Pencil size={10} />
+                  </button>
+                  <button type="button" onClick={() => promoteSubtaskToTask(typedTodo.id, subtask.id)} className="text-black/30 hover:text-black/70" title="Make a task">
+                    <CornerLeftUp size={10} />
+                  </button>
+                  <button type="button" onClick={() => deleteSubtask(typedTodo.id, subtask.id)} className="text-black/30 hover:text-[#a32020]" title="Delete">
+                    <X size={10} />
+                  </button>
+                </span>
+              </div>
+            ))}
+            {/* Add new subtask */}
+            <input
+              value={newSubtaskText}
+              onChange={(e) => setNewSubtaskText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  const trimmed = newSubtaskText.trim()
+                  if (trimmed) { addSubtask(typedTodo.id, trimmed); setNewSubtaskText("") }
+                }
+              }}
+              placeholder="+ Add subtask…"
+              className="w-full bg-transparent text-[11px] text-black/50 outline-none placeholder:text-black/30"
+            />
+          </div>
+
+          {/* Completion color picker */}
+          <div className="flex items-center gap-2.5">
+            <span className="text-[11px] text-black/45">Completion color</span>
+            <button
+              ref={colorAnchorRef}
+              type="button"
+              onClick={() => setShowColorPicker((v) => !v)}
+              className="flex h-6 w-6 items-center justify-center rounded-full border border-black/15 transition hover:border-black/30"
+              style={{ backgroundColor: draftColor ?? "transparent" }}
+              aria-label="Pick completion color"
+            >
+              {!draftColor ? <Palette size={12} className="text-black/35" /> : null}
+            </button>
+            {draftColor ? (
+              <button
+                type="button"
+                onClick={() => setDraftColor(null)}
+                className="text-[10px] text-black/35 hover:text-black/60"
+              >
+                Reset
+              </button>
+            ) : null}
+            {showColorPicker ? (
+              <ColorPicker
+                value={draftColor}
+                onChange={setDraftColor}
+                onClose={() => setShowColorPicker(false)}
+                anchorRef={colorAnchorRef}
+              />
+            ) : null}
+          </div>
+
           <div className="flex items-center gap-2">
             <button type="button" onClick={saveEdit} className="inline-flex items-center gap-1 rounded-full bg-black px-3 py-1.5 text-[11px] font-medium text-white">
               <Check size={12} />
               Save
             </button>
-            <button type="button" onClick={() => { setDraftText(typedTodo.text); setDraftDate(formatTodoDate(typedTodo.date)); setDraftTime(typedTodo.time ?? ""); setDraftLocation(typedTodo.location ?? ""); setDraftNotes(typedTodo.notes ?? ""); setIsEditing(false) }} className="inline-flex items-center gap-1 rounded-full border border-black/10 px-3 py-1.5 text-[11px] font-medium text-black/65">
+            <button type="button" onClick={cancelEdit} className="inline-flex items-center gap-1 rounded-full border border-black/10 px-3 py-1.5 text-[11px] font-medium text-black/65">
               <X size={12} />
               Cancel
             </button>
@@ -508,10 +777,7 @@ function TaskRowComponent({
       <div {...dragHandlers} className={["group relative flex items-start gap-2 rounded-[10px] py-0.5", isDragging ? "opacity-45" : "", selectionClass].join(" ")}>
         {dropIndicator}
         <button type="button" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); toggleCalendarTodo(typedTodo.id, { x: r.left + r.width / 2, y: r.top + r.height / 2 }) }} aria-label={typedTodo.completed ? "Mark incomplete" : "Mark complete"} className="mt-[4px] flex h-3.5 w-3.5 shrink-0 items-center justify-center transition-opacity hover:opacity-70">
-          <RoughCircle completed={typedTodo.completed} size={14} />
-        </button>
-        <button type="button" aria-label="Drag to reorder" className={["mt-[2px] shrink-0 text-black/12", draggable ? "cursor-grab" : "opacity-30"].join(" ")}>
-          <GripHorizontal size={14} />
+          <RoughCircle completed={typedTodo.completed} size={14} color={typedTodo.color} />
         </button>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-1.5">
@@ -524,6 +790,9 @@ function TaskRowComponent({
           {metaRow}
           {subtaskList}
         </div>
+        <button type="button" aria-label="Drag to reorder" className={["mt-[2px] shrink-0 text-black/12", draggable ? "cursor-grab opacity-0 group-hover:opacity-100 transition-opacity" : "opacity-0"].join(" ")}>
+          <GripHorizontal size={14} />
+        </button>
         {utilityActions}
       </div>
     )
@@ -552,10 +821,7 @@ function TaskRowComponent({
       <div {...dragHandlers} className={["group relative flex items-start gap-3 py-2", isDragging ? "opacity-45" : "", selectionClass].join(" ")}>
         {dropIndicator}
         <button type="button" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); toggleCalendarTodo(typedTodo.id, { x: r.left + r.width / 2, y: r.top + r.height / 2 }) }} aria-label={typedTodo.completed ? "Mark incomplete" : "Mark complete"} className="mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center transition-opacity hover:opacity-60">
-          <RoughCircle completed={typedTodo.completed} size={22} />
-        </button>
-        <button type="button" aria-label="Drag to reorder" className={["mt-1 shrink-0 text-black/12", draggable ? "cursor-grab" : "opacity-30"].join(" ")}>
-          <GripHorizontal size={14} />
+          <RoughCircle completed={typedTodo.completed} size={22} color={typedTodo.color} />
         </button>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-1.5">
@@ -569,6 +835,9 @@ function TaskRowComponent({
           {overdueLabel ? <p className="mt-0.5 text-[11px] leading-4 text-[#ff4f46]">{overdueLabel}</p> : null}
           {subtaskList}
         </div>
+        <button type="button" aria-label="Drag to reorder" className={["mt-1 shrink-0 text-black/12", draggable ? "cursor-grab opacity-0 group-hover:opacity-100 transition-opacity" : "opacity-0"].join(" ")}>
+          <GripHorizontal size={14} />
+        </button>
         {utilityActions}
 
         {showOverdueActions ? (

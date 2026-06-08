@@ -41,7 +41,7 @@ export type TaskDraftState = {
 type DailySectionKey = "urgent" | "schedule" | "allday"
 type StoreTodoWithDailyFields = Todo & { section?: DailySectionKey; rollover?: boolean; dismissed?: boolean }
 
-const createDefaultDraft = (): TaskDraftState => ({
+export const createDefaultDraft = (): TaskDraftState => ({
   title: "",
   section: "allday",
   scheduleDate: null,
@@ -89,10 +89,15 @@ export function QuickInputBar() {
   const [openPanel, setOpenPanel] = useState<
     "calendar" | "priority" | "attachment" | "subtasks" | "url" | "phone" | null
   >(null)
-  const [isFocused, setIsFocused] = useState(false)
+  // iconsVisible: the 3-icon row is only shown after the user presses + with an empty input.
+  const [iconsVisible, setIconsVisible] = useState(false)
   const [isParsing, setIsParsing] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  // hover-close timer — keeps the dropdown open while cursor moves from icon → panel
+  const hoverCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // when the user clicks an icon the panel is "locked" open; hover-away won't close it
+  const lockedPanelRef = useRef<string | null>(null)
   // Always points at the latest draft so submit works even when triggered from
   // a deferred handler (e.g. after committing a field on Enter).
   const draftRef = useRef(draft)
@@ -109,7 +114,9 @@ export function QuickInputBar() {
       // Ignore clicks inside the portaled color picker (rendered on <body>).
       if (target?.closest?.(".color-picker-panel")) return
       if (!containerRef.current?.contains(event.target as Node)) {
+        lockedPanelRef.current = null
         setOpenPanel(null)
+        setIconsVisible(false)
       }
     }
     const handleFocusRequest = () => {
@@ -127,8 +134,31 @@ export function QuickInputBar() {
     setDraft((current) => ({ ...current, ...updates }))
   }
 
-  const isTyping = draft.title.trim().length > 0
-  const isExpanded = isFocused || isTyping || openPanel !== null
+  // The 3-icon row is visible when explicitly expanded OR when a panel is open.
+  const showIconRow = iconsVisible || openPanel !== null
+
+  // Hover helpers — opening a panel on mouseenter with a debounced close so the
+  // cursor can travel from the icon button to the dropdown without it snapping shut.
+  const clearHoverClose = () => {
+    if (hoverCloseRef.current) { clearTimeout(hoverCloseRef.current); hoverCloseRef.current = null }
+  }
+  const scheduleHoverClose = () => {
+    if (lockedPanelRef.current !== null) return  // clicked panel stays open
+    clearHoverClose()
+    hoverCloseRef.current = setTimeout(() => setOpenPanel(null), 200)
+  }
+  const handleIconHoverEnter = (panel: "calendar" | "priority" | "attachment") => {
+    clearHoverClose()
+    setOpenPanel(panel)
+  }
+  const handleIconClick = (panel: "calendar" | "priority" | "attachment") => {
+    clearHoverClose()
+    setOpenPanel((current) => {
+      if (current === panel) { lockedPanelRef.current = null; return null }
+      lockedPanelRef.current = panel
+      return panel
+    })
+  }
 
   const handleSubmit = async () => {
     const draft = draftRef.current
@@ -246,14 +276,18 @@ export function QuickInputBar() {
     })
 
     setDraft(createDefaultDraft())
+    lockedPanelRef.current = null
     setOpenPanel(null)
+    setIconsVisible(false)
   }
 
   // Enter should add the task no matter where focus is inside the quick-add —
   // including while a dropdown (Schedule/Priority/etc.) is open.
   const handleContainerKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
+      lockedPanelRef.current = null
       setOpenPanel(null)
+      setIconsVisible(false)
       return
     }
     if (event.key !== "Enter" || event.shiftKey) return
@@ -283,103 +317,135 @@ export function QuickInputBar() {
 
   return (
     <div ref={containerRef} className="relative" onKeyDown={handleContainerKeyDown}>
-      <div className="transition-all duration-200">
-        <div className="flex items-center gap-3 text-[#8e8e8e]">
-          <input
-            data-quick-task-input="true"
-            ref={inputRef}
-            value={draft.title}
-            onFocus={() => setIsFocused(true)}
-            onBlur={() => {
-              window.setTimeout(() => {
-                if (!containerRef.current?.contains(document.activeElement)) {
-                  setIsFocused(false)
-                }
-              }, 0)
-            }}
-            onChange={(event) => updateDraft({ title: event.target.value })}
-            placeholder="Add New Task"
-            className="h-7 flex-1 bg-transparent text-[15px] font-normal text-[#111] outline-none placeholder:font-light placeholder:text-[#b9b9b9]"
-          />
+      {/* Row 1: input + plus */}
+      <div className="flex items-center gap-3 text-[#8e8e8e]">
+        <input
+          data-quick-task-input="true"
+          ref={inputRef}
+          value={draft.title}
+          onFocus={() => setIconsVisible(true)}
+          onChange={(event) => updateDraft({ title: event.target.value })}
+          placeholder="Add New Task"
+          className="h-7 flex-1 bg-transparent text-[15px] font-normal text-[#111] outline-none placeholder:font-light placeholder:text-[#b9b9b9]"
+        />
 
-          <button type="button" onClick={() => void handleSubmit()} disabled={isParsing} className={iconButtonClass} aria-label="Add task">
-            {isParsing ? <Loader2 size={17} className="animate-spin" /> : <Plus size={17} />}
-          </button>
-
-          {!isExpanded ? (
+        {/* Calendar — only shown in compact state (hidden when expanded row is visible) */}
+        {!showIconRow ? (
+          <div className="relative">
             <button
               type="button"
-              onClick={() => {
-                setIsFocused(true)
-                setOpenPanel((current) => (current === "calendar" ? null : "calendar"))
-              }}
+              onClick={() => handleIconClick("calendar")}
+              onMouseEnter={() => handleIconHoverEnter("calendar")}
+              onMouseLeave={scheduleHoverClose}
               className={iconButtonClass}
               aria-label="Schedule"
             >
               <CalendarDays size={17} />
             </button>
-          ) : null}
-        </div>
+            {openPanel === "calendar" ? (
+              <div
+                className="absolute right-0 top-full z-[70] mt-2"
+                onMouseEnter={clearHoverClose}
+                onMouseLeave={scheduleHoverClose}
+              >
+                <CalendarDropdown value={draft} onChange={updateDraft} />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
-        <div
-          className={[
-            "grid transition-all duration-200",
-            isExpanded ? "mt-2 grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
-          ].join(" ")}
+        {/* Plus: submit if text, otherwise toggle icon row */}
+        <button
+          type="button"
+          onClick={() => {
+            if (draft.title.trim()) {
+              void handleSubmit()
+            } else {
+              setIconsVisible((v) => !v)
+              setOpenPanel(null)
+            }
+          }}
+          disabled={isParsing}
+          className={iconButtonClass}
+          aria-label={draft.title.trim() ? "Add task" : "Show task options"}
         >
-          <div className={isExpanded ? "overflow-visible" : "overflow-hidden"}>
-            <div className="flex items-center gap-4 pt-1 text-[#8e8e8e]">
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setOpenPanel((current) => (current === "calendar" ? null : "calendar"))}
-                  className={iconButtonClass}
-                  aria-label="Schedule"
-                >
-                  <CalendarDays size={17} />
-                </button>
-                {openPanel === "calendar" ? (
-                  <div className="absolute left-0 top-full z-50 mt-2">
-                    <CalendarDropdown value={draft} onChange={updateDraft} />
-                  </div>
-                ) : null}
-              </div>
+          {isParsing ? <Loader2 size={17} className="animate-spin" /> : <Plus size={17} />}
+        </button>
+      </div>
 
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setOpenPanel((current) => (current === "priority" ? null : "priority"))}
-                  className={iconButtonClass}
-                  aria-label="Priority"
-                >
-                  <Flag size={17} />
-                </button>
-                {openPanel === "priority" ? (
-                  <div className="absolute left-0 top-full z-[60] mt-2">
-                    <PriorityDropdown value={draft} onChange={updateDraft} />
-                  </div>
-                ) : null}
+      {/* Row 2: icon row — visible on input focus, + press, or open panel */}
+      {showIconRow ? (
+        <div className="mt-2 flex items-center gap-4 pt-1 text-[#8e8e8e]">
+          {/* Calendar */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => handleIconClick("calendar")}
+              onMouseEnter={() => handleIconHoverEnter("calendar")}
+              onMouseLeave={scheduleHoverClose}
+              className={iconButtonClass}
+              aria-label="Schedule"
+            >
+              <CalendarDays size={17} />
+            </button>
+            {openPanel === "calendar" ? (
+              <div
+                className="absolute left-0 top-full z-[70] mt-2"
+                onMouseEnter={clearHoverClose}
+                onMouseLeave={scheduleHoverClose}
+              >
+                <CalendarDropdown value={draft} onChange={updateDraft} />
               </div>
+            ) : null}
+          </div>
 
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setOpenPanel((current) => (current === "attachment" ? null : "attachment"))}
-                  className={iconButtonClass}
-                  aria-label="Attachment"
-                >
-                  <Paperclip size={17} />
-                </button>
-                {openPanel === "attachment" ? (
-                  <div className="absolute left-0 top-full z-50 mt-2">
-                    <AttachmentDropdown value={draft} onChange={updateDraft} />
-                  </div>
-                ) : null}
+          {/* Priority */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => handleIconClick("priority")}
+              onMouseEnter={() => handleIconHoverEnter("priority")}
+              onMouseLeave={scheduleHoverClose}
+              className={iconButtonClass}
+              aria-label="Priority"
+            >
+              <Flag size={17} />
+            </button>
+            {openPanel === "priority" ? (
+              <div
+                className="absolute left-0 top-full z-[70] mt-2"
+                onMouseEnter={clearHoverClose}
+                onMouseLeave={scheduleHoverClose}
+              >
+                <PriorityDropdown value={draft} onChange={updateDraft} />
               </div>
-            </div>
+            ) : null}
+          </div>
+
+          {/* Attachment */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => handleIconClick("attachment")}
+              onMouseEnter={() => handleIconHoverEnter("attachment")}
+              onMouseLeave={scheduleHoverClose}
+              className={iconButtonClass}
+              aria-label="Attachment"
+            >
+              <Paperclip size={17} />
+            </button>
+            {openPanel === "attachment" ? (
+              <div
+                className="absolute left-0 top-full z-[70] mt-2"
+                onMouseEnter={clearHoverClose}
+                onMouseLeave={scheduleHoverClose}
+              >
+                <AttachmentDropdown value={draft} onChange={updateDraft} />
+              </div>
+            ) : null}
           </div>
         </div>
-      </div>
+      ) : null}
     </div>
   )
 }
