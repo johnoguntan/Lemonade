@@ -199,7 +199,7 @@ function SectionInputRow({ onAdd, onCancel, placeholder = "Add a task…" }: Sec
 
       {/* Row 2: icon row — visible on focus, + press, or open panel */}
       {showIconRow ? (
-        <div className="mt-2 flex items-center gap-4 pt-1 text-[#8e8e8e]">
+        <div className="mt-2 flex items-center justify-end gap-4 pt-1 text-[#8e8e8e]">
           {/* Calendar */}
           <div className="relative">
             <button
@@ -214,7 +214,7 @@ function SectionInputRow({ onAdd, onCancel, placeholder = "Add a task…" }: Sec
             </button>
             {openPanel === "calendar" ? (
               <div
-                className="absolute left-0 top-full z-[70] mt-2"
+                className="absolute right-0 top-full z-[70] mt-2"
                 onMouseEnter={clearHoverClose}
                 onMouseLeave={scheduleHoverClose}
               >
@@ -236,7 +236,7 @@ function SectionInputRow({ onAdd, onCancel, placeholder = "Add a task…" }: Sec
             </button>
             {openPanel === "priority" ? (
               <div
-                className="absolute left-0 top-full z-[70] mt-2"
+                className="absolute right-0 top-full z-[70] mt-2"
                 onMouseEnter={clearHoverClose}
                 onMouseLeave={scheduleHoverClose}
               >
@@ -258,7 +258,7 @@ function SectionInputRow({ onAdd, onCancel, placeholder = "Add a task…" }: Sec
             </button>
             {openPanel === "attachment" ? (
               <div
-                className="absolute left-0 top-full z-[70] mt-2"
+                className="absolute right-0 top-full z-[70] mt-2"
                 onMouseEnter={clearHoverClose}
                 onMouseLeave={scheduleHoverClose}
               >

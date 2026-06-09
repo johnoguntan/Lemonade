@@ -70,16 +70,27 @@ type WheelColumnProps = {
 const LOOP_COPIES = 9
 const MID_COPY = Math.floor(LOOP_COPIES / 2)
 
+// Accumulated wheel delta (px) required to step one item. A standard mouse
+// notch is ~100px, a trackpad sends many small deltas — this maps both to a
+// controlled one-item-at-a-time movement instead of flinging 3-6 items.
+const WHEEL_STEP_THRESHOLD = 60
+
 function WheelColumn({ options, selected, onSelect }: WheelColumnProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Flag to suppress the scroll handler while we silently re-center.
+  // True while WE are moving the scroll position — suppresses handleScroll.
   const silentRef = useRef(false)
+  // Accumulated wheel delta since the last step.
+  const wheelAccumRef = useRef(0)
   const n = options.length
   const selectedIndex = Math.max(0, options.indexOf(selected))
 
-  // Local index for immediate visual highlight while scrolling (before debounce fires).
-  const [localIdx, setLocalIdx] = useState(selectedIndex)
+  // LOOPED index (0 … LOOP_COPIES*n-1) of the item we are centered on /
+  // animating toward. Tracking the looped index (not value, not index % n)
+  // means exactly ONE copy highlights — duplicate values like "AM"/"PM"
+  // no longer all light up at once.
+  const targetRef = useRef(MID_COPY * n + selectedIndex)
+  const [centerIdx, setCenterIdx] = useState(MID_COPY * n + selectedIndex)
 
   // Looped options: 9 × the real list.
   const loopedOptions = useMemo(
@@ -87,67 +98,164 @@ function WheelColumn({ options, selected, onSelect }: WheelColumnProps) {
     [options]
   )
 
-  // Jump to the center copy's position whenever the external `selected` changes.
+  // Helper: move the scroll container to an exact position without triggering
+  // the browser's snap animation (which fires many scroll events and causes
+  // the debounce / scrollend to read wrong intermediate positions).
+  const scrollInstant = (node: HTMLDivElement, top: number) => {
+    silentRef.current = true
+    // 'instant' skips the CSS scroll-snap animation — lands in one frame.
+    node.scrollTo({ top, behavior: "instant" as ScrollBehavior })
+    requestAnimationFrame(() => { silentRef.current = false })
+  }
+
+  // Re-center on the correct item whenever the external `selected` changes.
   useEffect(() => {
     const node = scrollRef.current
     if (!node) return
-    silentRef.current = true
-    node.scrollTop = (MID_COPY * n + selectedIndex) * ITEM_HEIGHT
-    setLocalIdx(selectedIndex)
-    requestAnimationFrame(() => { silentRef.current = false })
+    const idx = MID_COPY * n + selectedIndex
+    scrollInstant(node, idx * ITEM_HEIGHT)
+    targetRef.current = idx
+    setCenterIdx(idx)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [n, selectedIndex])
+
+  // Commit the currently-centered item and re-center on the middle copy so
+  // the user always has room to scroll in either direction.
+  const commitRef = useRef<((node: HTMLDivElement) => void) | null>(null)
+  commitRef.current = (node: HTMLDivElement) => {
+    if (silentRef.current) return
+    const raw = Math.round(node.scrollTop / ITEM_HEIGHT)
+    const actual = ((raw % n) + n) % n
+    const recentered = MID_COPY * n + actual
+    targetRef.current = recentered
+    setCenterIdx(recentered)
+    onSelect(options[actual] ?? selected)
+    scrollInstant(node, recentered * ITEM_HEIGHT)
+  }
+
+  // scrollend fires AFTER the CSS snap animation completes — the most accurate
+  // moment to read the final position. Fall back to a 380ms debounce for
+  // browsers that don't support scrollend (Safari < 17.4).
+  useEffect(() => {
+    const node = scrollRef.current
+    if (!node) return
+    const onScrollEnd = () => {
+      if (debounceRef.current) { clearTimeout(debounceRef.current); debounceRef.current = null }
+      commitRef.current?.(node)
+    }
+    node.addEventListener("scrollend", onScrollEnd)
+    return () => node.removeEventListener("scrollend", onScrollEnd)
+  }, [])
+
+  // KEY FIX for "one scroll = 5 hours": take full control of wheel input.
+  // Native wheel scrolling moves ~100-120px per notch (plus momentum), which
+  // at 40px/item flings the wheel 3-6 items past where the user aimed.
+  // Instead we preventDefault every wheel event, accumulate the delta, and
+  // step exactly ONE item per threshold crossing with a smooth animation —
+  // iOS-picker behavior. Touch scrolling on mobile is unaffected (it doesn't
+  // fire wheel events) and keeps the native snap + scrollend path.
+  // Must be a native listener with { passive: false } — React's onWheel can
+  // be registered passive, which would make preventDefault a no-op.
+  useEffect(() => {
+    const node = scrollRef.current
+    if (!node) return
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault()
+      // deltaMode 1 = lines (Firefox mouse wheel) — convert to px.
+      const delta = event.deltaMode === 1 ? event.deltaY * ITEM_HEIGHT : event.deltaY
+      wheelAccumRef.current += delta
+      if (Math.abs(wheelAccumRef.current) < WHEEL_STEP_THRESHOLD) return
+      const direction = wheelAccumRef.current > 0 ? 1 : -1
+      // Reset (don't just subtract) so a single fast notch can never burst
+      // through multiple items.
+      wheelAccumRef.current = 0
+      const maxIdx = LOOP_COPIES * n - 1
+      const next = Math.min(maxIdx, Math.max(0, targetRef.current + direction))
+      targetRef.current = next
+      setCenterIdx(next)
+      node.scrollTo({ top: next * ITEM_HEIGHT, behavior: "smooth" })
+      // The smooth scroll fires scrollend (or the debounce fallback), which
+      // commits the value and re-centers — same path as touch scrolling.
+    }
+    node.addEventListener("wheel", onWheel, { passive: false })
+    return () => node.removeEventListener("wheel", onWheel)
+  }, [n])
 
   const handleScroll = () => {
     if (silentRef.current) return
     const node = scrollRef.current
     if (!node) return
 
-    // Immediate visual feedback — update the highlighted row as the user scrolls.
-    const rawIndex = Math.round(node.scrollTop / ITEM_HEIGHT)
-    const actualIndex = ((rawIndex % n) + n) % n
-    setLocalIdx(actualIndex)
+    // Immediate visual feedback — highlight the item nearest the center.
+    // Clamp to the looped list bounds for overscroll.
+    const rawIndex = Math.min(
+      LOOP_COPIES * n - 1,
+      Math.max(0, Math.round(node.scrollTop / ITEM_HEIGHT))
+    )
+    setCenterIdx(rawIndex)
 
+    // Fallback debounce for browsers without scrollend support.
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
-      const raw = Math.round(node.scrollTop / ITEM_HEIGHT)
-      const actual = ((raw % n) + n) % n
-      onSelect(options[actual] ?? selected)
-      // Silently snap back to the center copy so there is always room to scroll
-      // in either direction without hitting the end of the list.
-      silentRef.current = true
-      node.scrollTop = (MID_COPY * n + actual) * ITEM_HEIGHT
-      requestAnimationFrame(() => { silentRef.current = false })
-    }, 120)
+      debounceRef.current = null
+      commitRef.current?.(node)
+    }, 380)
   }
 
   return (
-    <div className="relative h-40 overflow-hidden rounded-xl bg-gray-50">
-      <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-10 -translate-y-1/2 border-y border-black/8 bg-white/60" />
+    // h-[120px] = VISIBLE_ROWS(3) × ITEM_HEIGHT(40) — this is intentional.
+    // The container center sits at exactly 60px, which aligns with
+    //   paddingTop(40) + item_offset × 40 + 20 = 60
+    // when scrollTop = item_offset × 40. Any taller container shifts the
+    // center and causes the wrong item to appear selected.
+    <div className="relative h-[120px] overflow-hidden rounded-2xl bg-[#f5f5f5]">
+      {/* Liquid-glass selection card */}
+      <div
+        className="pointer-events-none absolute inset-x-2 top-1/2 z-20 h-10 -translate-y-1/2 rounded-xl"
+        style={{
+          background: "rgba(255,255,255,0.88)",
+          backdropFilter: "blur(10px) saturate(180%)",
+          WebkitBackdropFilter: "blur(10px) saturate(180%)",
+          boxShadow:
+            "0 4px 24px rgba(0,0,0,0.10), 0 1px 3px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,1)",
+          border: "1px solid rgba(0,0,0,0.07)",
+        }}
+      />
+      {/* Top fade — masks items scrolling out of view */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-9 bg-gradient-to-b from-[#f5f5f5] via-[#f5f5f5]/80 to-transparent" />
+      {/* Bottom fade */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-9 bg-gradient-to-t from-[#f5f5f5] via-[#f5f5f5]/80 to-transparent" />
       <div
         ref={scrollRef}
         onScroll={handleScroll}
         className="h-full overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        style={{ scrollSnapType: "y mandatory" }}
       >
         <div style={{ paddingTop: ITEM_HEIGHT * PADDING_ITEMS, paddingBottom: ITEM_HEIGHT * PADDING_ITEMS }}>
           {loopedOptions.map((option, index) => {
-            const active = option === options[localIdx]
+            // Highlight by LOOPED index — exactly one copy is active, so
+            // duplicate values ("AM"/"PM") never light up together.
+            const active = index === centerIdx
             return (
               <button
                 key={`${option}-${index}`}
                 type="button"
+                style={{ scrollSnapAlign: "center" }}
                 onClick={() => {
-                  const actualIndex = options.indexOf(option)
-                  onSelect(option)
-                  setLocalIdx(actualIndex)
-                  silentRef.current = true
+                  const actualIndex = index % n
+                  const recentered = MID_COPY * n + actualIndex
+                  onSelect(options[actualIndex] ?? option)
+                  targetRef.current = recentered
+                  setCenterIdx(recentered)
                   if (scrollRef.current) {
-                    scrollRef.current.scrollTop = (MID_COPY * n + actualIndex) * ITEM_HEIGHT
+                    scrollInstant(scrollRef.current, recentered * ITEM_HEIGHT)
                   }
-                  requestAnimationFrame(() => { silentRef.current = false })
                 }}
                 className={[
-                  "flex h-10 w-full items-center justify-center transition-all",
-                  active ? "text-lg font-semibold text-gray-900" : "text-sm text-gray-300",
+                  "relative z-30 flex h-10 w-full items-center justify-center transition-all duration-100",
+                  active
+                    ? "text-[17px] font-bold tracking-tight text-black"
+                    : "text-[13px] font-medium text-black/40",
                 ].join(" ")}
               >
                 {option}

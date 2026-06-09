@@ -562,7 +562,7 @@ function TaskRowComponent({
                 </button>
               </div>
               {showTimePicker ? (
-                <div className="absolute left-0 top-full z-50 mt-1 w-[236px] rounded-2xl border border-black/10 bg-white p-3 shadow-xl">
+                <div className="absolute left-0 top-full z-50 mt-1 w-[270px] rounded-2xl border border-black/10 bg-white p-4 shadow-xl">
                   <TimeWheelPicker
                     value={draftTime}
                     onChange={(t) => { setDraftTime(t); setDraftTimeText(t); setShowTimePicker(false) }}
