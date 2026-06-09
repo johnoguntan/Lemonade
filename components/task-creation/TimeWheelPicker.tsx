@@ -82,6 +82,8 @@ function WheelColumn({ options, selected, onSelect }: WheelColumnProps) {
   const silentRef = useRef(false)
   // Accumulated wheel delta since the last step.
   const wheelAccumRef = useRef(0)
+  // Active rAF id for the wheel-step animation.
+  const animRef = useRef<number | null>(null)
   const n = options.length
   const selectedIndex = Math.max(0, options.indexOf(selected))
 
@@ -106,6 +108,41 @@ function WheelColumn({ options, selected, onSelect }: WheelColumnProps) {
     // 'instant' skips the CSS scroll-snap animation — lands in one frame.
     node.scrollTo({ top, behavior: "instant" as ScrollBehavior })
     requestAnimationFrame(() => { silentRef.current = false })
+  }
+
+  // Animate scrollTop manually with rAF. We CANNOT use scrollTo({ behavior:
+  // "smooth" }) here: on a scroll-snap-type: mandatory container Chrome
+  // cancels programmatic smooth scrolls and re-snaps to the current position,
+  // so the wheel never moves (verified live). Snap is disabled during the
+  // animation and restored once we land — the target is always an exact snap
+  // position, so restoring never causes a jump.
+  const animateTo = (node: HTMLDivElement, top: number) => {
+    if (animRef.current !== null) cancelAnimationFrame(animRef.current)
+    const start = node.scrollTop
+    const dist = top - start
+    if (dist === 0) return
+    // Each per-frame scrollTop assignment is an "instant scroll" to Chrome,
+    // which fires scroll/scrollend BETWEEN frames. Without this flag those
+    // events trigger an early commit whose re-center yanks the wheel back
+    // mid-animation. Suppress them and commit explicitly when we land.
+    silentRef.current = true
+    node.style.scrollSnapType = "none"
+    const t0 = performance.now()
+    const DURATION = 150
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - t0) / DURATION)
+      const ease = 1 - Math.pow(1 - p, 3) // ease-out cubic
+      node.scrollTop = start + dist * ease
+      if (p < 1) {
+        animRef.current = requestAnimationFrame(tick)
+      } else {
+        animRef.current = null
+        node.style.scrollSnapType = "y mandatory"
+        silentRef.current = false
+        commitRef.current?.(node)
+      }
+    }
+    animRef.current = requestAnimationFrame(tick)
   }
 
   // Re-center on the correct item whenever the external `selected` changes.
@@ -173,12 +210,16 @@ function WheelColumn({ options, selected, onSelect }: WheelColumnProps) {
       const next = Math.min(maxIdx, Math.max(0, targetRef.current + direction))
       targetRef.current = next
       setCenterIdx(next)
-      node.scrollTo({ top: next * ITEM_HEIGHT, behavior: "smooth" })
-      // The smooth scroll fires scrollend (or the debounce fallback), which
-      // commits the value and re-centers — same path as touch scrolling.
+      animateTo(node, next * ITEM_HEIGHT)
+      // The animation fires scroll events → scrollend (or the debounce
+      // fallback) commits the value and re-centers — same path as touch.
     }
     node.addEventListener("wheel", onWheel, { passive: false })
-    return () => node.removeEventListener("wheel", onWheel)
+    return () => {
+      node.removeEventListener("wheel", onWheel)
+      if (animRef.current !== null) cancelAnimationFrame(animRef.current)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [n])
 
   const handleScroll = () => {
@@ -203,16 +244,23 @@ function WheelColumn({ options, selected, onSelect }: WheelColumnProps) {
   }
 
   return (
-    // h-[120px] = VISIBLE_ROWS(3) × ITEM_HEIGHT(40) — this is intentional.
-    // The container center sits at exactly 60px, which aligns with
-    //   paddingTop(40) + item_offset × 40 + 20 = 60
-    // when scrollTop = item_offset × 40. Any taller container shifts the
-    // center and causes the wrong item to appear selected.
-    <div className="relative h-[120px] overflow-hidden rounded-2xl bg-[#f5f5f5]">
+    // CRITICAL: every height here is set in PX from ITEM_HEIGHT via inline
+    // styles — never rem-based Tailwind classes like h-10. The app sets
+    // html { font-size: 12px }, which silently shrinks rem classes (h-10 →
+    // 30px) while the scroll math still assumes ITEM_HEIGHT px. That mismatch
+    // made commits land hours away from the visually-centered item.
+    // Container = VISIBLE_ROWS × ITEM_HEIGHT so the center row aligns with
+    //   paddingTop + offset × ITEM_HEIGHT + ITEM_HEIGHT/2
+    // exactly when scrollTop = offset × ITEM_HEIGHT.
+    <div
+      className="relative overflow-hidden rounded-2xl bg-[#f5f5f5]"
+      style={{ height: ITEM_HEIGHT * VISIBLE_ROWS }}
+    >
       {/* Liquid-glass selection card */}
       <div
-        className="pointer-events-none absolute inset-x-2 top-1/2 z-20 h-10 -translate-y-1/2 rounded-xl"
+        className="pointer-events-none absolute inset-x-2 top-1/2 z-20 -translate-y-1/2 rounded-xl"
         style={{
+          height: ITEM_HEIGHT,
           background: "rgba(255,255,255,0.88)",
           backdropFilter: "blur(10px) saturate(180%)",
           WebkitBackdropFilter: "blur(10px) saturate(180%)",
@@ -240,7 +288,9 @@ function WheelColumn({ options, selected, onSelect }: WheelColumnProps) {
               <button
                 key={`${option}-${index}`}
                 type="button"
-                style={{ scrollSnapAlign: "center" }}
+                // height MUST be px from ITEM_HEIGHT (not h-10, which is rem
+                // and shrinks under the app's html { font-size: 12px }).
+                style={{ scrollSnapAlign: "center", height: ITEM_HEIGHT }}
                 onClick={() => {
                   const actualIndex = index % n
                   const recentered = MID_COPY * n + actualIndex
@@ -252,7 +302,7 @@ function WheelColumn({ options, selected, onSelect }: WheelColumnProps) {
                   }
                 }}
                 className={[
-                  "relative z-30 flex h-10 w-full items-center justify-center transition-all duration-100",
+                  "relative z-30 flex w-full items-center justify-center transition-all duration-100",
                   active
                     ? "text-[17px] font-bold tracking-tight text-black"
                     : "text-[13px] font-medium text-black/40",
@@ -294,6 +344,14 @@ export function TimeWheelPicker({ value, onChange }: TimeWheelPickerProps) {
   const lastEmittedRef = useRef<string | null>(value)
 
   useEffect(() => {
+    // KEY GUARD: if this value change is just the parent echoing back what we
+    // emitted, do nothing. Without this, typing in the Custom input emits
+    // partial text (e.g. "2"), the echo doesn't match the custom regex yet,
+    // and this effect would flip the mode back to "Time" and wipe the input —
+    // making it impossible to type. Only genuinely external changes (presets,
+    // shortcuts, reopening with a saved value) should re-derive local state.
+    if (lastEmittedRef.current === value) return
+
     setHour(parsedStart.hour)
     setMinute(parsedStart.minute)
     setMeridiem(parsedStart.meridiem)

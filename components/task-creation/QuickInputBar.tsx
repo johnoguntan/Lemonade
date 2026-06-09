@@ -313,7 +313,9 @@ export function QuickInputBar() {
     void handleSubmit()
   }
 
-  const iconButtonClass = "text-[#8e8e8e] transition-all duration-200 hover:text-[#3d3d3d]"
+  // flex centering kills the inline-SVG baseline gap that made icons sit at
+  // slightly different heights depending on whether they had a wrapper div.
+  const iconButtonClass = "flex items-center justify-center text-[#8e8e8e] transition-all duration-200 hover:text-[#3d3d3d]"
 
   return (
     <div ref={containerRef} className="relative" onKeyDown={handleContainerKeyDown}>
@@ -331,23 +333,19 @@ export function QuickInputBar() {
 
         {/* Calendar — only shown in compact state (hidden when expanded row is visible) */}
         {!showIconRow ? (
-          <div className="relative">
+          <div className="relative flex items-center">
             <button
               type="button"
+              // Click-only by design: this compact icon must not open the
+              // dropdown (or show anything else) on hover.
               onClick={() => handleIconClick("calendar")}
-              onMouseEnter={() => handleIconHoverEnter("calendar")}
-              onMouseLeave={scheduleHoverClose}
               className={iconButtonClass}
               aria-label="Schedule"
             >
               <CalendarDays size={17} />
             </button>
             {openPanel === "calendar" ? (
-              <div
-                className="absolute right-0 top-full z-[70] mt-2"
-                onMouseEnter={clearHoverClose}
-                onMouseLeave={scheduleHoverClose}
-              >
+              <div className="absolute right-0 top-full z-[70] mt-2">
                 <CalendarDropdown value={draft} onChange={updateDraft} />
               </div>
             ) : null}
@@ -377,7 +375,7 @@ export function QuickInputBar() {
       {showIconRow ? (
         <div className="mt-2 flex items-center justify-end gap-4 pt-1 text-[#8e8e8e]">
           {/* Calendar */}
-          <div className="relative">
+          <div className="relative flex items-center">
             <button
               type="button"
               onClick={() => handleIconClick("calendar")}
@@ -400,7 +398,7 @@ export function QuickInputBar() {
           </div>
 
           {/* Priority */}
-          <div className="relative">
+          <div className="relative flex items-center">
             <button
               type="button"
               onClick={() => handleIconClick("priority")}
@@ -423,7 +421,7 @@ export function QuickInputBar() {
           </div>
 
           {/* Attachment */}
-          <div className="relative">
+          <div className="relative flex items-center">
             <button
               type="button"
               onClick={() => handleIconClick("attachment")}
