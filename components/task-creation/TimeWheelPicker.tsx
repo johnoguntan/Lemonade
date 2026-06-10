@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 
+import { normalizeCustomTime } from "@/lib/normalize-custom-time"
+
 type TimeWheelPickerProps = {
   value: string | null
   onChange: (value: string) => void
@@ -383,12 +385,14 @@ export function TimeWheelPicker({ value, onChange }: TimeWheelPickerProps) {
   ])
 
   useEffect(() => {
+    // Custom mode commits on blur/Enter (see commitCustom) — emitting every
+    // keystroke would push half-typed junk like "10 ho" into the draft.
+    if (mode === "Custom") return
+
     const nextValue =
-      mode === "Custom"
-        ? customValue.trim()
-        : mode === "Range"
-          ? `${hour}:${minute} ${meridiem} - ${endHour}:${endMinute} ${endMeridiem}`
-          : `${hour}:${minute} ${meridiem}`
+      mode === "Range"
+        ? `${hour}:${minute} ${meridiem} - ${endHour}:${endMinute} ${endMeridiem}`
+        : `${hour}:${minute} ${meridiem}`
 
     if (!nextValue) {
       return
@@ -403,7 +407,32 @@ export function TimeWheelPicker({ value, onChange }: TimeWheelPickerProps) {
     }
     lastEmittedRef.current = nextValue
     onChange(nextValue)
-  }, [customValue, endHour, endMeridiem, endMinute, hour, meridiem, minute, mode, onChange])
+  }, [endHour, endMeridiem, endMinute, hour, meridiem, minute, mode, onChange])
+
+  // Normalize whatever the user typed ("10", "28", "10pm", "2-4pm", "10h")
+  // into a canonical value and emit it. Runs on blur and Enter; also via the
+  // unmount cleanup below so a typed value isn't lost if the popover closes
+  // while the input still has focus (e.g. Escape).
+  const commitCustom = () => {
+    if (mode !== "Custom") return
+    const normalized = normalizeCustomTime(customValue)
+    if (!normalized) return
+    setCustomValue(normalized)
+    if (lastEmittedRef.current === normalized) return
+    lastEmittedRef.current = normalized
+    onChange(normalized)
+  }
+  const commitCustomRef = useRef(commitCustom)
+  commitCustomRef.current = commitCustom
+  useEffect(() => () => commitCustomRef.current(), [])
+
+  // Live preview of how the typed text will be interpreted.
+  const customPreview = useMemo(() => {
+    const trimmed = customValue.trim()
+    if (!trimmed) return null
+    const normalized = normalizeCustomTime(trimmed)
+    return normalized !== trimmed ? normalized : null
+  }, [customValue])
 
   return (
     <div>
@@ -428,9 +457,18 @@ export function TimeWheelPicker({ value, onChange }: TimeWheelPickerProps) {
           <input
             value={customValue}
             onChange={(event) => setCustomValue(event.target.value)}
-            placeholder="28 hours or 40 hours"
+            onBlur={commitCustom}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") commitCustom()
+            }}
+            placeholder="10, 10pm, 28 hours, 2-4pm…"
             className="h-10 w-full rounded-full border border-black/10 bg-white px-4 text-[13px] text-black outline-none placeholder:text-black/35"
           />
+          {customPreview ? (
+            <div className="mt-2 px-2 text-[11px] text-black/45">
+              → {customPreview}
+            </div>
+          ) : null}
         </div>
       ) : mode === "Range" ? (
         <div className="space-y-3">
