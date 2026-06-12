@@ -7,7 +7,7 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint .",
-    "test": "TMP_DIR=.tmp-tests; rm -rf \"$TMP_DIR\"; trap 'rm -rf \"$TMP_DIR\"' EXIT; tsc -p tsconfig.test.json && node --test \"$TMP_DIR\"/tests/store-migrations.test.js \"$TMP_DIR\"/tests/store-recurring.test.js \"$TMP_DIR\"/tests/store-task-ops.test.js \"$TMP_DIR\"/tests/nlp-parser.test.js"
+    "test": "TMP_DIR=.tmp-tests; rm -rf \"$TMP_DIR\"; trap 'rm -rf \"$TMP_DIR\"' EXIT; tsc -p tsconfig.test.json && node --test \"$TMP_DIR\"/tests/store-migrations.test.js \"$TMP_DIR\"/tests/store-recurring.test.js \"$TMP_DIR\"/tests/store-task-ops.test.js \"$TMP_DIR\"/tests/nlp-parser.test.js \"$TMP_DIR\"/tests/quick-add-enter.test.js \"$TMP_DIR\"/tests/task-edit-enter.test.js \"$TMP_DIR\"/tests/quick-add-behaviors.test.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
@@ -77,6 +77,8 @@
     "eslint-config-next": "^16.2.1",
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-react-hooks": "^7.0.1",
+    "global-jsdom": "^29.0.0",
+    "jsdom": "^29.1.1",
     "nodemon": "^3.1.14",
     "postcss": "^8.5",
     "tailwindcss": "^4.2.0",

@@ -4,8 +4,8 @@ import { useCallback, useMemo, useRef, type DragEvent } from "react"
 import type { Collection } from "@/lib/types"
 import { formatLocalDateKey, useLemonadeStore, type Todo } from "@/lib/store"
 import { CollectionDayBlock } from "@/components/collections/CollectionDayBlock"
-import { TaskRow } from "@/components/daily/TaskRow"
-import { SectionLines, buildCalendarAddHandler } from "@/components/daily/SectionLines"
+import { TwoColumnTasks } from "@/components/collections/TwoColumnTasks"
+import { buildCalendarAddHandler } from "@/components/daily/SectionLines"
 
 type DateCollectionProps = {
   collection: Collection
@@ -116,20 +116,8 @@ function MultiDayDateCollection({ collection, todos }: DateCollectionProps) {
     >
       <h2 className="mb-3 mt-8 text-xs tracking-widest uppercase text-gray-400">{collection.name}</h2>
 
-      {todos.length > 0 ? (
-        <div className="space-y-2">
-          {todos.map((todo) => (
-            <TaskRow key={todo.id} todo={todo} appearance="collection" draggable={true} />
-          ))}
-        </div>
-      ) : null}
-
-      <SectionLines
-        count={5}
-        onAdd={addHandler}
-        ariaLabel={`Add a task to ${collection.name}`}
-        className="mt-2"
-      />
+      {/* Two side-by-side columns — same layout as the day block (Tomorrow). */}
+      <TwoColumnTasks todos={todos} onAdd={addHandler} ariaLabel={`Add a task to ${collection.name}`} />
     </section>
   )
 }

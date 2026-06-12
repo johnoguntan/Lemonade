@@ -97,7 +97,8 @@ export function HabitsTracker() {
               placeholder="Take vitamins"
               className="mt-2 h-9 w-full rounded-full border border-black/10 bg-white px-3 text-[13px] text-black outline-none placeholder:text-[#9a9a9a]"
             />
-            <div className="mt-3 flex justify-end gap-2">
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <span className="mr-auto text-[10px] text-black/30">Enter to save</span>
               <button
                 type="button"
                 onClick={() => {
@@ -107,13 +108,6 @@ export function HabitsTracker() {
                 className="rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.12em] text-[#7a7a7a] transition hover:text-black"
               >
                 Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleAddHabit()}
-                className="rounded-full bg-black px-3 py-1 text-[11px] uppercase tracking-[0.12em] text-white transition hover:bg-[#222]"
-              >
-                Save
               </button>
             </div>
           </div>

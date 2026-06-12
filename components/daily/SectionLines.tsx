@@ -1,15 +1,16 @@
 "use client"
 
-import { useEffect, useRef, useState, type KeyboardEvent } from "react"
+import { useEffect, useRef, useState } from "react"
 import { CalendarDays, Flag, Paperclip, Plus } from "lucide-react"
 import { CalendarDropdown } from "@/components/task-creation/CalendarDropdown"
 import { PriorityDropdown } from "@/components/task-creation/PriorityDropdown"
 import { AttachmentDropdown } from "@/components/task-creation/AttachmentDropdown"
 import {
   createDefaultDraft,
+  useQuickAddGlobalKeys,
   type TaskDraftState,
 } from "@/components/task-creation/QuickInputBar"
-import { formatLocalDateKey, useLemonadeStore, type Todo } from "@/lib/store"
+import { formatLocalDateKey, type Todo } from "@/lib/store"
 
 type DailySectionKey = "urgent" | "schedule" | "allday"
 export type DailySectionInputKind = DailySectionKey | "overdue" | "collection"
@@ -41,7 +42,7 @@ type SectionInputRowProps = {
 //   Row 1: [input] [CalendarDays] [+]
 //   Row 2 (only after pressing + with empty input, or when a panel is open):
 //          [CalendarDays] [Flag] [Paperclip]
-// Hovering any icon opens its dropdown (200ms grace when moving to the panel).
+// Hovering any icon opens its dropdown; it stays open until a click elsewhere.
 
 function SectionInputRow({ onAdd, onCancel, placeholder = "Add a task…" }: SectionInputRowProps) {
   const [text, setText] = useState("")
@@ -50,7 +51,6 @@ function SectionInputRow({ onAdd, onCancel, placeholder = "Add a task…" }: Sec
   const [iconsVisible, setIconsVisible] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
-  const hoverCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lockedPanelRef = useRef<string | null>(null)
 
   useEffect(() => { inputRef.current?.focus() }, [])
@@ -95,10 +95,22 @@ function SectionInputRow({ onAdd, onCancel, placeholder = "Add a task…" }: Sec
     onCancel()
   }
 
-  const handleKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") { e.preventDefault(); submit() }
-    else if (e.key === "Escape") { lockedPanelRef.current = null; setOpenPanel(null); setIconsVisible(false); setText(""); onCancel() }
-  }
+  // Window-level fallback: Enter submits even when focus has escaped the row
+  // (clicking a non-focusable spot in a dropdown moves focus to <body>, and the
+  // ColorPicker is portaled outside the container). Active whenever this row is
+  // mounted — the row only exists while the user is mid-add.
+  useQuickAddGlobalKeys({
+    containerRef,
+    isActive: () => true,
+    onSubmit: submit,
+    onEscape: () => {
+      lockedPanelRef.current = null
+      setOpenPanel(null)
+      setIconsVisible(false)
+      setText("")
+      onCancel()
+    },
+  })
 
   // Container-level keydown — catches Enter/Escape when focus is inside a dropdown
   // (CalendarDropdown, PriorityDropdown, etc.) rather than the main input.
@@ -121,20 +133,13 @@ function SectionInputRow({ onAdd, onCancel, placeholder = "Add a task…" }: Sec
     submit()
   }
 
-  // Hover helpers — same 200ms grace as QuickInputBar.
-  const clearHoverClose = () => {
-    if (hoverCloseRef.current) { clearTimeout(hoverCloseRef.current); hoverCloseRef.current = null }
-  }
-  const scheduleHoverClose = () => {
-    if (lockedPanelRef.current !== null) return  // clicked panel stays open
-    clearHoverClose()
-    hoverCloseRef.current = setTimeout(() => setOpenPanel(null), 200)
-  }
+  // Hover opens a dropdown and it STAYS open after the cursor leaves —
+  // it only closes on a click somewhere else (outside mousedown above)
+  // or by clicking the same icon again. Same behavior as QuickInputBar.
   const handleIconHoverEnter = (panel: "calendar" | "priority" | "attachment") => {
-    clearHoverClose(); setOpenPanel(panel)
+    setOpenPanel(panel)
   }
   const handleIconClick = (panel: "calendar" | "priority" | "attachment") => {
-    clearHoverClose()
     setOpenPanel((p) => {
       if (p === panel) { lockedPanelRef.current = null; return null }
       lockedPanelRef.current = panel
@@ -165,7 +170,6 @@ function SectionInputRow({ onAdd, onCancel, placeholder = "Add a task…" }: Sec
               type="button"
               onClick={() => handleIconClick("calendar")}
               onMouseEnter={() => handleIconHoverEnter("calendar")}
-              onMouseLeave={scheduleHoverClose}
               className={iconCls}
               aria-label="Schedule"
             >
@@ -174,8 +178,6 @@ function SectionInputRow({ onAdd, onCancel, placeholder = "Add a task…" }: Sec
             {openPanel === "calendar" ? (
               <div
                 className="absolute right-0 top-full z-[70] mt-2"
-                onMouseEnter={clearHoverClose}
-                onMouseLeave={scheduleHoverClose}
               >
                 <CalendarDropdown value={draft} onChange={updateDraft} />
               </div>
@@ -183,15 +185,15 @@ function SectionInputRow({ onAdd, onCancel, placeholder = "Add a task…" }: Sec
           </div>
         ) : null}
 
-        {/* Plus: submit if text, otherwise toggle icon row */}
+        {/* Plus: toggles the 3-icon options row only — adding a task is Enter's job */}
         <button
           type="button"
           onClick={() => {
-            if (text.trim()) { submit() }
-            else { setIconsVisible((v) => !v); setOpenPanel(null) }
+            setIconsVisible((v) => !v)
+            setOpenPanel(null)
           }}
           className={iconCls}
-          aria-label={text.trim() ? "Add task" : "Show task options"}
+          aria-label="Show task options"
         >
           <Plus size={17} />
         </button>
@@ -206,7 +208,6 @@ function SectionInputRow({ onAdd, onCancel, placeholder = "Add a task…" }: Sec
               type="button"
               onClick={() => handleIconClick("calendar")}
               onMouseEnter={() => handleIconHoverEnter("calendar")}
-              onMouseLeave={scheduleHoverClose}
               className={iconCls}
               aria-label="Schedule"
             >
@@ -215,8 +216,6 @@ function SectionInputRow({ onAdd, onCancel, placeholder = "Add a task…" }: Sec
             {openPanel === "calendar" ? (
               <div
                 className="absolute right-0 top-full z-[70] mt-2"
-                onMouseEnter={clearHoverClose}
-                onMouseLeave={scheduleHoverClose}
               >
                 <CalendarDropdown value={draft} onChange={updateDraft} />
               </div>
@@ -228,7 +227,6 @@ function SectionInputRow({ onAdd, onCancel, placeholder = "Add a task…" }: Sec
               type="button"
               onClick={() => handleIconClick("priority")}
               onMouseEnter={() => handleIconHoverEnter("priority")}
-              onMouseLeave={scheduleHoverClose}
               className={iconCls}
               aria-label="Priority"
             >
@@ -237,8 +235,6 @@ function SectionInputRow({ onAdd, onCancel, placeholder = "Add a task…" }: Sec
             {openPanel === "priority" ? (
               <div
                 className="absolute right-0 top-full z-[70] mt-2"
-                onMouseEnter={clearHoverClose}
-                onMouseLeave={scheduleHoverClose}
               >
                 <PriorityDropdown value={draft} onChange={updateDraft} />
               </div>
@@ -250,7 +246,6 @@ function SectionInputRow({ onAdd, onCancel, placeholder = "Add a task…" }: Sec
               type="button"
               onClick={() => handleIconClick("attachment")}
               onMouseEnter={() => handleIconHoverEnter("attachment")}
-              onMouseLeave={scheduleHoverClose}
               className={iconCls}
               aria-label="Attachment"
             >
@@ -259,8 +254,6 @@ function SectionInputRow({ onAdd, onCancel, placeholder = "Add a task…" }: Sec
             {openPanel === "attachment" ? (
               <div
                 className="absolute right-0 top-full z-[70] mt-2"
-                onMouseEnter={clearHoverClose}
-                onMouseLeave={scheduleHoverClose}
               >
                 <AttachmentDropdown value={draft} onChange={updateDraft} />
               </div>

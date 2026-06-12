@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react"
+import { memo, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react"
 
 // ─── Saw-toothed circle checkbox ─────────────────────────────────────────────
 // Paths are pre-computed polygons: 18 teeth (full size) and 12 teeth (small).
@@ -47,11 +47,16 @@ import {
   Copy,
   CornerDownRight,
   CornerLeftUp,
+  Download,
+  Eye,
   GitMerge,
   GripHorizontal,
+  Link2,
+  MapPin,
   Palette,
   Paperclip,
   Pencil,
+  Phone,
   Scissors,
   Share2,
   Trash2,
@@ -62,6 +67,7 @@ import { formatLocalDateKey, normalizeTodoPriority, useLemonadeStore, type Todo 
 import { downloadTaskIcs } from "@/lib/ics"
 import { parseFlexibleDate } from "@/lib/date-parse"
 import { MiniCalendar } from "@/components/task-creation/CalendarDropdown"
+import { useQuickAddGlobalKeys } from "@/components/task-creation/QuickInputBar"
 import { TimeWheelPicker } from "@/components/task-creation/TimeWheelPicker"
 import { ColorPicker } from "@/components/task-creation/ColorPicker"
 import {
@@ -110,6 +116,18 @@ const priorityMarkerColors = {
   important: "#8b5cf6",
   normal: "#3f7df6",
 } as const
+
+// Make a typed URL openable: bare "example.com" needs an explicit scheme.
+const normalizeUrl = (raw: string) => (/^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`)
+
+// Compact label for a link chip — the hostname, not the whole scrolling URL.
+const urlChipLabel = (raw: string) => {
+  try {
+    return new URL(normalizeUrl(raw)).hostname.replace(/^www\./, "")
+  } catch {
+    return raw.length > 28 ? `${raw.slice(0, 28)}…` : raw
+  }
+}
 
 const formatOverdueLabel = (dateKey?: string | null) => {
   if (!dateKey) return null
@@ -190,6 +208,31 @@ function TaskRowComponent({
   const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null)
   const [editingSubtaskDraft, setEditingSubtaskDraft] = useState("")
 
+  // Time wheel dismissal: clicking ANYWHERE other than the wheel itself or its
+  // clock toggle closes it — inside the edit form, elsewhere on the page, anywhere.
+  useEffect(() => {
+    if (!showTimePicker) return
+    const handleOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.closest?.('[data-time-picker]') || target?.closest?.('[data-time-picker-toggle]')) return
+      setShowTimePicker(false)
+    }
+    window.addEventListener("mousedown", handleOutside)
+    return () => window.removeEventListener("mousedown", handleOutside)
+  }, [showTimePicker])
+
+  // Snooze options menu (opened from the hover toolbar's clock icon).
+  const [snoozeMenuOpen, setSnoozeMenuOpen] = useState(false)
+  const snoozeMenuRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!snoozeMenuOpen) return
+    const handleOutside = (event: MouseEvent) => {
+      if (!snoozeMenuRef.current?.contains(event.target as Node)) setSnoozeMenuOpen(false)
+    }
+    window.addEventListener("mousedown", handleOutside)
+    return () => window.removeEventListener("mousedown", handleOutside)
+  }, [snoozeMenuOpen])
+
   // Power-action dialog state.
   const [splitOpen, setSplitOpen] = useState(false)
   const [splitText, setSplitText] = useState("")
@@ -205,8 +248,13 @@ function TaskRowComponent({
     return `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, "0")}-${`${now.getDate()}`.padStart(2, "0")}`
   }, [])
 
-  const subtitle = [typedTodo.location, typedTodo.notes].filter(Boolean).join(" · ")
+  // Location is rendered as a functional chip below — notes only here, so a
+  // long address (or a legacy URL stuck in notes) doesn't stretch the row.
+  const subtitle = typedTodo.notes ?? ""
   const overdueLabel = showOverdueActions ? formatOverdueLabel(typedTodo.date) : null
+
+  // Attachment preview dialog (view + download).
+  const [attachmentPreviewOpen, setAttachmentPreviewOpen] = useState(false)
 
   const formatDueShort = (key?: string | null) => {
     if (!key) return ""
@@ -215,27 +263,76 @@ function TaskRowComponent({
     return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" })
   }
   const attachmentList = typedTodo.attachments ?? []
+  const primaryAttachment = attachmentList[0] ?? null
+  const attachmentIsImage = Boolean(primaryAttachment?.type.startsWith("image/"))
+  const attachmentIsPdf = primaryAttachment?.type === "application/pdf"
   const dueLabel = typedTodo.dueDate ? `Due ${formatDueShort(typedTodo.dueDate)}` : null
-  const metaRow =
-    typedTodo.photoDataUrl || attachmentList.length > 0 || dueLabel || typedTodo.isRecurring ? (
-      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-        {typedTodo.photoDataUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={typedTodo.photoDataUrl} alt="" className="h-8 w-8 rounded-md border border-black/10 object-cover" />
-        ) : null}
-        {dueLabel ? (
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">{dueLabel}</span>
-        ) : null}
-        {typedTodo.isRecurring ? (
-          <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-medium text-sky-700">Repeats</span>
-        ) : null}
-        {attachmentList.length > 0 && !typedTodo.photoDataUrl ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2 py-0.5 text-[10px] text-black/60">
-            <Paperclip size={10} /> {attachmentList[0].name}
-          </span>
-        ) : null}
-      </div>
-    ) : null
+  const hasMeta = Boolean(
+    typedTodo.photoDataUrl || primaryAttachment || dueLabel || typedTodo.isRecurring ||
+    typedTodo.url || typedTodo.phone || typedTodo.location
+  )
+  const chipClass =
+    "inline-flex max-w-[180px] items-center gap-1 rounded-full bg-black/5 px-2 py-0.5 text-[10px] text-black/60 transition hover:bg-black/10 hover:text-black"
+  const metaRow = hasMeta ? (
+    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+      {typedTodo.photoDataUrl && !primaryAttachment ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={typedTodo.photoDataUrl} alt="" className="h-8 w-8 rounded-md border border-black/10 object-cover" />
+      ) : null}
+      {dueLabel ? (
+        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">{dueLabel}</span>
+      ) : null}
+      {typedTodo.isRecurring ? (
+        <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-medium text-sky-700">Repeats</span>
+      ) : null}
+
+      {/* Functional chips: compact, clickable — no raw URLs stretching the row */}
+      {typedTodo.url ? (
+        <a
+          href={normalizeUrl(typedTodo.url)}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={typedTodo.url}
+          className={chipClass}
+        >
+          <Link2 size={10} className="shrink-0" /> <span className="truncate">{urlChipLabel(typedTodo.url)}</span>
+        </a>
+      ) : null}
+      {typedTodo.phone ? (
+        <a href={`tel:${typedTodo.phone.replace(/[^\d+]/g, "")}`} title={`Call ${typedTodo.phone}`} className={chipClass}>
+          <Phone size={10} className="shrink-0" /> <span className="truncate">{typedTodo.phone}</span>
+        </a>
+      ) : null}
+      {typedTodo.location ? (
+        <a
+          href={`https://maps.google.com/?q=${encodeURIComponent(typedTodo.location)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={typedTodo.location}
+          className={chipClass}
+        >
+          <MapPin size={10} className="shrink-0" /> <span className="truncate">{typedTodo.location}</span>
+        </a>
+      ) : null}
+
+      {/* Attachment: name + a little preview element (view + download) */}
+      {primaryAttachment ? (
+        <span className="inline-flex max-w-[220px] items-center gap-1 rounded-full bg-black/5 px-2 py-0.5 text-[10px] text-black/60">
+          <Paperclip size={10} className="shrink-0" />
+          <span className="truncate">{primaryAttachment.name}</span>
+          <button
+            type="button"
+            onClick={() => setAttachmentPreviewOpen(true)}
+            className="ml-0.5 shrink-0 rounded-full p-0.5 text-black/45 transition hover:bg-black/10 hover:text-black"
+            aria-label="View attachment"
+            title="View attachment"
+          >
+            <Eye size={11} />
+          </button>
+        </span>
+      ) : null}
+    </div>
+  ) : null
   const scheduleColor = schedulePalette[(typedTodo.createdAt ?? 0) % schedulePalette.length]
   const showScheduleStyle = sectionTitle === "SCHEDULE"
   const priorityMarkerColor = priorityMarkerColors[normalizeTodoPriority(typedTodo.priority)]
@@ -273,6 +370,13 @@ function TaskRowComponent({
     setIsEditing(false)
   }
 
+  // Latest saveEdit, for deferred calls (after a field's onBlur commits its
+  // value the closure from THIS render is stale — the ref isn't).
+  const saveEditRef = useRef(saveEdit)
+  useEffect(() => {
+    saveEditRef.current = saveEdit
+  })
+
   const cancelEdit = () => {
     setDraftText(typedTodo.text)
     setDraftDate(() => {
@@ -295,6 +399,45 @@ function TaskRowComponent({
     setShowColorPicker(false)
     setIsEditing(false)
   }
+
+  // ─── Save-on-Enter for the edit form ───────────────────────────────────────
+  // There is no Save button: Enter saves from anywhere in the form, Escape
+  // cancels. Shift+Enter still inserts a newline in the notes textarea, and the
+  // subtask inputs keep their own Enter behavior (they preventDefault).
+  const editFormRef = useRef<HTMLDivElement | null>(null)
+
+  const handleEditKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      cancelEdit()
+      return
+    }
+    if (event.key !== "Enter" || event.shiftKey) return
+    // A field already handled this Enter (e.g. the add-subtask input).
+    if (event.defaultPrevented) return
+
+    const target = event.target as HTMLElement
+    if (target.tagName === "INPUT") {
+      // Commit the focused field first (date/time parse in onBlur), then save
+      // on the next tick so the committed value is in the draft.
+      event.preventDefault()
+      ;(target as HTMLInputElement).blur()
+      window.setTimeout(() => saveEditRef.current(), 0)
+      return
+    }
+    // Notes textarea (plain Enter) or any other surface → save.
+    event.preventDefault()
+    saveEdit()
+  }
+
+  // Window-level fallback: Enter still saves when focus has escaped the form
+  // (clicking inside MiniCalendar/TimeWheelPicker moves focus to <body>, and
+  // the ColorPicker is portaled onto <body>).
+  useQuickAddGlobalKeys({
+    containerRef: editFormRef,
+    isActive: () => isEditing,
+    onSubmit: () => saveEditRef.current(),
+    onEscape: cancelEdit,
+  })
 
   const shareTask = async () => {
     const payload = [typedTodo.text, typedTodo.time, subtitle].filter(Boolean).join("\n")
@@ -459,20 +602,44 @@ function TaskRowComponent({
       <span className="ml-1 text-[10px] font-medium text-black/35">{subtasks.length}</span>
     ) : null
 
+  const snoozeChoices = [
+    ["Later today", "later-today"],
+    ["Tomorrow", "tomorrow"],
+    ["This weekend", "this-weekend"],
+    ["Next week", "next-week"],
+  ] as const
+
   const utilityActions = (
-    <div className="absolute right-0 top-1 z-20 flex items-center gap-1 rounded-full bg-white/95 px-1.5 py-0.5 opacity-0 shadow-[0_2px_8px_rgba(0,0,0,0.12)] backdrop-blur-sm transition group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+    <div className={["absolute right-0 top-1 z-20 flex items-center gap-1 rounded-full bg-white/95 px-1.5 py-0.5 shadow-[0_2px_8px_rgba(0,0,0,0.12)] backdrop-blur-sm transition group-hover:opacity-100 [@media(hover:none)]:opacity-100", snoozeMenuOpen ? "opacity-100" : "opacity-0"].join(" ")}>
       <button type="button" onClick={() => setIsEditing(true)} className="rounded-full p-1 text-black/35 hover:bg-black/5 hover:text-black" aria-label="Edit task">
         <Pencil size={13} />
       </button>
       <button type="button" onClick={() => duplicateCalendarTodo(typedTodo.id)} className="rounded-full p-1 text-black/35 hover:bg-black/5 hover:text-black" aria-label="Duplicate task">
         <Copy size={13} />
       </button>
-      <button type="button" onClick={() => snoozeCalendarTodo(typedTodo.id, "tomorrow")} className="rounded-full p-1 text-black/35 hover:bg-black/5 hover:text-black" aria-label="Snooze task">
-        <Clock3 size={13} />
-      </button>
-      <button type="button" onClick={() => exportIcs()} className="rounded-full p-1 text-black/35 hover:bg-black/5 hover:text-black" aria-label="Add to calendar">
-        <CalendarPlus size={13} />
-      </button>
+      {/* Snooze: opens a menu of choices instead of instantly snoozing */}
+      <div ref={snoozeMenuRef} className="relative">
+        <button type="button" onClick={() => setSnoozeMenuOpen((v) => !v)} className="rounded-full p-1 text-black/35 hover:bg-black/5 hover:text-black" aria-label="Snooze task">
+          <Clock3 size={13} />
+        </button>
+        {snoozeMenuOpen ? (
+          <div className="absolute right-0 top-full z-30 mt-1 w-[150px] rounded-xl border border-black/10 bg-white py-1 shadow-xl">
+            {snoozeChoices.map(([label, key]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => {
+                  snoozeCalendarTodo(typedTodo.id, key)
+                  setSnoozeMenuOpen(false)
+                }}
+                className="block w-full px-3 py-1.5 text-left text-[12px] text-black/75 hover:bg-black/5"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
       <button type="button" onClick={() => void shareTask()} className="rounded-full p-1 text-black/35 hover:bg-black/5 hover:text-black" aria-label="Share task">
         <Share2 size={13} />
       </button>
@@ -484,26 +651,28 @@ function TaskRowComponent({
 
   if (isEditing) {
     return (
-      <div className="group rounded-[16px] border border-black/10 bg-white px-3 py-2.5">
+      <div ref={editFormRef} onKeyDown={handleEditKeyDown} className="group rounded-[16px] border border-black/10 bg-white px-3 py-2.5">
         <div className="space-y-2">
-          {/* Title */}
+          {/* Title — Enter/Escape are handled by the form container */}
           <input
             autoFocus
             value={draftText}
             onChange={(e) => setDraftText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveEdit() } else if (e.key === "Escape") cancelEdit() }}
             className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-[13px] text-black outline-none"
           />
 
-          {/* Date + Time pickers */}
-          <div className="grid grid-cols-2 gap-2">
-            {/* Date: type freely or click calendar icon */}
-            <div className="relative">
+          {/* Date + Time pickers — fields wrap instead of squeezing, so the
+              full date/time is always visible on desktop, tablet and mobile. */}
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-2">
+            {/* Date: type freely; focusing the field opens the calendar */}
+            <div className="relative min-w-0">
               <div className="flex items-center rounded-xl border border-black/10 px-3 py-2 focus-within:border-black/25">
                 <input
                   value={draftDateText}
                   onChange={(e) => setDraftDateText(e.target.value)}
+                  onFocus={() => { setShowDatePicker(true); setShowTimePicker(false) }}
                   onBlur={() => {
+                    setShowDatePicker(false)
                     const parsed = parseFlexibleDate(draftDateText)
                     if (parsed) {
                       setDraftDate(parsed)
@@ -515,17 +684,12 @@ function TaskRowComponent({
                   placeholder="Date"
                   className="min-w-0 flex-1 bg-transparent text-[12px] text-black outline-none placeholder:text-black/30"
                 />
-                <button
-                  type="button"
-                  onClick={() => { setShowDatePicker((v) => !v); setShowTimePicker(false) }}
-                  className="ml-1 shrink-0 text-black/35 transition hover:text-black/70"
-                  aria-label="Open calendar"
-                >
-                  <CalendarPlus size={13} />
-                </button>
               </div>
               {showDatePicker ? (
-                <div className="absolute left-0 top-full z-50 mt-1">
+                // preventDefault on mousedown keeps the input focused while
+                // clicking inside the calendar (otherwise blur closes it
+                // before the click lands).
+                <div className="absolute left-0 top-full z-50 mt-1" onMouseDown={(e) => e.preventDefault()}>
                   <MiniCalendar
                     value={draftDate}
                     onSelect={(d) => {
@@ -540,7 +704,7 @@ function TaskRowComponent({
             </div>
 
             {/* Time: type freely or click clock icon */}
-            <div className="relative">
+            <div className="relative min-w-0">
               <div className="flex items-center rounded-xl border border-black/10 px-3 py-2 focus-within:border-black/25">
                 <input
                   value={draftTimeText}
@@ -554,6 +718,7 @@ function TaskRowComponent({
                 />
                 <button
                   type="button"
+                  data-time-picker-toggle="true"
                   onClick={() => { setShowTimePicker((v) => !v); setShowDatePicker(false) }}
                   className="ml-1 shrink-0 text-black/35 transition hover:text-black/70"
                   aria-label="Open time picker"
@@ -562,7 +727,10 @@ function TaskRowComponent({
                 </button>
               </div>
               {showTimePicker ? (
-                <div className="absolute left-0 top-full z-50 mt-1 w-[270px] rounded-2xl border border-black/10 bg-white p-4 shadow-xl">
+                <div
+                  data-time-picker="true"
+                  className="absolute left-0 top-full z-50 mt-1 w-[270px] rounded-2xl border border-black/10 bg-white p-4 shadow-xl"
+                >
                   <TimeWheelPicker
                     value={draftTime}
                     onChange={(t) => { setDraftTime(t); setDraftTimeText(t); setShowTimePicker(false) }}
@@ -602,10 +770,16 @@ function TaskRowComponent({
                     onChange={(e) => setEditingSubtaskDraft(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
+                        // preventDefault so the form container doesn't ALSO
+                        // save-and-close the whole edit form.
+                        e.preventDefault()
                         const t = editingSubtaskDraft.trim()
                         if (t) editSubtask(typedTodo.id, subtask.id, t)
                         setEditingSubtaskId(null)
-                      } else if (e.key === "Escape") { setEditingSubtaskId(null) }
+                      } else if (e.key === "Escape") {
+                        e.stopPropagation()
+                        setEditingSubtaskId(null)
+                      }
                     }}
                     onBlur={() => {
                       const t = editingSubtaskDraft.trim()
@@ -638,9 +812,15 @@ function TaskRowComponent({
               onChange={(e) => setNewSubtaskText(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
-                  e.preventDefault()
                   const trimmed = newSubtaskText.trim()
-                  if (trimmed) { addSubtask(typedTodo.id, trimmed); setNewSubtaskText("") }
+                  if (trimmed) {
+                    // Adds the subtask; preventDefault keeps the form container
+                    // from also saving-and-closing the edit form.
+                    e.preventDefault()
+                    addSubtask(typedTodo.id, trimmed)
+                    setNewSubtaskText("")
+                  }
+                  // Empty → fall through to the container, which saves the form.
                 }
               }}
               placeholder="+ Add subtask…"
@@ -681,14 +861,11 @@ function TaskRowComponent({
           </div>
 
           <div className="flex items-center gap-2">
-            <button type="button" onClick={saveEdit} className="inline-flex items-center gap-1 rounded-full bg-black px-3 py-1.5 text-[11px] font-medium text-white">
-              <Check size={12} />
-              Save
-            </button>
             <button type="button" onClick={cancelEdit} className="inline-flex items-center gap-1 rounded-full border border-black/10 px-3 py-1.5 text-[11px] font-medium text-black/65">
               <X size={12} />
               Cancel
             </button>
+            <span className="text-[10px] text-black/30">Enter to save</span>
           </div>
         </div>
       </div>
@@ -916,6 +1093,50 @@ function TaskRowComponent({
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+
+      {/* Attachment preview + download */}
+      <Dialog open={attachmentPreviewOpen} onOpenChange={setAttachmentPreviewOpen}>
+        <DialogContent className="max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle className="truncate pr-6">{primaryAttachment?.name ?? "Attachment"}</DialogTitle>
+            <DialogDescription className="sr-only">Attachment preview</DialogDescription>
+          </DialogHeader>
+          {primaryAttachment?.dataUrl ? (
+            attachmentIsImage ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={primaryAttachment.dataUrl}
+                alt={primaryAttachment.name}
+                className="max-h-[60vh] w-full rounded-xl border border-black/10 object-contain"
+              />
+            ) : attachmentIsPdf ? (
+              <iframe
+                src={primaryAttachment.dataUrl}
+                title={primaryAttachment.name}
+                className="h-[60vh] w-full rounded-xl border border-black/10"
+              />
+            ) : (
+              <p className="rounded-xl bg-black/[0.03] px-4 py-6 text-center text-[13px] text-black/55">
+                No inline preview for this file type — use Download to open it.
+              </p>
+            )
+          ) : (
+            <p className="rounded-xl bg-black/[0.03] px-4 py-6 text-center text-[13px] text-black/55">
+              This attachment isn&rsquo;t stored on this device.
+            </p>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setAttachmentPreviewOpen(false)}>Close</Button>
+            {primaryAttachment?.dataUrl ? (
+              <Button type="button" asChild>
+                <a href={primaryAttachment.dataUrl} download={primaryAttachment.name}>
+                  <Download className="size-4" /> Download
+                </a>
+              </Button>
+            ) : null}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={splitOpen} onOpenChange={setSplitOpen}>
         <DialogContent className="max-w-[460px]">

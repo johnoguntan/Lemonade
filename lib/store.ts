@@ -90,6 +90,7 @@ export interface Todo {
   photoDataUrl?: string
   url?: string
   location?: string
+  phone?: string
   isHeading?: boolean
   subtasks: SubTask[]
   isRecurring?: boolean

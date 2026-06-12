@@ -30,6 +30,7 @@ export type CloudTaskRecord = {
   completedAt: string | null
   notes: string | null
   location: string | null
+  phone: string | null
   duration: number | null
   url: string | null
   photoUrl: string | null
@@ -191,6 +192,7 @@ export function buildCloudSnapshotFromState(state: LocalUserSlice): Omit<CloudSn
     completedAt: todo.completed ? coalesceDate(todo.completedAt ?? todo.createdAt) : null,
     notes: todo.notes ?? null,
     location: todo.location ?? null,
+    phone: todo.phone ?? null,
     duration: typeof todo.durationMinutes === "number" ? todo.durationMinutes : null,
     url: todo.url ?? null,
     photoUrl: todo.photoDataUrl ?? null,
@@ -342,6 +344,7 @@ export function applyCloudSnapshotToStore(snapshot: CloudSnapshot) {
       photoDataUrl: task.photoUrl ?? undefined,
       url: task.url ?? undefined,
       location: task.location ?? undefined,
+      phone: task.phone ?? undefined,
       isHeading: task.isHeading,
       subtasks: Array.isArray(task.subtasks) ? task.subtasks : [],
       isRecurring: Boolean(task.recurring),

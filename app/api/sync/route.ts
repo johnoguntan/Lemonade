@@ -275,6 +275,7 @@ async function fetchSnapshot(
       completedAt: task.completed_at,
       notes: task.notes,
       location: task.location,
+      phone: task.phone,
       duration: task.duration,
       url: task.url,
       photoUrl: task.photo_url,

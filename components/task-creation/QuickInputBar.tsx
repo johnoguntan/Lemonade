@@ -73,6 +73,71 @@ const PARSE_SIGNAL_RE =
 
 const looksParseable = (text: string) => PARSE_SIGNAL_RE.test(text)
 
+// ─── Global Enter/Escape fallback ────────────────────────────────────────────
+// The container's own onKeyDown only fires while focus is INSIDE the bar. But
+// clicking a non-focusable spot in a dropdown moves focus to <body> (and in
+// Safari/Firefox even buttons don't take focus on click), and the ColorPicker
+// is portaled onto <body> — in all those cases Enter went nowhere. This hook
+// listens on window so Enter always adds the task while a quick-add surface is
+// active, without stealing Enter from unrelated inputs elsewhere on the page.
+export function useQuickAddGlobalKeys({
+  containerRef,
+  isActive,
+  onSubmit,
+  onEscape,
+}: {
+  containerRef: React.RefObject<HTMLDivElement | null>
+  isActive: () => boolean
+  onSubmit: () => void
+  onEscape: () => void
+}) {
+  // Refs so the single window listener always sees the latest closures.
+  const stateRef = useRef({ isActive, onSubmit, onEscape })
+  useEffect(() => {
+    stateRef.current = { isActive, onSubmit, onEscape }
+  })
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const { isActive, onSubmit, onEscape } = stateRef.current
+      if (!isActive()) return
+      // Another quick-add surface (or the container handler) already took it.
+      if (event.defaultPrevented) return
+      const target = event.target as HTMLElement | null
+      // Focus inside the bar bubbles through the container's own onKeyDown.
+      if (target && containerRef.current?.contains(target)) return
+
+      const inPortal = Boolean(target?.closest?.(".color-picker-panel"))
+      // Only act when focus is "nowhere" (body/html) or inside a portaled
+      // quick-add surface — never hijack typing in unrelated fields.
+      const focusIsFree =
+        !target || target === document.body || target === document.documentElement || inPortal
+      if (!focusIsFree) return
+
+      if (event.key === "Escape") {
+        onEscape()
+        return
+      }
+      if (event.key !== "Enter" || event.shiftKey) return
+      if (target?.tagName === "TEXTAREA") return
+      // A text field inside the portal: blur first so its onBlur commits the
+      // value into the draft, then submit on the next tick.
+      if (inPortal && target && (target.tagName === "INPUT" || target.tagName === "SELECT")) {
+        event.preventDefault()
+        ;(target as HTMLInputElement).blur()
+        // Read through the ref at fire time: the blur above re-renders, and we
+        // want the submit closure that sees the committed value.
+        window.setTimeout(() => stateRef.current.onSubmit(), 0)
+        return
+      }
+      event.preventDefault()
+      onSubmit()
+    }
+    window.addEventListener("keydown", handler)
+    return () => window.removeEventListener("keydown", handler)
+  }, [containerRef])
+}
+
 // Map the Alert dropdown labels to reminder offsets (minutes before the event).
 const ALERT_OFFSET_MINUTES: Record<string, number> = {
   "At time of event": 0,
@@ -94,8 +159,6 @@ export function QuickInputBar() {
   const [isParsing, setIsParsing] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
-  // hover-close timer — keeps the dropdown open while cursor moves from icon → panel
-  const hoverCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // when the user clicks an icon the panel is "locked" open; hover-away won't close it
   const lockedPanelRef = useRef<string | null>(null)
   // Always points at the latest draft so submit works even when triggered from
@@ -137,22 +200,13 @@ export function QuickInputBar() {
   // The 3-icon row is visible when explicitly expanded OR when a panel is open.
   const showIconRow = iconsVisible || openPanel !== null
 
-  // Hover helpers — opening a panel on mouseenter with a debounced close so the
-  // cursor can travel from the icon button to the dropdown without it snapping shut.
-  const clearHoverClose = () => {
-    if (hoverCloseRef.current) { clearTimeout(hoverCloseRef.current); hoverCloseRef.current = null }
-  }
-  const scheduleHoverClose = () => {
-    if (lockedPanelRef.current !== null) return  // clicked panel stays open
-    clearHoverClose()
-    hoverCloseRef.current = setTimeout(() => setOpenPanel(null), 200)
-  }
+  // Hovering an icon opens its dropdown, and the dropdown STAYS open when the
+  // cursor leaves — it only closes on a click somewhere else (the outside
+  // mousedown handler above) or by clicking the same icon again.
   const handleIconHoverEnter = (panel: "calendar" | "priority" | "attachment") => {
-    clearHoverClose()
     setOpenPanel(panel)
   }
   const handleIconClick = (panel: "calendar" | "priority" | "attachment") => {
-    clearHoverClose()
     setOpenPanel((current) => {
       if (current === panel) { lockedPanelRef.current = null; return null }
       lockedPanelRef.current = panel
@@ -254,9 +308,12 @@ export function QuickInputBar() {
       dueDate: dueDateKey,
       attachments: attachments.length ? attachments : undefined,
       photoDataUrl: attachmentPhoto,
-      notes: [draft.notes, parsed?.notes, url, phone, address].filter(Boolean).join("\n") || undefined,
+      // url/phone/address are real fields (rendered as functional chips on the
+      // task) — they don't belong in the notes text.
+      notes: [draft.notes, parsed?.notes].filter(Boolean).join("\n") || undefined,
       location: address || undefined,
       url: url || undefined,
+      phone: phone || undefined,
       color: draft.color || undefined,
       icon: draft.icon || undefined,
       priority: effectivePriority,
@@ -280,6 +337,19 @@ export function QuickInputBar() {
     setOpenPanel(null)
     setIconsVisible(false)
   }
+
+  // Window-level fallback: Enter adds the task even when focus has escaped the
+  // container (body, or the portaled ColorPicker) while a dropdown is open.
+  useQuickAddGlobalKeys({
+    containerRef,
+    isActive: () => openPanel !== null,
+    onSubmit: () => void handleSubmit(),
+    onEscape: () => {
+      lockedPanelRef.current = null
+      setOpenPanel(null)
+      setIconsVisible(false)
+    },
+  })
 
   // Enter should add the task no matter where focus is inside the quick-add —
   // including while a dropdown (Schedule/Priority/etc.) is open.
@@ -352,20 +422,16 @@ export function QuickInputBar() {
           </div>
         ) : null}
 
-        {/* Plus: submit if text, otherwise toggle icon row */}
+        {/* Plus: toggles the 3-icon options row only — adding a task is Enter's job */}
         <button
           type="button"
           onClick={() => {
-            if (draft.title.trim()) {
-              void handleSubmit()
-            } else {
-              setIconsVisible((v) => !v)
-              setOpenPanel(null)
-            }
+            setIconsVisible((v) => !v)
+            setOpenPanel(null)
           }}
           disabled={isParsing}
           className={iconButtonClass}
-          aria-label={draft.title.trim() ? "Add task" : "Show task options"}
+          aria-label="Show task options"
         >
           {isParsing ? <Loader2 size={17} className="animate-spin" /> : <Plus size={17} />}
         </button>
@@ -379,19 +445,14 @@ export function QuickInputBar() {
             <button
               type="button"
               onClick={() => handleIconClick("calendar")}
-              onMouseEnter={() => handleIconHoverEnter("calendar")}
-              onMouseLeave={scheduleHoverClose}
-              className={iconButtonClass}
+              onMouseEnter={() => handleIconHoverEnter("calendar")}              className={iconButtonClass}
               aria-label="Schedule"
             >
               <CalendarDays size={17} />
             </button>
             {openPanel === "calendar" ? (
               <div
-                className="absolute right-0 top-full z-[70] mt-2"
-                onMouseEnter={clearHoverClose}
-                onMouseLeave={scheduleHoverClose}
-              >
+                className="absolute right-0 top-full z-[70] mt-2"              >
                 <CalendarDropdown value={draft} onChange={updateDraft} />
               </div>
             ) : null}
@@ -402,19 +463,14 @@ export function QuickInputBar() {
             <button
               type="button"
               onClick={() => handleIconClick("priority")}
-              onMouseEnter={() => handleIconHoverEnter("priority")}
-              onMouseLeave={scheduleHoverClose}
-              className={iconButtonClass}
+              onMouseEnter={() => handleIconHoverEnter("priority")}              className={iconButtonClass}
               aria-label="Priority"
             >
               <Flag size={17} />
             </button>
             {openPanel === "priority" ? (
               <div
-                className="absolute right-0 top-full z-[70] mt-2"
-                onMouseEnter={clearHoverClose}
-                onMouseLeave={scheduleHoverClose}
-              >
+                className="absolute right-0 top-full z-[70] mt-2"              >
                 <PriorityDropdown value={draft} onChange={updateDraft} />
               </div>
             ) : null}
@@ -425,19 +481,14 @@ export function QuickInputBar() {
             <button
               type="button"
               onClick={() => handleIconClick("attachment")}
-              onMouseEnter={() => handleIconHoverEnter("attachment")}
-              onMouseLeave={scheduleHoverClose}
-              className={iconButtonClass}
+              onMouseEnter={() => handleIconHoverEnter("attachment")}              className={iconButtonClass}
               aria-label="Attachment"
             >
               <Paperclip size={17} />
             </button>
             {openPanel === "attachment" ? (
               <div
-                className="absolute right-0 top-full z-[70] mt-2"
-                onMouseEnter={clearHoverClose}
-                onMouseLeave={scheduleHoverClose}
-              >
+                className="absolute right-0 top-full z-[70] mt-2"              >
                 <AttachmentDropdown value={draft} onChange={updateDraft} />
               </div>
             ) : null}

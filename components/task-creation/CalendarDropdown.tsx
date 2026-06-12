@@ -212,7 +212,7 @@ function FloatingPopover({
   className?: string
 }) {
   return (
-    <div className={`absolute left-0 top-full z-20 mt-3 ${className}`}>
+    <div data-floating-picker="true" className={`absolute left-0 top-full z-20 mt-3 ${className}`}>
       {children}
     </div>
   )
@@ -269,8 +269,20 @@ export function CalendarDropdown({ value, onChange }: CalendarDropdownProps) {
     setOpenPicker(shouldClose ? null : "scheduleTime")
   }
 
+  // Any click inside the panel that is NOT on an open sub-picker (or one of
+  // the buttons that toggle them) dismisses the sub-picker — so the time
+  // wheel (and friends) goes away as soon as another element is selected.
+  const handlePanelMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (openPicker === null && !calendarTimeOpen) return
+    const target = event.target as HTMLElement
+    if (target.closest("[data-floating-picker]") || target.closest("[data-picker-toggle]")) return
+    setOpenPicker(null)
+    setTimeAnchor(null)
+    setCalendarTimeOpen(false)
+  }
+
   return (
-    <div ref={panelRef} className="w-[380px] rounded-2xl border border-gray-100 bg-white p-5 shadow-xl">
+    <div ref={panelRef} onMouseDown={handlePanelMouseDown} className="w-[380px] rounded-2xl border border-gray-100 bg-white p-5 shadow-xl">
       <div className="space-y-4">
         <div className="relative">
           <div className="flex items-center justify-between gap-3">
@@ -287,12 +299,12 @@ export function CalendarDropdown({ value, onChange }: CalendarDropdownProps) {
                 placeholder="e.g. 2/10/2026 or 4th of July"
                 className="rounded-full bg-[#dfeafe] px-4 py-1 text-sm outline-none"
               />
-              <button type="button" onClick={() => setOpenPicker((current) => (current === "schedule" ? null : "schedule"))}>
+              <button type="button" data-picker-toggle="true" onClick={() => setOpenPicker((current) => (current === "schedule" ? null : "schedule"))}>
                 <CalendarDays size={18} className="text-gray-500" />
               </button>
 
               {openPicker === "schedule" ? (
-                <div className="absolute right-0 top-full z-30 mt-3">
+                <div data-floating-picker="true" className="absolute right-0 top-full z-30 mt-3">
                   <div className="relative">
                     <MiniCalendar
                       value={value.scheduleDate}
@@ -318,18 +330,26 @@ export function CalendarDropdown({ value, onChange }: CalendarDropdownProps) {
           <div className="mt-4 space-y-3 border-t border-gray-100 pt-4">
             <RowButton
               label="Today at"
-              selected={Boolean(value.scheduleDate && startOfDay(value.scheduleDate).getTime() === startOfDay(new Date()).getTime())}
+              // Today is also the DEFAULT: with no explicit choice (fresh draft,
+              // e.g. right after a task was added) the task lands on today.
+              selected={
+                !value.scheduleWhenever &&
+                (value.scheduleDate
+                  ? startOfDay(value.scheduleDate).getTime() === startOfDay(new Date()).getTime()
+                  : true)
+              }
               onClick={() => applyShortcut("today")}
               rightContent={
                 <div className="relative">
                   <button
                     type="button"
+                    data-picker-toggle="true"
                     onClick={() => toggleScheduleTime("today")}
                   >
                     {value.scheduleTime ?? "10:00 AM"} <ChevronDown className="inline" size={16} />
                   </button>
                   {openPicker === "scheduleTime" && timeAnchor === "today" ? (
-                    <div className="absolute right-0 top-full z-30 mt-2 w-[236px] rounded-2xl border border-gray-100 bg-white p-3 shadow-xl">
+                    <div data-floating-picker="true" className="absolute right-0 top-full z-30 mt-2 w-[236px] rounded-2xl border border-gray-100 bg-white p-3 shadow-xl">
                       <TimeWheelPicker value={value.scheduleTime} onChange={(scheduleTime) => onChange({ scheduleTime })} />
                     </div>
                   ) : null}
@@ -344,12 +364,13 @@ export function CalendarDropdown({ value, onChange }: CalendarDropdownProps) {
                 <div className="relative">
                   <button
                     type="button"
+                    data-picker-toggle="true"
                     onClick={() => toggleScheduleTime("tomorrow")}
                   >
                     {value.scheduleTime ?? "10:00 AM"} <ChevronDown className="inline" size={16} />
                   </button>
                   {openPicker === "scheduleTime" && timeAnchor === "tomorrow" ? (
-                    <div className="absolute right-0 top-full z-30 mt-2 w-[236px] rounded-2xl border border-gray-100 bg-white p-3 shadow-xl">
+                    <div data-floating-picker="true" className="absolute right-0 top-full z-30 mt-2 w-[236px] rounded-2xl border border-gray-100 bg-white p-3 shadow-xl">
                       <TimeWheelPicker value={value.scheduleTime} onChange={(scheduleTime) => onChange({ scheduleTime })} />
                     </div>
                   ) : null}
@@ -378,7 +399,7 @@ export function CalendarDropdown({ value, onChange }: CalendarDropdownProps) {
                 placeholder="e.g. 2/10/2026 or 4th of July"
                 className="rounded-full bg-[#dfeafe] px-4 py-1 text-sm outline-none"
               />
-              <button type="button" onClick={() => setOpenPicker((current) => (current === "dueDate" ? null : "dueDate"))}>
+              <button type="button" data-picker-toggle="true" onClick={() => setOpenPicker((current) => (current === "dueDate" ? null : "dueDate"))}>
                 <CalendarDays size={18} className="text-gray-500" />
               </button>
             </div>
@@ -401,6 +422,7 @@ export function CalendarDropdown({ value, onChange }: CalendarDropdownProps) {
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                data-picker-toggle="true"
                 onClick={() => setOpenPicker((current) => (current === "customDuration" ? null : "customDuration"))}
                 className="rounded-full bg-[#dfeafe] px-4 py-1 text-sm"
               >
@@ -519,7 +541,7 @@ export function CalendarDropdown({ value, onChange }: CalendarDropdownProps) {
           <RowButton
             label="Repeat"
             rightContent={
-              <button type="button" onClick={() => setOpenPicker((current) => (current === "repeat" ? null : "repeat"))}>
+              <button type="button" data-picker-toggle="true" onClick={() => setOpenPicker((current) => (current === "repeat" ? null : "repeat"))}>
                 {value.repeat ? value.repeat.frequency[0].toUpperCase() + value.repeat.frequency.slice(1) : "Never"} <ChevronDown className="inline" size={16} />
               </button>
             }
@@ -540,7 +562,7 @@ export function CalendarDropdown({ value, onChange }: CalendarDropdownProps) {
           <RowButton
             label="Alert"
             rightContent={
-              <button type="button" onClick={() => setOpenPicker((current) => (current === "alert" ? null : "alert"))}>
+              <button type="button" data-picker-toggle="true" onClick={() => setOpenPicker((current) => (current === "alert" ? null : "alert"))}>
                 {value.alert ?? "None"} <ChevronDown className="inline" size={16} />
               </button>
             }
@@ -573,7 +595,7 @@ export function CalendarDropdown({ value, onChange }: CalendarDropdownProps) {
           <RowButton
             label="Snooze"
             rightContent={
-              <button type="button" onClick={() => setOpenPicker((current) => (current === "snooze" ? null : "snooze"))}>
+              <button type="button" data-picker-toggle="true" onClick={() => setOpenPicker((current) => (current === "snooze" ? null : "snooze"))}>
                 {value.snooze ?? "Custom"} <ChevronDown className="inline" size={16} />
               </button>
             }
