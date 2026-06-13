@@ -24,6 +24,7 @@ import {
   Zap,
 } from "lucide-react"
 import { useAllsenadroStore } from "@/lib/allsenadro-store"
+import { useRightColumnCollections } from "@/lib/right-column-collections"
 import { ColorPicker } from "@/components/task-creation/ColorPicker"
 import type { TaskDraftState, TaskPriority } from "@/components/task-creation/QuickInputBar"
 
@@ -57,6 +58,8 @@ export function PriorityDropdown({ value, onChange }: PriorityDropdownProps) {
   const collections = useAllsenadroStore((state) => state.collections)
   const presets = useAllsenadroStore((state) => state.presets)
   const activePresetId = useAllsenadroStore((state) => state.activePresetId)
+  const rightColumnCollections = useRightColumnCollections((state) => state.collections)
+  const addTagCollection = useRightColumnCollections((state) => state.addTagCollection)
   const [query, setQuery] = useState("")
   const [showColorPicker, setShowColorPicker] = useState(false)
   const colorPickerButtonRef = useRef<HTMLButtonElement | null>(null)
@@ -89,6 +92,14 @@ export function PriorityDropdown({ value, onChange }: PriorityDropdownProps) {
       }
     })
 
+    // Collections saved to the right column (including ones created here) so they
+    // surface as suggestions next time.
+    rightColumnCollections.forEach((collection) => {
+      if (collection.name.trim()) {
+        names.add(collection.name.trim())
+      }
+    })
+
     const usablePresets = presets.filter((preset) => preset.collections.length > 0)
     const activePreset =
       usablePresets.find((preset) => preset.id === activePresetId) ??
@@ -108,7 +119,7 @@ export function PriorityDropdown({ value, onChange }: PriorityDropdownProps) {
     }
 
     return Array.from(names)
-  }, [activePresetId, collections, presets])
+  }, [activePresetId, collections, presets, rightColumnCollections])
   const suggestions = useMemo(() => {
     const trimmed = query.trim().toLowerCase()
     if (!trimmed) {
@@ -133,6 +144,10 @@ export function PriorityDropdown({ value, onChange }: PriorityDropdownProps) {
     if (!value.collections.includes(trimmed)) {
       onChange({ collections: [...value.collections, trimmed] })
     }
+
+    // Persist as a real, saved tag collection so it appears in the right-column
+    // collections view. addTagCollection is a no-op when one already exists.
+    addTagCollection(trimmed)
 
     setQuery("")
   }
@@ -244,12 +259,15 @@ export function PriorityDropdown({ value, onChange }: PriorityDropdownProps) {
         <h3 className="mb-3 text-base text-gray-900">Icon</h3>
         <div className="grid grid-cols-7 gap-2">
           {iconOptions.map((Icon, index) => {
-            const active = value.icon === Icon.displayName || value.icon === Icon.name
+            // lucide components are forwardRef objects whose `.name` is undefined;
+            // `.displayName` ("Star", "AlarmClock", …) is the stable identifier.
+            const iconName = Icon.displayName ?? ""
+            const active = value.icon === iconName
             return (
               <button
-                key={`${Icon.name ?? "icon"}-${index}`}
+                key={`${iconName || "icon"}-${index}`}
                 type="button"
-                onClick={() => onChange({ icon: Icon.name })}
+                onClick={() => onChange({ icon: iconName })}
                 className={[
                   "flex h-9 w-9 items-center justify-center rounded-full transition",
                   active ? "bg-gray-900 text-white" : "text-gray-700 hover:bg-gray-100",

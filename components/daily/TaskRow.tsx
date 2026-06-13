@@ -70,6 +70,7 @@ import { MiniCalendar } from "@/components/task-creation/CalendarDropdown"
 import { useQuickAddGlobalKeys } from "@/components/task-creation/QuickInputBar"
 import { TimeWheelPicker } from "@/components/task-creation/TimeWheelPicker"
 import { ColorPicker } from "@/components/task-creation/ColorPicker"
+import { TaskIcon } from "@/lib/task-icons"
 import {
   ContextMenu,
   ContextMenuCheckboxItem,
@@ -336,6 +337,24 @@ function TaskRowComponent({
   const scheduleColor = schedulePalette[(typedTodo.createdAt ?? 0) % schedulePalette.length]
   const showScheduleStyle = sectionTitle === "SCHEDULE"
   const priorityMarkerColor = priorityMarkerColors[normalizeTodoPriority(typedTodo.priority)]
+
+  // The color/icon the user picked in the task-add panel. The icon is tinted
+  // with the chosen color; a small dot makes the color visible even when there
+  // is no icon and the task isn't completed.
+  const accentColor = typedTodo.color ?? null
+  const leadingAccent =
+    accentColor || typedTodo.icon ? (
+      <span className="flex shrink-0 translate-y-[1px] items-center gap-1 self-center">
+        {accentColor ? (
+          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: accentColor }} aria-hidden="true" />
+        ) : null}
+        {typedTodo.icon ? (
+          <span style={accentColor ? { color: accentColor } : undefined} className="text-black/70">
+            <TaskIcon icon={typedTodo.icon} className="size-3.5" />
+          </span>
+        ) : null}
+      </span>
+    ) : null
 
   const subtasks = typedTodo.subtasks ?? []
   const hasSubtasks = subtasks.length > 0
@@ -960,6 +979,7 @@ function TaskRowComponent({
           <div className="flex items-baseline gap-1.5">
             {typedTodo.time ? <span className="text-[13px] font-medium" style={{ color: scheduleColor }}>{typedTodo.time}</span> : null}
             {subtaskToggle}
+            {leadingAccent}
             <p onDoubleClick={() => setIsEditing(true)} className="cursor-text text-[13px] leading-[1.25] text-black">{typedTodo.text}</p>
             {collapsedSubtaskCount}
           </div>
@@ -981,6 +1001,7 @@ function TaskRowComponent({
         <div className="min-w-0 flex-1 py-0.5">
           <div className="flex items-baseline gap-1.5">
             {subtaskToggle}
+            {leadingAccent}
             <p onDoubleClick={() => setIsEditing(true)} className="cursor-text text-[15px] font-semibold leading-[1.18] text-black">{typedTodo.text}</p>
             {collapsedSubtaskCount}
           </div>
@@ -1003,6 +1024,7 @@ function TaskRowComponent({
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-1.5">
             {subtaskToggle}
+            {leadingAccent}
             <p onDoubleClick={() => setIsEditing(true)} className={`cursor-text text-[13px] leading-[1.32] ${typedTodo.completed ? "text-black/40 line-through" : "text-black"}`}>{typedTodo.text}</p>
             {collapsedSubtaskCount}
           </div>

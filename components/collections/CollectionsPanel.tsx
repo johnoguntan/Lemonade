@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo } from "react"
 import { CollectionsEditor, type EditableCollection } from "@/components/collections/CollectionsEditor"
 import { DateCollection } from "@/components/collections/DateCollection"
 import { PresetSwitcher } from "@/components/collections/PresetSwitcher"
 import { TagCollection } from "@/components/collections/TagCollection"
 import { useAllsenadroStore } from "@/lib/allsenadro-store"
+import { LOCAL_COLLECTIONS_KEY, useRightColumnCollections } from "@/lib/right-column-collections"
 import type { Collection } from "@/lib/types"
 import { formatLocalDateKey, useLemonadeStore, type Label, type Todo } from "@/lib/store"
 
@@ -20,8 +21,6 @@ type CollectionTodo = Todo & {
 type TagLikeCollection = Collection & {
   tag?: string | null
 }
-
-const LOCAL_COLLECTIONS_KEY = "allsenadro-right-column-collections-v1"
 
 const normalizeName = (value: string) => value.trim().toLowerCase()
 
@@ -215,14 +214,19 @@ export function CollectionsPanel() {
     ]
   }, [])
 
-  const [localCollections, setLocalCollections] = useState<EditableCollection[]>(fallbackCollections)
-  const [localCollectionsHydrated, setLocalCollectionsHydrated] = useState(false)
+  // Right-column collections live in a shared store so a collection created from
+  // the task-add panel shows up here immediately (and vice-versa).
+  const localCollections = useRightColumnCollections((state) => state.collections)
+  const localCollectionsHydrated = useRightColumnCollections((state) => state.hydrated)
+  const hydrateCollections = useRightColumnCollections((state) => state.hydrate)
+  const setLocalCollections = useRightColumnCollections((state) => state.setCollections)
 
   useEffect(() => {
+    if (localCollectionsHydrated) return
+
     const stored = window.localStorage.getItem(LOCAL_COLLECTIONS_KEY)
     if (!stored) {
-      setLocalCollections(fallbackCollections)
-      setLocalCollectionsHydrated(true)
+      hydrateCollections(fallbackCollections)
       return
     }
 
@@ -230,22 +234,15 @@ export function CollectionsPanel() {
       const parsed = JSON.parse(stored) as EditableCollection[]
       if (Array.isArray(parsed) && parsed.length > 0) {
         // Migrate: patch broken Whenever entries + add any missing defaults.
-        setLocalCollections(migrateCollections(parsed, fallbackCollections))
-        setLocalCollectionsHydrated(true)
+        hydrateCollections(migrateCollections(parsed, fallbackCollections))
         return
       }
     } catch {
       // Ignore invalid local data and fall back to defaults.
     }
 
-    setLocalCollections(fallbackCollections)
-    setLocalCollectionsHydrated(true)
-  }, [fallbackCollections])
-
-  useEffect(() => {
-    if (!localCollectionsHydrated) return
-    window.localStorage.setItem(LOCAL_COLLECTIONS_KEY, JSON.stringify(localCollections))
-  }, [localCollections, localCollectionsHydrated])
+    hydrateCollections(fallbackCollections)
+  }, [fallbackCollections, hydrateCollections, localCollectionsHydrated])
 
   const getTodosForCollection = (collection: Collection) => {
     if (collection.type === "date-based") {

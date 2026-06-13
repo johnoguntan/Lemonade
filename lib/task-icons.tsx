@@ -2,20 +2,34 @@
 
 import {
   AlarmClock,
+  Bell,
+  Bookmark,
   BookOpen,
   Briefcase,
+  Calendar,
+  Camera,
+  CheckCircle,
+  Clock3,
   Dumbbell,
+  Flag,
   Gift,
+  Grid2x2,
   Heart,
   Home,
+  Lock,
   Mail,
+  MapPin,
   MessageCircle,
+  Music,
   Phone,
   Plane,
+  ShoppingBag,
   ShoppingCart,
   Star,
+  Tag,
   Utensils,
   Wrench,
+  Zap,
   type LucideIcon,
 } from "lucide-react"
 
@@ -54,40 +68,46 @@ export const TASK_ICON_LIBRARY: Array<{ key: TaskIconKey; label: string; Icon: L
   { key: "wrench", label: "Fix", Icon: Wrench },
 ]
 
-export function TaskIcon({ icon, className }: { icon: string | undefined; className?: string }) {
+// Maps the existing lowercase semantic keys (TaskIconKey) to components.
+const SEMANTIC_ICONS: Record<string, LucideIcon> = Object.fromEntries(
+  TASK_ICON_LIBRARY.map((entry) => [entry.key, entry.Icon])
+)
+
+// The task-creation PriorityDropdown stores the raw lucide component name
+// (PascalCase, e.g. "Star", "AlarmClock"). Map those names back to components so
+// icons chosen during task creation actually render. Keyed by `Icon.name`.
+const LUCIDE_NAME_ICONS: Record<string, LucideIcon> = {
+  AlarmClock,
+  CheckCircle,
+  Calendar,
+  Lock,
+  Clock3,
+  Grid2x2,
+  Star,
+  Heart,
+  Zap,
+  Flag,
+  Bookmark,
+  Tag,
+  Bell,
+  MapPin,
+  Phone,
+  Mail,
+  Camera,
+  Music,
+  ShoppingBag,
+  Briefcase,
+}
+
+// Resolve an icon identifier (either a lowercase semantic key or a lucide
+// component name) to its component, or null when unknown/unset.
+export function resolveTaskIcon(icon: string | undefined): LucideIcon | null {
   if (!icon) return null
-  switch (icon as TaskIconKey) {
-    case "star":
-      return <Star className={className} />
-    case "briefcase":
-      return <Briefcase className={className} />
-    case "home":
-      return <Home className={className} />
-    case "phone":
-      return <Phone className={className} />
-    case "mail":
-      return <Mail className={className} />
-    case "message":
-      return <MessageCircle className={className} />
-    case "shopping":
-      return <ShoppingCart className={className} />
-    case "dumbbell":
-      return <Dumbbell className={className} />
-    case "book":
-      return <BookOpen className={className} />
-    case "plane":
-      return <Plane className={className} />
-    case "gift":
-      return <Gift className={className} />
-    case "heart":
-      return <Heart className={className} />
-    case "alarm":
-      return <AlarmClock className={className} />
-    case "utensils":
-      return <Utensils className={className} />
-    case "wrench":
-      return <Wrench className={className} />
-    default:
-      return null
-  }
+  return SEMANTIC_ICONS[icon] ?? LUCIDE_NAME_ICONS[icon] ?? null
+}
+
+export function TaskIcon({ icon, className }: { icon: string | undefined; className?: string }) {
+  const Resolved = resolveTaskIcon(icon)
+  if (!Resolved) return null
+  return <Resolved className={className} />
 }

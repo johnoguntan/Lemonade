@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { ExternalLink, Paperclip, Phone, Plus, X } from "lucide-react"
+import { ExternalLink, File, FileText, Image as ImageIcon, Paperclip, Phone, Plus, X } from "lucide-react"
 import type { TaskDraftState } from "@/components/task-creation/QuickInputBar"
 
 type AttachmentDropdownProps = {
@@ -160,7 +160,32 @@ export function AttachmentDropdown({ value, onChange }: AttachmentDropdownProps)
             reader.readAsDataURL(file)
           }}
         />
-        {value.attachmentName ? <p className="mt-2 text-sm text-gray-400">{value.attachmentName}</p> : null}
+        {value.attachmentName ? (
+          <div className="mt-2 flex items-center gap-2 rounded-lg bg-gray-50 px-2 py-1.5">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-md bg-white text-gray-400">
+              {value.attachmentFile?.type.startsWith("image/") && value.attachmentDataUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={value.attachmentDataUrl} alt={value.attachmentName} className="h-full w-full object-cover" />
+              ) : value.attachmentFile?.type === "application/pdf" ? (
+                <FileText size={15} />
+              ) : value.attachmentFile?.type.startsWith("image/") ? (
+                <ImageIcon size={15} />
+              ) : (
+                <File size={15} />
+              )}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-sm text-gray-500">{value.attachmentName}</span>
+            <button
+              type="button"
+              onClick={() => onChange({ attachmentFile: null, attachmentName: null, attachmentDataUrl: null })}
+              className="shrink-0 rounded-full p-0.5 text-gray-400 transition hover:bg-gray-200 hover:text-black"
+              aria-label="Remove attachment"
+              title="Remove attachment"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div className="mt-4 border-t border-gray-100 pt-4">
