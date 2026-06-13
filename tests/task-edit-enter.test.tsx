@@ -86,10 +86,9 @@ test("TaskRow edit: Enter saves while a picker is open and focus is on <body>", 
   const { id, input } = renderEditingRow("Call john")
   setInputValue(input, "Call john updated")
 
-  // Open the date picker, then lose focus to <body> — what happens when the
-  // user clicks inside the MiniCalendar surface.
-  const openCalendar = container.querySelector<HTMLButtonElement>('button[aria-label="Open calendar"]')!
-  act(() => openCalendar.click())
+  // Open the time wheel (the date picker now opens on field focus and closes
+  // on blur, so the wheel is the picker that can be open with focus on <body>).
+  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Open time picker"]')!.click())
   act(() => {
     ;(document.activeElement as HTMLElement | null)?.blur?.()
   })

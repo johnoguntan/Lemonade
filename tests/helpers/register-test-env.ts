@@ -37,14 +37,12 @@ require("global-jsdom")(undefined, { url: "http://localhost:3000/" })
 
 // jsdom doesn't implement scrolling APIs — components like the TimeWheelPicker
 // and Radix dialogs call them on mount.
-/* eslint-disable @typescript-eslint/no-empty-function */
 if (!window.Element.prototype.scrollTo) {
   window.Element.prototype.scrollTo = () => {}
 }
 if (!window.Element.prototype.scrollIntoView) {
   window.Element.prototype.scrollIntoView = () => {}
 }
-/* eslint-enable @typescript-eslint/no-empty-function */
 
 // ── 3. Network stub ──────────────────────────────────────────────────────────
 globalThis.fetch = (async () =>

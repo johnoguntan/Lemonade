@@ -1,13 +1,17 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { Paperclip, Plus, X } from "lucide-react"
+import { ExternalLink, Paperclip, Phone, Plus, X } from "lucide-react"
 import type { TaskDraftState } from "@/components/task-creation/QuickInputBar"
 
 type AttachmentDropdownProps = {
   value: TaskDraftState
   onChange: (updates: Partial<TaskDraftState>) => void
 }
+
+// Bare "example.com" needs a scheme before it can open in a new tab.
+const normalizeUrl = (raw: string) => (/^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`)
+const looksLikeUrl = (raw: string) => /\./.test(raw.trim())
 
 export function AttachmentDropdown({ value, onChange }: AttachmentDropdownProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -61,18 +65,48 @@ export function AttachmentDropdown({ value, onChange }: AttachmentDropdownProps)
 
       <div className="mt-4 border-t border-gray-100 pt-4">
         <div className="space-y-3">
-          <input
-            value={value.url}
-            onChange={(event) => onChange({ url: event.target.value })}
-            placeholder="Add URL"
-            className="w-full text-lg text-gray-400 outline-none placeholder:text-gray-300"
-          />
-          <input
-            value={value.phone}
-            onChange={(event) => onChange({ phone: event.target.value })}
-            placeholder="Add Phone"
-            className="w-full text-lg text-gray-400 outline-none placeholder:text-gray-300"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              value={value.url}
+              onChange={(event) => onChange({ url: event.target.value })}
+              placeholder="Add URL"
+              className="min-w-0 flex-1 text-lg text-gray-400 outline-none placeholder:text-gray-300"
+            />
+            {value.url.trim() && looksLikeUrl(value.url) ? (
+              <a
+                href={normalizeUrl(value.url)}
+                target="_blank"
+                rel="noopener noreferrer"
+                // mousedown is suppressed so the quick-add's outside-click handler
+                // doesn't close the panel before the link opens.
+                onMouseDown={(event) => event.stopPropagation()}
+                className="shrink-0 rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-black"
+                aria-label="Open link in new tab"
+                title="Open in new tab"
+              >
+                <ExternalLink size={16} />
+              </a>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              value={value.phone}
+              onChange={(event) => onChange({ phone: event.target.value })}
+              placeholder="Add Phone"
+              className="min-w-0 flex-1 text-lg text-gray-400 outline-none placeholder:text-gray-300"
+            />
+            {value.phone.trim() ? (
+              <a
+                href={`tel:${value.phone.replace(/[^\d+]/g, "")}`}
+                onMouseDown={(event) => event.stopPropagation()}
+                className="shrink-0 rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-black"
+                aria-label="Call this number"
+                title="Call"
+              >
+                <Phone size={16} />
+              </a>
+            ) : null}
+          </div>
           <input
             value={value.address}
             onChange={(event) => onChange({ address: event.target.value })}

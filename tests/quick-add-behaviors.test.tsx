@@ -15,6 +15,7 @@ import { createRoot, type Root } from "react-dom/client"
 
 import { QuickInputBar, createDefaultDraft, type TaskDraftState } from "@/components/task-creation/QuickInputBar"
 import { CalendarDropdown } from "@/components/task-creation/CalendarDropdown"
+import { AttachmentDropdown } from "@/components/task-creation/AttachmentDropdown"
 import { TaskRow } from "@/components/daily/TaskRow"
 import { useLemonadeStore } from "@/lib/store"
 
@@ -178,6 +179,27 @@ test("Enter inside the Repeat picker adds the task WITH the chosen repeat", asyn
   assert.equal(added.text, "Water the plants")
   assert.equal(added.isRecurring, true, "task is recurring")
   assert.equal(added.recurringFrequency, "weekly")
+})
+
+test("AttachmentDropdown: typed URL gets an open-in-new-tab link", () => {
+  let draft: TaskDraftState = { ...createDefaultDraft(), url: "example.com/path" }
+  const onChange = (updates: Partial<TaskDraftState>) => {
+    draft = { ...draft, ...updates }
+    act(() => root.render(React.createElement(AttachmentDropdown, { value: draft, onChange })))
+  }
+  act(() => root.render(React.createElement(AttachmentDropdown, { value: draft, onChange })))
+
+  const openLink = container.querySelector<HTMLAnchorElement>('a[aria-label="Open link in new tab"]')
+  assert.ok(openLink, "open-in-new-tab link is shown while adding a URL")
+  assert.equal(openLink!.getAttribute("href"), "https://example.com/path", "URL is normalized with scheme")
+  assert.equal(openLink!.getAttribute("target"), "_blank")
+  assert.equal(openLink!.getAttribute("rel"), "noopener noreferrer")
+})
+
+test("AttachmentDropdown: no open link until something URL-like is typed", () => {
+  const draft: TaskDraftState = createDefaultDraft()
+  act(() => root.render(React.createElement(AttachmentDropdown, { value: draft, onChange: () => {} })))
+  assert.equal(container.querySelector('a[aria-label="Open link in new tab"]'), null)
 })
 
 // ── CalendarDropdown: time picker dismissal ──────────────────────────────────
