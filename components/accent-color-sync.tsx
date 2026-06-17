@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
-import { useLemonadeStore } from "@/lib/store"
+import { LEMONADE_STORAGE_KEY, useLemonadeStore } from "@/lib/store"
 
 function hexToRgb(hex: string) {
   const normalized = hex.replace("#", "")
@@ -36,6 +36,19 @@ export function AccentColorSync() {
       root.style.removeProperty("--accent-color-rgb")
     }
   }, [accentColor])
+
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== LEMONADE_STORAGE_KEY) {
+        return
+      }
+
+      void useLemonadeStore.persist.rehydrate()
+    }
+
+    window.addEventListener("storage", handleStorage)
+    return () => window.removeEventListener("storage", handleStorage)
+  }, [])
 
   return null
 }

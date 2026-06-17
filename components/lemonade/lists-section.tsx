@@ -1,10 +1,10 @@
 "use client"
 
 import { useRef, useState, type DragEvent } from "react"
-import { useLemonadeStore, type List } from "@/lib/store"
+import { todoMatchesSearchFilters, useLemonadeStore, type List, type TaskSearchFilters } from "@/lib/store"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Plus, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsLeft, ChevronsRight, MoreVertical, Trash2, Equal, PenLine, ArrowRight, CornerUpLeft, CornerUpRight, Link2, Check, ListTodo } from "lucide-react"
+import { Plus, ChevronDown, ChevronUp, ChevronRight, MoreVertical, Trash2, Equal, PenLine, ArrowRight, CornerUpLeft, CornerUpRight, Link2, Check, ListTodo, AlertTriangle } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,6 +21,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { getPlannerTaskDragData, setPlannerTaskDragData } from "@/lib/task-dnd"
+import { TodoItem } from "./todo-item"
 
 export function ListsSection() {
   const { 
@@ -36,10 +38,15 @@ export function ListsSection() {
     addListAdjacent,
     moveListToTab,
     addListTodo, 
+    updateListTodo,
     toggleListTodo, 
     deleteListTodo,
-    isCalendarExpanded,
-    toggleCalendar
+    preferences,
+    searchQuery,
+    searchModeActive,
+    taskSearchFilters,
+    labelFilterIds,
+    activeFilterColor,
   } = useLemonadeStore()
   const [activeTabId, setActiveTabId] = useState("planning-tab")
   const [newTabName, setNewTabName] = useState("")
@@ -48,16 +55,33 @@ export function ListsSection() {
   const [renameTabDialogOpen, setRenameTabDialogOpen] = useState(false)
   const [renameTabName, setRenameTabName] = useState("")
   const [newTodoTexts, setNewTodoTexts] = useState<Record<string, string>>({})
+  const [newReturnItemName, setNewReturnItemName] = useState("")
+  const [newReturnStoreName, setNewReturnStoreName] = useState("")
+  const [newReturnDeadline, setNewReturnDeadline] = useState("")
+  const [newReturnNotes, setNewReturnNotes] = useState("")
   const [draggedListId, setDraggedListId] = useState<string | null>(null)
+  const [isListsCollapsed, setIsListsCollapsed] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const getListTabId = (list: List) =>
-    list.tabId ?? (list.type === "planning" ? "planning-tab" : "my-lists-tab")
+    list.tabId ?? (list.type === "planning" ? "planning-tab" : list.type === "shopping-returns" ? "shopping-returns-tab" : "my-lists-tab")
 
   const filteredLists = lists.filter((list) => getListTabId(list) === activeTabId)
+  const shoppingReturnsList = lists.find((list) => list.id === "shopping-returns") ?? null
+  const isShoppingReturnsTab = activeTabId === "shopping-returns-tab"
+  const visibleShoppingReturns = (shoppingReturnsList?.todos ?? []).filter(
+    (todo) =>
+      todoMatchesSearchFilters(todo, {
+        searchQuery,
+        searchModeActive,
+        taskSearchFilters,
+        labelFilterIds,
+        activeFilterColor,
+        showCompleted: preferences.showCompleted,
+      })
+  )
   const getTabCount = (tabId: string) => lists.filter((list) => getListTabId(list) === tabId).length
   const activeTab = listTabs.find((tab) => tab.id === activeTabId) ?? null
-
   const handleCreateTab = () => {
     const normalizedName = newTabName.trim().toUpperCase()
 
@@ -83,6 +107,10 @@ export function ListsSection() {
   }
 
   const handleCreateList = () => {
+    if (isShoppingReturnsTab) {
+      return
+    }
+
     const existingAutoNamedLists = filteredLists.filter(
       (list) => /^LIST \d+$/.test(list.name)
     )
@@ -102,42 +130,49 @@ export function ListsSection() {
     }
   }
 
-  const handleScroll = (direction: 'prev' | 'next' | 'prev-page' | 'next-page') => {
-    const container = scrollRef.current
-    if (!container) return
-
-    const cardStep = 292
-    const pageStep = Math.max(container.clientWidth - 120, cardStep)
-
-    const left =
-      direction === 'prev'
-        ? container.scrollLeft - cardStep
-        : direction === 'next'
-          ? container.scrollLeft + cardStep
-          : direction === 'prev-page'
-            ? container.scrollLeft - pageStep
-            : container.scrollLeft + pageStep
-
-    container.scrollTo({ left, behavior: 'smooth' })
-  }
-
   const handleManageListsInTab = () => {
-    if (isCalendarExpanded) {
-      toggleCalendar()
+    if (isListsCollapsed) {
+      setIsListsCollapsed(false)
     }
     scrollRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
     setManageTabMenuOpen(false)
   }
 
+  const handleAddShoppingReturn = () => {
+    if (!shoppingReturnsList || !newReturnItemName.trim()) {
+      return
+    }
+
+    addListTodo(shoppingReturnsList.id, newReturnItemName.trim())
+    const createdTodo = useLemonadeStore
+      .getState()
+      .lists.find((list) => list.id === shoppingReturnsList.id)
+      ?.todos.at(-1)
+
+    if (createdTodo) {
+      updateListTodo(shoppingReturnsList.id, createdTodo.id, {
+        storeName: newReturnStoreName.trim() || undefined,
+        returnDeadline: newReturnDeadline || undefined,
+        notes: newReturnNotes.trim() || undefined,
+      })
+    }
+
+    setNewReturnItemName("")
+    setNewReturnStoreName("")
+    setNewReturnDeadline("")
+    setNewReturnNotes("")
+  }
+
   return (
-    <div className={cn(
-      "relative z-20 shrink-0 border-t border-border bg-background transition-all duration-300"
-    )}>
+    <div
+      className="relative z-20 mt-2 h-auto border-t-0 bg-transparent transition-all duration-300"
+    >
       {/* Tabs */}
       <div className={cn(
-        "flex min-h-10 items-center px-2 py-1 gap-2 bg-background dark:bg-[#131313]",
-        !isCalendarExpanded && "border-b border-border"
-      )}>
+        "flex min-h-10 items-center gap-2 overflow-hidden rounded-xl border border-border/35 bg-background/45 px-3 py-1 backdrop-blur-[12px] dark:bg-[rgba(19,19,19,0.34)]",
+        !isListsCollapsed && "border-b border-border/45"
+      )}
+      >
         <DropdownMenu open={manageTabMenuOpen} onOpenChange={setManageTabMenuOpen}>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="size-6">
@@ -156,29 +191,33 @@ export function ListsSection() {
               <ListTodo className="size-4" />
               Manage lists in tab
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => {
-                if (activeTab) {
-                  setRenameTabName(activeTab.name)
-                  setRenameTabDialogOpen(true)
-                }
-              }}
-              className="px-2 py-3 text-[15px]"
-            >
-              <PenLine className="size-4" />
-              Rename tab
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => {
-                deleteListsInTab(activeTabId)
-                setManageTabMenuOpen(false)
-              }}
-              className="px-2 py-3 text-[15px]"
-              variant="destructive"
-            >
-              <Trash2 className="size-4" />
-              Delete all {getTabCount(activeTabId)} lists
-            </DropdownMenuItem>
+            {!isShoppingReturnsTab ? (
+              <>
+                <DropdownMenuItem
+                  onClick={() => {
+                    if (activeTab) {
+                      setRenameTabName(activeTab.name)
+                      setRenameTabDialogOpen(true)
+                    }
+                  }}
+                  className="px-2 py-3 text-[15px]"
+                >
+                  <PenLine className="size-4" />
+                  Rename tab
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => {
+                    deleteListsInTab(activeTabId)
+                    setManageTabMenuOpen(false)
+                  }}
+                  className="px-2 py-3 text-[15px]"
+                  variant="destructive"
+                >
+                  <Trash2 className="size-4" />
+                  Delete all {getTabCount(activeTabId)} lists
+                </DropdownMenuItem>
+              </>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -199,35 +238,42 @@ export function ListsSection() {
           </DialogContent>
         </Dialog>
 
-        {listTabs.map((tab, index) => (
-          <div
-            key={tab.id}
-            className={cn(
-              "flex items-center border-r border-[#edf0f4]",
-              index === 0 && "border-l border-[#edf0f4]"
-            )}
-          >
-            <button
-              onClick={() => setActiveTabId(tab.id)}
-              className={cn(
-                "relative mx-1 my-0.5 flex items-center gap-2 px-3 py-1.5 font-meta text-[10px] leading-[10px] uppercase tracking-[0.08em] transition-colors",
-                activeTabId === tab.id
-                  ? "text-foreground dark:bg-[#131313] dark:text-foreground"
-                  : "text-[#a7a9ac] hover:rounded-2xl hover:bg-[#F2F3F5] hover:text-[#a7a9ac] dark:hover:bg-[#131315] dark:hover:text-foreground"
-              )}
-            >
-              <span>{tab.name}</span>
-              <span className="text-inherit/90">{getTabCount(tab.id)}</span>
-              {activeTabId === tab.id ? (
-                <span className="absolute inset-x-1 -bottom-[5px] h-[2px] bg-[var(--accent-color)]" />
-              ) : null}
-            </button>
+        <div className="min-w-0 flex-1 overflow-x-auto">
+          <div className="flex min-w-max items-stretch">
+            {listTabs.map((tab, index) => (
+              <div
+                key={tab.id}
+                className={cn(
+                  "flex items-stretch border-r border-[#edf0f4]",
+                  index === 0 && "border-l border-[#edf0f4]"
+                )}
+              >
+                <button
+                  onClick={() => setActiveTabId(tab.id)}
+                  className={cn(
+                    "lemonade-tab-label relative mx-1 my-0.5 inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-0 font-meta text-[10px] leading-none uppercase tracking-[0.08em] transition-colors",
+                    activeTabId === tab.id
+                      ? "text-foreground dark:bg-[#131313] dark:text-foreground"
+                      : "text-[#a7a9ac] hover:rounded-2xl hover:bg-[#F2F3F5] hover:text-[#a7a9ac] dark:hover:bg-[#131315] dark:hover:text-foreground"
+                  )}
+                >
+                  <span>{tab.name}</span>
+                  <span className="inline-flex min-w-4 items-center justify-center text-inherit/90">{getTabCount(tab.id)}</span>
+                  {activeTabId === tab.id ? (
+                    <span
+                      className="absolute inset-x-1 bottom-[1px] h-[2px] rounded-full bg-[var(--accent-color)]"
+                      style={{ boxShadow: "0 0 0 1px color-mix(in srgb, var(--accent-color) 22%, transparent)" }}
+                    />
+                  ) : null}
+                </button>
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
 
         <Dialog open={tabDialogOpen} onOpenChange={setTabDialogOpen}>
           <DialogTrigger asChild>
-            <Button variant="ghost" size="icon" className="size-6 ml-1">
+            <Button variant="ghost" size="icon" className="ml-1 size-6 shrink-0" disabled={isShoppingReturnsTab}>
               <Plus className="size-4" />
             </Button>
           </DialogTrigger>
@@ -247,43 +293,42 @@ export function ListsSection() {
           </DialogContent>
         </Dialog>
 
-        <div className="flex-1" />
-
         <Button
           variant="ghost"
           size="icon"
-          onClick={toggleCalendar}
-          className="size-6"
+          onClick={() => setIsListsCollapsed((current) => !current)}
+          className="size-6 shrink-0"
         >
-          {isCalendarExpanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+          {isListsCollapsed ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
         </Button>
       </div>
 
       {/* Lists Grid */}
-      {!isCalendarExpanded ? (
-        <div className="group/lists-nav relative border-b border-border bg-[#f7f8fa] dark:bg-[#0d0d0d]">
-          <div className="pointer-events-none absolute left-0 top-1/2 z-10 flex -translate-y-1/2 flex-col overflow-hidden rounded-r-md border border-border bg-[#f7f8fa] opacity-0 transition-opacity duration-200 group-hover/lists-nav:opacity-100 dark:bg-[#0d0d0d]">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => handleScroll('prev')}
-              className="pointer-events-auto size-8 rounded-none text-muted-foreground hover:text-foreground"
-            >
-              <ChevronLeft className="size-[15px]" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => handleScroll('prev-page')}
-              className="pointer-events-auto size-8 rounded-none text-muted-foreground hover:text-foreground"
-            >
-              <ChevronsLeft className="size-[15px]" />
-            </Button>
-          </div>
-
+      {!isListsCollapsed ? (
+        <div className="lemonade-list-stack relative h-auto bg-transparent">
+          {isShoppingReturnsTab ? (
+            <ShoppingReturnsSection
+              list={shoppingReturnsList}
+              items={visibleShoppingReturns}
+              showCompleted={preferences.showCompleted}
+              newItemName={newReturnItemName}
+              newStoreName={newReturnStoreName}
+              newDeadline={newReturnDeadline}
+              newNotes={newReturnNotes}
+              onNewItemNameChange={setNewReturnItemName}
+              onNewStoreNameChange={setNewReturnStoreName}
+              onNewDeadlineChange={setNewReturnDeadline}
+              onNewNotesChange={setNewReturnNotes}
+              onAddItem={handleAddShoppingReturn}
+              onToggleReturned={(todoId) => shoppingReturnsList && toggleListTodo(shoppingReturnsList.id, todoId)}
+              onDeleteItem={(todoId) => shoppingReturnsList && deleteListTodo(shoppingReturnsList.id, todoId)}
+              onUpdateItem={(todoId, updates) => shoppingReturnsList && updateListTodo(shoppingReturnsList.id, todoId, updates)}
+            />
+          ) : (
+          <>
           <div
             ref={scrollRef}
-            className="flex min-h-[500px] items-stretch gap-0 overflow-x-auto overflow-y-visible bg-[#f7f8fa] px-0 py-0 scroll-smooth dark:bg-[#0d0d0d]"
+            className="lemonade-list-card-stack flex h-auto flex-col gap-7 bg-transparent px-0 py-2"
           >
             {filteredLists.map((list) => (
               <ListCard
@@ -295,7 +340,10 @@ export function ListsSection() {
                 onMoveToTab={(tabId) => moveListToTab(list.id, tabId)}
                 onAddListLeft={() => addListAdjacent(list.id, "left")}
                 onAddListRight={() => addListAdjacent(list.id, "right")}
-                onDragStart={() => setDraggedListId(list.id)}
+                onDragStart={(event) => {
+                  event.dataTransfer.setData("text/plain", list.id)
+                  setDraggedListId(list.id)
+                }}
                 onDragEnd={() => setDraggedListId(null)}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={() => {
@@ -307,42 +355,29 @@ export function ListsSection() {
                 newTodoText={newTodoTexts[list.id] || ""}
                 onNewTodoTextChange={(text) => setNewTodoTexts((prev) => ({ ...prev, [list.id]: text }))}
                 onAddTodo={() => handleAddTodo(list.id)}
-                onToggleTodo={(todoId) => toggleListTodo(list.id, todoId)}
-                onDeleteTodo={(todoId) => deleteListTodo(list.id, todoId)}
+                searchQuery={searchQuery}
+                searchModeActive={searchModeActive}
+                taskSearchFilters={taskSearchFilters}
+                labelFilterIds={labelFilterIds}
+                activeFilterColor={activeFilterColor}
+                showCompleted={preferences.showCompleted}
                 listTabs={listTabs}
               />
             ))}
 
             <button
               onClick={handleCreateList}
-              className="flex min-h-[500px] w-[33.333%] min-w-[320px] shrink-0 items-center justify-center gap-2 self-stretch bg-[#f7f8fa] p-6 text-muted-foreground transition-colors hover:text-foreground dark:bg-[#0d0d0d]"
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border/70 bg-transparent px-4 text-muted-foreground transition-colors hover:border-[var(--accent-color)] hover:text-foreground"
             >
               <Plus className="size-4" />
               <span className="text-sm font-medium">NEW LIST</span>
             </button>
           </div>
-
-          <div className="pointer-events-none absolute right-0 top-1/2 z-10 flex -translate-y-1/2 flex-col overflow-hidden rounded-l-md border border-border bg-[#f7f8fa] opacity-0 transition-opacity duration-200 group-hover/lists-nav:opacity-100 dark:bg-[#0d0d0d]">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => handleScroll('next')}
-              className="pointer-events-auto size-8 rounded-none text-muted-foreground hover:text-foreground"
-            >
-              <ChevronRight className="size-[15px]" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => handleScroll('next-page')}
-              className="pointer-events-auto size-8 rounded-none text-muted-foreground hover:text-foreground"
-            >
-              <ChevronsRight className="size-[15px]" />
-            </Button>
-          </div>
+          </>
+          )}
         </div>
       ) : (
-        <div className="h-0 overflow-hidden bg-background" />
+        <div className="h-0 overflow-hidden bg-background/90 dark:bg-transparent" />
       )}
     </div>
   )
@@ -356,16 +391,206 @@ interface ListCardProps {
   onMoveToTab: (tabId: string) => void
   onAddListLeft: () => void
   onAddListRight: () => void
-  onDragStart: () => void
+  onDragStart: (event: DragEvent<HTMLDivElement>) => void
   onDragEnd: () => void
   onDragOver: (event: DragEvent<HTMLDivElement>) => void
   onDrop: () => void
   newTodoText: string
   onNewTodoTextChange: (text: string) => void
   onAddTodo: () => void
-  onToggleTodo: (todoId: string) => void
-  onDeleteTodo: (todoId: string) => void
+  searchQuery: string
+  searchModeActive: boolean
+  taskSearchFilters: TaskSearchFilters
+  labelFilterIds: string[]
+  activeFilterColor: string | null
+  showCompleted: boolean
   listTabs: Array<{ id: string; name: string }>
+}
+
+interface ShoppingReturnsSectionProps {
+  list: List | null
+  items: List["todos"]
+  showCompleted: boolean
+  newItemName: string
+  newStoreName: string
+  newDeadline: string
+  newNotes: string
+  onNewItemNameChange: (value: string) => void
+  onNewStoreNameChange: (value: string) => void
+  onNewDeadlineChange: (value: string) => void
+  onNewNotesChange: (value: string) => void
+  onAddItem: () => void
+  onToggleReturned: (todoId: string) => void
+  onDeleteItem: (todoId: string) => void
+  onUpdateItem: (todoId: string, updates: Partial<List["todos"][number]>) => void
+}
+
+function ShoppingReturnsSection({
+  list,
+  items,
+  showCompleted,
+  newItemName,
+  newStoreName,
+  newDeadline,
+  newNotes,
+  onNewItemNameChange,
+  onNewStoreNameChange,
+  onNewDeadlineChange,
+  onNewNotesChange,
+  onAddItem,
+  onToggleReturned,
+  onDeleteItem,
+  onUpdateItem,
+}: ShoppingReturnsSectionProps) {
+  const todayKey = new Date().toISOString().split("T")[0]
+
+  return (
+    <div className="h-auto bg-transparent px-0 py-2">
+      <div className="mx-auto flex max-w-5xl flex-col gap-6">
+        <div className="p-5">
+          <div className="mb-4 flex items-start justify-between gap-4">
+            <div className="flex-1 text-right">
+              <h3 className="lemonade-right-panel-heading font-heading text-[20px] leading-[20px] uppercase">Shopping Returns</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Track what needs to go back, where, and by when.
+              </p>
+            </div>
+            <div className="text-xs font-medium text-muted-foreground">
+              {showCompleted ? "Returned items visible" : "Returned items hidden"}
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <Input
+              value={newItemName}
+              onChange={(event) => onNewItemNameChange(event.target.value)}
+              placeholder="Item name"
+              onKeyDown={(event) => event.key === "Enter" && onAddItem()}
+            />
+            <Input
+              value={newStoreName}
+              onChange={(event) => onNewStoreNameChange(event.target.value)}
+              placeholder="Store name (optional)"
+              onKeyDown={(event) => event.key === "Enter" && onAddItem()}
+            />
+            <Input
+              type="date"
+              value={newDeadline}
+              onChange={(event) => onNewDeadlineChange(event.target.value)}
+            />
+            <Button onClick={onAddItem} className="md:justify-self-start">
+              Add return
+            </Button>
+          </div>
+
+          <textarea
+            value={newNotes}
+            onChange={(event) => onNewNotesChange(event.target.value)}
+            placeholder="Notes (optional)"
+            className="mt-3 min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+
+        <div>
+          <div className="grid grid-cols-[minmax(82px,1.2fr)_minmax(78px,0.85fr)_minmax(96px,112px)_minmax(82px,1fr)_72px] gap-2 border-b border-border/70 px-4 py-3 text-[8.5px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+            <span className="min-w-0 truncate">Item</span>
+            <span className="min-w-0 truncate">Store</span>
+            <span className="min-w-0 truncate">Deadline</span>
+            <span className="min-w-0 truncate">Notes</span>
+            <span className="min-w-0 truncate text-right">Returned</span>
+          </div>
+
+          <div className="divide-y divide-border/60">
+            {items.length > 0 || !list ? (
+              <div className="flex flex-col">
+                {Array.from({ length: Math.max(items.length, 9) }).map((_, index) => {
+                  const todo = items[index]
+                  if (!todo) {
+                    return (
+                      <div
+                        key={`filler-returns-${index}`}
+                        className="h-16 border-b border-[#e8e8ec] last:border-b-0 dark:border-white/15"
+                      />
+                    )
+                  }
+                  const isOverdue = !!todo.returnDeadline && !todo.completed && todo.returnDeadline < todayKey
+                  return (
+                    <div
+                      key={todo.id}
+                      className="grid grid-cols-[minmax(82px,1.2fr)_minmax(78px,0.85fr)_minmax(96px,112px)_minmax(82px,1fr)_72px] gap-2 border-b border-[#e8e8ec] px-4 py-4 last:border-b-0 dark:border-white/15"
+                    >
+                      <Input
+                        value={todo.text}
+                        onChange={(event) => onUpdateItem(todo.id, { text: event.target.value })}
+                        placeholder="Item name"
+                      />
+                      <Input
+                        value={todo.storeName ?? ""}
+                        onChange={(event) =>
+                          onUpdateItem(todo.id, { storeName: event.target.value || undefined })
+                        }
+                        placeholder="Store"
+                      />
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="date"
+                          value={todo.returnDeadline ?? ""}
+                          onChange={(event) =>
+                            onUpdateItem(todo.id, { returnDeadline: event.target.value || undefined })
+                          }
+                          className={cn(isOverdue && "border-destructive text-destructive")}
+                        />
+                        {isOverdue ? <AlertTriangle className="size-4 text-destructive" /> : null}
+                      </div>
+                      <Input
+                        value={todo.notes ?? ""}
+                        onChange={(event) => onUpdateItem(todo.id, { notes: event.target.value || undefined })}
+                        placeholder="Notes"
+                      />
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onToggleReturned(todo.id)}
+                          className={cn(
+                            "flex size-4 items-center justify-center rounded-full border border-border",
+                            todo.completed && "border-foreground bg-foreground"
+                          )}
+                          aria-label={todo.completed ? "Mark as not returned" : "Mark as returned"}
+                        >
+                          {todo.completed ? (
+                            <svg
+                              className="size-2.5 text-background"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                            </svg>
+                          ) : null}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDeleteItem(todo.id)}
+                          className="text-muted-foreground hover:text-destructive"
+                          aria-label="Delete return"
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+                No return items yet.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function ListCard({ 
@@ -383,14 +608,20 @@ function ListCard({
   newTodoText, 
   onNewTodoTextChange, 
   onAddTodo,
-  onToggleTodo,
-  onDeleteTodo,
+  searchQuery,
+  searchModeActive,
+  taskSearchFilters,
+  labelFilterIds,
+  activeFilterColor,
+  showCompleted,
   listTabs,
 }: ListCardProps) {
+  const { moveCalendarTodoToList, moveListTodoToList } = useLemonadeStore()
   const [isEditingName, setIsEditingName] = useState(false)
   const [editName, setEditName] = useState(list.name)
   const [menuOpen, setMenuOpen] = useState(false)
   const [showMoveMenu, setShowMoveMenu] = useState(false)
+  const [isTaskDropOver, setIsTaskDropOver] = useState(false)
 
   const handleSaveName = () => {
     if (editName.trim()) {
@@ -405,6 +636,16 @@ function ListCard({
   }
 
   const currentTabId = list.tabId ?? (list.type === "planning" ? "planning-tab" : "my-lists-tab")
+  const visibleTodos = list.todos.filter((todo) =>
+    todoMatchesSearchFilters(todo, {
+      searchQuery,
+      searchModeActive,
+      taskSearchFilters,
+      labelFilterIds,
+      activeFilterColor,
+      showCompleted,
+    })
+  )
 
   return (
     <div
@@ -414,15 +655,15 @@ function ListCard({
       onDragOver={onDragOver}
       onDrop={onDrop}
       className={cn(
-        "group relative flex min-h-[500px] w-[33.333%] min-w-[320px] shrink-0 flex-col self-stretch bg-[#f7f8fa] px-10 py-5 transition-all dark:bg-[#0d0d0d]",
+        "lemonade-list-card group relative flex h-auto w-full min-w-0 flex-col self-stretch rounded-none bg-transparent px-0 py-1 transition-all",
         isDragging && "opacity-45",
-        "hover:bg-[#f7f8fa] dark:hover:bg-[#0d0d0d]"
+        "hover:bg-transparent"
       )}
     >
-      <div className="pointer-events-none absolute inset-0 z-10 bg-[#F2F3F5] opacity-0 transition-opacity duration-200 group-hover:opacity-100 dark:bg-[#131315]" />
+      <div className="pointer-events-none absolute inset-0 z-10 rounded-2xl bg-black/[0.015] opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
 
       <div className="relative z-20 mb-4 flex flex-col gap-2">
-        <div className="flex justify-center">
+        <div className="flex justify-start">
           <button
             type="button"
             aria-label={`Drag ${list.name}`}
@@ -446,6 +687,11 @@ function ListCard({
             <Button
               variant="ghost"
               size="icon"
+              draggable={false}
+              onDragStart={(event) => {
+                // This button should never initiate list-card drag.
+                event.preventDefault()
+              }}
               className="mt-0.5 size-7 shrink-0 rounded-md opacity-0 transition-opacity group-hover:opacity-100"
             >
               <MoreVertical className="size-4" />
@@ -524,7 +770,7 @@ function ListCard({
           </DropdownMenuContent>
           </DropdownMenu>
 
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1 text-right">
             {isEditingName ? (
               <input
                 type="text"
@@ -532,13 +778,13 @@ function ListCard({
                 onChange={(e) => setEditName(e.target.value)}
                 onBlur={handleSaveName}
                 onKeyDown={(e) => e.key === 'Enter' && handleSaveName()}
-                className="font-heading text-[20px] leading-[20px] bg-transparent outline-none border-b border-foreground uppercase"
+                className="lemonade-list-title w-full font-heading text-[20px] leading-[20px] bg-transparent outline-none border-b border-foreground uppercase"
                 autoFocus
               />
             ) : (
               <h3 
                 onClick={() => setIsEditingName(true)}
-                className="font-heading text-[20px] leading-[20px] uppercase cursor-text hover:opacity-70"
+                className="lemonade-list-title font-heading text-[20px] leading-[20px] uppercase cursor-text hover:opacity-70"
               >
                 {list.name}
               </h3>
@@ -547,46 +793,71 @@ function ListCard({
         </div>
       </div>
 
-      <div className="relative z-20 flex min-h-[360px] flex-1 flex-col">
-        {Array.from({ length: 9 }).map((_, index) => {
-          const todo = list.todos[index]
+      <div
+        className={cn(
+          "relative z-20 flex h-auto flex-col rounded-2xl border border-border/50 bg-transparent px-0 py-0",
+          isTaskDropOver && "border-dashed border-[var(--accent-color)] bg-[color-mix(in_srgb,var(--accent-color)_8%,transparent)]"
+        )}
+        onDragOver={(event) => {
+          const dragData = getPlannerTaskDragData(event as unknown as DragEvent<HTMLDivElement>)
+          if (!dragData?.todoId) return
+          event.preventDefault()
+          event.stopPropagation()
+          event.dataTransfer.dropEffect = "move"
+          setIsTaskDropOver(true)
+        }}
+        onDragLeave={() => setIsTaskDropOver(false)}
+        onDrop={(event) => {
+          const dragData = getPlannerTaskDragData(event as unknown as DragEvent<HTMLDivElement>)
+          if (!dragData?.todoId) return
+          event.preventDefault()
+          event.stopPropagation()
+
+          if (dragData.source === "calendar" || dragData.source === "timeline-timed" || dragData.source === "timeline-unscheduled") {
+            moveCalendarTodoToList(dragData.todoId, list.id)
+          } else if (dragData.source === "list" && dragData.listId) {
+            if (dragData.listId !== list.id) {
+              moveListTodoToList(dragData.listId, dragData.todoId, list.id)
+            }
+          }
+          setIsTaskDropOver(false)
+        }}
+      >
+        {Array.from({ length: Math.max(visibleTodos.length + 1, 9) }).map((_, index) => {
+          const todo = visibleTodos[index]
 
           if (todo) {
             return (
-              <div key={todo.id} className="group/todo flex h-10 items-center gap-2 border-b border-[#e8e8ec] dark:border-[#2a2d34]">
-                <button
-                  onClick={() => onToggleTodo(todo.id)}
-                  className={cn(
-                    "size-4 rounded-full border border-border flex-shrink-0 flex items-center justify-center",
-                    todo.completed && "bg-foreground border-foreground"
-                  )}
-                >
-                  {todo.completed && (
-                    <svg className="size-2.5 text-background" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                    </svg>
-                  )}
-                </button>
-                <span className={cn(
-                  "flex-1 truncate text-sm text-foreground",
-                  todo.completed && "line-through opacity-50"
-                )}>
-                  {todo.text}
-                </span>
-                <button
-                  onClick={() => onDeleteTodo(todo.id)}
-                  className="opacity-0 text-muted-foreground transition-opacity hover:text-destructive group-hover/todo:opacity-100"
-                >
-                  <Trash2 className="size-3" />
-                </button>
+              <div
+                key={todo.id}
+                className="border-b border-[#e8e8ec] px-2 last:border-b-0 dark:border-white/15"
+              >
+                <TodoItem
+                  todo={todo}
+                  listId={list.id}
+                  textSizeClass="lemonade-task-text"
+                  draggable
+                  showInlineTaskActions
+                  onDragStart={(event) => {
+                    event.stopPropagation()
+                    setPlannerTaskDragData(event, { todoId: todo.id, source: "list", listId: list.id })
+                  }}
+                  onDragEnd={(event) => {
+                    event.stopPropagation()
+                    setIsTaskDropOver(false)
+                  }}
+                />
               </div>
             )
           }
 
-          const isInputRow = index === Math.min(list.todos.length, 8)
+          const isInputRow = index === Math.min(visibleTodos.length, 8)
 
           return (
-            <div key={`${list.id}-line-${index}`} className="flex h-10 items-center border-b border-[#e8e8ec] dark:border-[#2a2d34]">
+            <div key={`${list.id}-line-${index}`} className="group/add flex h-10 items-center gap-2 border-b border-[#e8e8ec] px-2 last:border-b-0 dark:border-white/15">
+              <span className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground opacity-0 transition-opacity group-hover/add:opacity-100">
+                <Plus className="size-3" />
+              </span>
               {isInputRow ? (
                 <input
                   type="text"
@@ -594,9 +865,9 @@ function ListCard({
                   onChange={(e) => onNewTodoTextChange(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && onAddTodo()}
                   placeholder={list.todos.length === 0 && index === 0 ? "Add item..." : ""}
-                  className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                  className="lemonade-list-item-text w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
                 />
-              ) : null}
+              ) : <div className="flex-1" />}
             </div>
           )
         })}

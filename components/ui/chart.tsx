@@ -69,6 +69,14 @@ function ChartContainer({
   )
 }
 
+// Only allow safe CSS color values to prevent injection via dangerouslySetInnerHTML.
+// Accepts: #rgb, #rrggbb, #rrggbbaa, rgb(...), rgba(...), hsl(...), hsla(...), named colors.
+const SAFE_COLOR_RE = /^(#[0-9a-f]{3,8}|rgb\([^)]*\)|rgba\([^)]*\)|hsl\([^)]*\)|hsla\([^)]*\)|[a-z]+)$/i
+const sanitizeChartColor = (value: string | undefined): string | undefined => {
+  if (!value) return undefined
+  return SAFE_COLOR_RE.test(value.trim()) ? value.trim() : undefined
+}
+
 const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
   const colorConfig = Object.entries(config).filter(
     ([, config]) => config.theme || config.color,
@@ -87,9 +95,10 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
 ${prefix} [data-chart=${id}] {
 ${colorConfig
   .map(([key, itemConfig]) => {
-    const color =
+    const raw =
       itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ||
       itemConfig.color
+    const color = sanitizeChartColor(raw)
     return color ? `  --color-${key}: ${color};` : null
   })
   .join('\n')}

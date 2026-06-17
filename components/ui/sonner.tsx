@@ -1,10 +1,10 @@
 'use client'
 
-import { useTheme } from 'next-themes'
+import { useLemonadeStore } from '@/lib/store'
 import { Toaster as Sonner, ToasterProps } from 'sonner'
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = 'system' } = useTheme()
+  const theme = useLemonadeStore((state) => state.preferences.theme)
 
   return (
     <Sonner

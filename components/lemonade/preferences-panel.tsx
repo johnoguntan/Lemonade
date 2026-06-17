@@ -1,396 +1,261 @@
 "use client"
 
-import { useLemonadeStore, type ThemeColor, type BulletStyle } from "@/lib/store"
-import { Button } from "@/components/ui/button"
+import { useLemonadeStore } from "@/lib/store"
 import { Switch } from "@/components/ui/switch"
-import { Sun, Moon, Eye, EyeOff, Circle, Minus, ArrowRight, Ban, ChevronsLeft, Plus, Pencil, Trash2 } from "lucide-react"
+import { Sun, Moon, X, Sparkles, Gift, Zap, Star, Smile, Radio, Minus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTheme } from "next-themes"
-import { useState, useRef } from "react"
-import { Input } from "@/components/ui/input"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import { Separator } from "@/components/ui/separator"
+import { useRef, useState } from "react"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Button } from "@/components/ui/button"
+import { ColorPickerPanel } from "./color-picker-panel"
+
+const CELEBRATION_MODES = [
+  { id: "burst",    label: "Burst",    Icon: Sparkles },
+  { id: "confetti", label: "Confetti", Icon: Gift },
+  { id: "firework", label: "Firework", Icon: Zap },
+  { id: "stars",    label: "Stars",    Icon: Star },
+  { id: "emoji",    label: "Emoji",    Icon: Smile },
+  { id: "ripple",   label: "Ripple",   Icon: Radio },
+  { id: "minimal",  label: "Minimal",  Icon: Minus },
+  { id: "off",      label: "Off",      Icon: X },
+] as const
+
+const QUICK_EMOJIS = ["🎉", "🎊", "✨", "🌟", "💫", "🏆", "🎯", "🔥", "💎", "🌈", "🦄", "🚀", "❤️", "🎈", "👏"]
 
 const THEME_COLORS = [
-  { label: 'purple', hex: '#852CE6' },
-  { label: 'red', hex: '#E63946' },
-  { label: 'orange', hex: '#F47B20' },
-  { label: 'yellow', hex: '#F4C430' },
-  { label: 'green', hex: '#2D9B6F' },
-  { label: 'teal', hex: '#0D9488' },
-  { label: 'blue', hex: '#2563EB' },
-  { label: 'pink', hex: '#EC4899' },
-  { label: 'black', hex: '#1A1A1A' },
+  { label: "purple", hex: "#852CE6" },
+  { label: "red", hex: "#E63946" },
+  { label: "orange", hex: "#F47B20" },
+  { label: "yellow", hex: "#F4C430" },
+  { label: "green", hex: "#2D9B6F" },
+  { label: "teal", hex: "#0D9488" },
+  { label: "blue", hex: "#2563EB" },
+  { label: "pink", hex: "#EC4899" },
+  { label: "black", hex: "#1A1A1A" },
 ]
 
 export function PreferencesPanel() {
-  const { preferences, setPreferences, setSidebarOpen, sidebarOpen, tags, addTag, editTag, deleteTag } = useLemonadeStore()
+  const { preferences, setPreferences, setSidebarOpen, sidebarOpen } = useLemonadeStore()
   const { setTheme } = useTheme()
-  const [newTagName, setNewTagName] = useState("")
-  const [newTagColor, setNewTagColor] = useState("#852CE6")
-  const [editingTagId, setEditingTagId] = useState<string | null>(null)
-  const [editTagName, setEditTagName] = useState("")
-  const [editTagColor, setEditTagColor] = useState("")
+  const [openAccentPicker, setOpenAccentPicker] = useState(false)
+  const emojiInputRef = useRef<HTMLInputElement>(null)
 
-  const handleAddTag = () => {
-    if (newTagName.trim()) {
-      addTag(newTagName.trim(), newTagColor)
-      setNewTagName("")
-    }
-  }
+  const celebrationMode = preferences.celebrationMode ?? "burst"
+  const celebrationEmoji = preferences.celebrationEmoji ?? "🎉"
 
-  const handleEditTag = (id: string) => {
-    if (editTagName.trim()) {
-      editTag(id, editTagName.trim(), editTagColor)
-      setEditingTagId(null)
-    }
-  }
-
-  const handleThemeChange = (theme: 'light' | 'dark') => {
+  const handleThemeChange = (theme: "light" | "dark") => {
     setPreferences({ theme })
     setTheme(theme)
   }
 
   return (
-    <div className={cn(
-      "fixed inset-y-0 left-0 w-72 bg-[#1a1a1a] text-white z-50 flex flex-col transition-transform duration-300 ease-in-out shadow-2xl",
-      sidebarOpen ? "translate-x-0" : "-translate-x-full"
-    )}>
-      <div className="p-6 flex-1 overflow-y-auto">
-          <h2 className="text-base font-normal text-gray-400 mb-8 mt-2">Preferences</h2>
-
-          {/* 1. Accent color */}
-          <div className="mb-8">
-            <div className="flex flex-wrap gap-2.5">
-              {THEME_COLORS.map(({ hex }) => (
-                <button
-                  key={hex}
-                  onClick={() => setPreferences({ accentColor: hex })}
-                  className={cn(
-                    "size-6 rounded-full transition-all border-2 border-transparent hover:scale-110",
-                    preferences.accentColor === hex && "ring-2 ring-white ring-offset-2 ring-offset-[#1a1a1a]"
-                  )}
-                  style={{ backgroundColor: hex }}
-                />
-              ))}
-            </div>
-          </div>
-
-          {/* 2. Columns */}
-          <div className="mb-6 flex items-center justify-between">
-            <label className="text-sm font-normal text-gray-300">Columns</label>
-            <div className="flex bg-[#2a2a2a] rounded p-0.5">
-              {([1, 3, 5, 7] as const).map((num) => (
-                <button
-                  key={num}
-                  onClick={() => setPreferences({ columns: num })}
-                  className={cn(
-                    "px-3 py-1 text-xs rounded transition-colors",
-                    preferences.columns === num ? "bg-white text-black" : "text-gray-400 hover:text-white"
-                  )}
-                >
-                  {num}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 3. Text size */}
-          <div className="mb-6 flex items-center justify-between">
-            <label className="text-sm font-normal text-gray-300">Text size</label>
-            <div className="flex bg-[#2a2a2a] rounded p-0.5">
-              {(['S', 'M', 'L'] as const).map((size) => (
-                <button
-                  key={size}
-                  onClick={() => setPreferences({ textSize: size })}
-                  className={cn(
-                    "px-3 py-1 text-xs rounded transition-colors",
-                    preferences.textSize === size ? "bg-white text-black" : "text-gray-400 hover:text-white"
-                  )}
-                >
-                  {size}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 4. Spacing */}
-          <div className="mb-6 flex items-center justify-between">
-            <label className="text-sm font-normal text-gray-300">Spacing</label>
-            <div className="flex bg-[#2a2a2a] rounded p-0.5">
-              {(['S', 'M', 'L'] as const).map((size) => (
-                <button
-                  key={size}
-                  onClick={() => setPreferences({ spacing: size })}
-                  className={cn(
-                    "px-3 py-1 text-xs rounded transition-colors",
-                    preferences.spacing === size ? "bg-white text-black" : "text-gray-400 hover:text-white"
-                  )}
-                >
-                  {size}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 5. Completed todos */}
-          <div className="mb-6 flex items-center justify-between">
-            <label className="text-sm font-normal text-gray-300">Completed todo's</label>
-            <div className="flex bg-[#2a2a2a] rounded p-0.5 gap-0.5">
-              <button
-                onClick={() => setPreferences({ showCompleted: true })}
-                className={cn(
-                  "p-1.5 rounded transition-colors",
-                  preferences.showCompleted ? "bg-white text-black" : "text-gray-400 hover:text-white"
-                )}
-              >
-                <Eye className="size-4" />
-              </button>
-              <button
-                onClick={() => setPreferences({ showCompleted: false })}
-                className={cn(
-                  "p-1.5 rounded transition-colors",
-                  !preferences.showCompleted ? "bg-white text-black" : "text-gray-400 hover:text-white"
-                )}
-              >
-                <EyeOff className="size-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* 6. Bullet style */}
-          <div className="mb-6 flex items-center justify-between">
-            <label className="text-sm font-normal text-gray-300">Bullet style</label>
-            <div className="flex bg-[#2a2a2a] rounded p-0.5 gap-0.5">
-              {[
-                { style: 'none' as BulletStyle, icon: Ban },
-                { style: 'dot' as BulletStyle, icon: Circle },
-                { style: 'dash' as BulletStyle, icon: Minus },
-                { style: 'arrow' as BulletStyle, icon: ArrowRight },
-              ].map(({ style, icon: Icon }) => (
-                <button
-                  key={style}
-                  onClick={() => setPreferences({ bulletStyle: style })}
-                  className={cn(
-                    "p-1.5 rounded transition-colors",
-                    preferences.bulletStyle === style ? "bg-white text-black" : "text-gray-400 hover:text-white"
-                  )}
-                >
-                  <Icon className="size-4" />
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 7. Start on */}
-          <div className="mb-6 flex items-center justify-between">
-            <label className="text-sm font-normal text-gray-300">Start on</label>
-            <div className="flex bg-[#2a2a2a] rounded p-0.5">
-              <button
-                onClick={() => setPreferences({ startOnYesterday: false })}
-                className={cn(
-                  "px-3 py-1 text-xs rounded transition-colors",
-                  !preferences.startOnYesterday ? "bg-white text-black" : "text-gray-400 hover:text-white"
-                )}
-              >
-                Today
-              </button>
-              <button
-                onClick={() => setPreferences({ startOnYesterday: true })}
-                className={cn(
-                  "px-3 py-1 text-xs rounded transition-colors",
-                  preferences.startOnYesterday ? "bg-white text-black" : "text-gray-400 hover:text-white"
-                )}
-              >
-                Yesterday
-              </button>
-            </div>
-          </div>
-
-          {/* 8. Lines */}
-          <div className="mb-6 flex items-center justify-between">
-            <label className="text-sm font-normal text-gray-300">Lines</label>
-            <div className="flex bg-[#2a2a2a] rounded p-0.5 gap-0.5">
-              <button
-                onClick={() => setPreferences({ showLines: true })}
-                className={cn(
-                  "p-1.5 rounded transition-colors",
-                  preferences.showLines ? "bg-white text-black" : "text-gray-400 hover:text-white"
-                )}
-              >
-                <Eye className="size-4" />
-              </button>
-              <button
-                onClick={() => setPreferences({ showLines: false })}
-                className={cn(
-                  "p-1.5 rounded transition-colors",
-                  !preferences.showLines ? "bg-white text-black" : "text-gray-400 hover:text-white"
-                )}
-              >
-                <EyeOff className="size-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* 9. Display */}
-          <div className="mb-6 flex items-center justify-between">
-            <label className="text-sm font-normal text-gray-300">Display</label>
-            <div className="flex bg-[#2a2a2a] rounded p-0.5 gap-0.5">
-              <button
-                onClick={() => handleThemeChange('light')}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1 text-xs rounded transition-colors",
-                  preferences.theme === 'light' ? "bg-white text-black" : "text-gray-400 hover:text-white"
-                )}
-              >
-                <Sun className="size-3.5" /> Light
-              </button>
-              <button
-                onClick={() => handleThemeChange('dark')}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1 text-xs rounded transition-colors",
-                  preferences.theme === 'dark' ? "bg-white text-black" : "text-gray-400 hover:text-white"
-                )}
-              >
-                <Moon className="size-3.5" /> Dark
-              </button>
-            </div>
-          </div>
-
-          {/* 10. Celebrations */}
-          <div className="mb-6 flex items-center justify-between">
-            <label className="text-sm font-normal text-gray-300">Celebrations</label>
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] text-gray-500 font-medium">OFF</span>
-              <Switch
-                checked={preferences.showCelebrations}
-                onCheckedChange={(checked) => setPreferences({ showCelebrations: checked })}
-                className="data-[state=checked]:bg-[var(--accent-color)] scale-75"
-              />
-              <span className="text-[10px] text-gray-500 font-medium">ON</span>
-            </div>
-          </div>
-
-          <Separator className="bg-gray-800 my-6" />
-
-          {/* Tags Section */}
-          <div className="mb-6">
-            <h3 className="text-sm font-semibold text-gray-300 mb-4 uppercase tracking-wider">Tags</h3>
-            
-            {/* Tag List */}
-            <div className="space-y-2 mb-4">
-              {tags.map((tag) => (
-                <div key={tag.id} className="flex items-center justify-between group/tag">
-                  {editingTagId === tag.id ? (
-                    <div className="flex items-center gap-2 w-full">
-                      <div className="flex-1 flex items-center bg-[#2a2a2a] rounded px-2 gap-2">
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <button className="size-3 rounded-full shrink-0" style={{ backgroundColor: editTagColor }} />
-                          </PopoverTrigger>
-                          <PopoverContent className="w-40 bg-[#2a2a2a] border-gray-700 p-2">
-                            <div className="grid grid-cols-4 gap-2">
-                              {THEME_COLORS.map(c => (
-                                <button
-                                  key={c.hex}
-                                  className="size-6 rounded-full"
-                                  style={{ backgroundColor: c.hex }}
-                                  onClick={() => setEditTagColor(c.hex)}
-                                />
-                              ))}
-                            </div>
-                          </PopoverContent>
-                        </Popover>
-                        <Input
-                          value={editTagName}
-                          onChange={(e) => setEditTagName(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && handleEditTag(tag.id)}
-                          className="h-7 text-xs bg-transparent border-none focus-visible:ring-0 text-white p-0"
-                          autoFocus
-                        />
-                      </div>
-                      <button onClick={() => handleEditTag(tag.id)} className="text-gray-400 hover:text-white">
-                        <Plus className="size-4 rotate-45" />
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="flex items-center gap-2">
-                        <div className="size-2 rounded-full" style={{ backgroundColor: tag.color }} />
-                        <span className="text-xs text-gray-300">{tag.name}</span>
-                      </div>
-                      <div className="flex items-center gap-1 opacity-0 group-hover/tag:opacity-100 transition-opacity">
-                        <button 
-                          onClick={() => {
-                            setEditingTagId(tag.id)
-                            setEditTagName(tag.name)
-                            setEditTagColor(tag.color)
-                          }}
-                          className="p-1 text-gray-500 hover:text-white"
-                        >
-                          <Pencil className="size-3" />
-                        </button>
-                        <button onClick={() => deleteTag(tag.id)} className="p-1 text-gray-500 hover:text-red-400">
-                          <Trash2 className="size-3" />
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* Add Tag */}
-            <div className="flex items-center gap-2">
-              <div className="flex-1 flex items-center bg-[#2a2a2a] rounded px-2 gap-2">
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <button className="size-3 rounded-full shrink-0" style={{ backgroundColor: newTagColor }} />
-                  </PopoverTrigger>
-                  <PopoverContent className="w-40 bg-[#2a2a2a] border-gray-700 p-2">
-                    <div className="grid grid-cols-4 gap-2">
-                      {THEME_COLORS.map(c => (
-                        <button
-                          key={c.hex}
-                          className="size-6 rounded-full"
-                          style={{ backgroundColor: c.hex }}
-                          onClick={() => setNewTagColor(c.hex)}
-                        />
-                      ))}
-                    </div>
-                  </PopoverContent>
-                </Popover>
-                <Input
-                  placeholder="New tag..."
-                  value={newTagName}
-                  onChange={(e) => setNewTagName(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAddTag()}
-                  className="h-8 text-xs bg-transparent border-none focus-visible:ring-0 text-white p-0"
-                />
-              </div>
-              <button 
-                onClick={handleAddTag}
-                className="size-8 flex items-center justify-center bg-[#2a2a2a] rounded hover:bg-[#3a3a3a] text-gray-400 hover:text-white transition-colors"
-              >
-                <Plus className="size-4" />
-              </button>
-            </div>
-          </div>
+    <div
+      className={cn(
+        "lemonade-sidebar fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-[#1a1a1a] text-white transition-transform duration-300 ease-in-out",
+        sidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full pointer-events-none shadow-none"
+      )}
+    >
+      <div className="flex items-center justify-between px-6 pb-4 pt-8">
+        <div>
+          <h2 className="text-base font-normal text-gray-200">Preferences</h2>
+          <p className="mt-1 text-xs text-gray-500">Notebook essentials only</p>
         </div>
-
-        {/* Bottom footer close button */}
-        <div className="p-4 mt-auto">
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="text-gray-500 hover:text-white transition-colors"
-          >
-            <ChevronsLeft className="size-6" />
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setSidebarOpen(false)}
+          className="rounded-full p-2 text-gray-400 transition-colors hover:bg-white/5 hover:text-white"
+          aria-label="Close preferences"
+        >
+          <X className="size-4" />
+        </button>
       </div>
+
+      <div className="flex-1 space-y-8 overflow-y-auto px-6 pb-6">
+        <section>
+          <label className="mb-3 block text-sm font-normal text-gray-300">Accent</label>
+          <div className="flex flex-wrap gap-2.5">
+            {THEME_COLORS.map(({ hex }) => (
+              <button
+                key={hex}
+                type="button"
+                onClick={() => setPreferences({ accentColor: hex })}
+                className={cn(
+                  "size-6 rounded-full border-2 border-transparent transition-all hover:scale-110",
+                  preferences.accentColor === hex && "ring-2 ring-white ring-offset-2 ring-offset-[#1a1a1a]"
+                )}
+                style={{ backgroundColor: hex }}
+                aria-label={`Use ${hex} as the accent color`}
+              />
+            ))}
+
+            <Popover open={openAccentPicker} onOpenChange={setOpenAccentPicker}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 rounded-full border-white/15 bg-white/[0.03] px-3 text-[11px] text-gray-200 hover:bg-white/10"
+                >
+                  Custom…
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                side="right"
+                sideOffset={10}
+                className="z-50 max-h-[70vh] w-[360px] overflow-y-auto border border-border border-b-[4px] border-b-[var(--accent-color)] p-3 shadow-md"
+              >
+                <ColorPickerPanel
+                  value={preferences.accentColor}
+                  palette={preferences.colorPalette}
+                  onChange={(color) => setPreferences({ accentColor: color })}
+                  onPaletteChange={(palette) => setPreferences({ colorPalette: palette })}
+                  title="Accent color"
+                  description="Pick a color from the wheel or choose a saved swatch."
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+        </section>
+
+        <section>
+          <label className="mb-3 block text-sm font-normal text-gray-300">Theme</label>
+          <div className="flex bg-[#2a2a2a] rounded p-0.5 gap-0.5">
+            <button
+              type="button"
+              onClick={() => handleThemeChange("light")}
+              className={cn(
+                "flex flex-1 items-center justify-center gap-1.5 rounded px-3 py-2 text-xs transition-colors",
+                preferences.theme === "light" ? "bg-white text-black" : "text-gray-400 hover:text-white"
+              )}
+            >
+              <Sun className="size-3.5" />
+              Light
+            </button>
+            <button
+              type="button"
+              onClick={() => handleThemeChange("dark")}
+              className={cn(
+                "flex flex-1 items-center justify-center gap-1.5 rounded px-3 py-2 text-xs transition-colors",
+                preferences.theme === "dark" ? "bg-white text-black" : "text-gray-400 hover:text-white"
+              )}
+            >
+              <Moon className="size-3.5" />
+              Dark
+            </button>
+          </div>
+        </section>
+
+        <section className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+          <div>
+            <label className="block text-sm font-normal text-gray-300">Dot grid</label>
+            <p className="mt-1 text-[11px] text-gray-500">Show the notebook paper texture.</p>
+          </div>
+          <Switch
+            checked={preferences.showDotGridBackground}
+            onCheckedChange={(checked) => setPreferences({ showDotGridBackground: checked })}
+          />
+        </section>
+
+        {/* Celebrations */}
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-normal text-gray-300">Celebrations</label>
+            <Switch
+              checked={preferences.showCelebrations}
+              onCheckedChange={(checked) => setPreferences({ showCelebrations: checked })}
+            />
+          </div>
+
+          {preferences.showCelebrations && (
+            <div className="space-y-3">
+              {/* Mode grid */}
+              <div className="grid grid-cols-4 gap-1.5">
+                {CELEBRATION_MODES.map(({ id, label, Icon }) => {
+                  const active = celebrationMode === id
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setPreferences({ celebrationMode: id })}
+                      className={cn(
+                        "flex flex-col items-center gap-1 rounded-lg border py-2 text-[10px] transition-colors",
+                        active
+                          ? "border-white/40 bg-white/10 text-white"
+                          : "border-white/8 bg-white/[0.03] text-gray-400 hover:bg-white/[0.07] hover:text-gray-200"
+                      )}
+                    >
+                      <Icon className="size-3.5" />
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Emoji picker — only when emoji mode is active */}
+              {celebrationMode === "emoji" && (
+                <div className="space-y-2 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                  <p className="text-[11px] text-gray-400">Choose your emoji</p>
+
+                  {/* Quick-pick row */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {QUICK_EMOJIS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => setPreferences({ celebrationEmoji: emoji })}
+                        className={cn(
+                          "flex h-7 w-7 items-center justify-center rounded-lg text-base transition-colors",
+                          celebrationEmoji === emoji
+                            ? "bg-white/20 ring-1 ring-white/40"
+                            : "bg-white/5 hover:bg-white/10"
+                        )}
+                        aria-label={`Use ${emoji} as celebration emoji`}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Custom emoji input */}
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/10 text-xl"
+                      aria-hidden="true"
+                    >
+                      {celebrationEmoji}
+                    </span>
+                    <input
+                      ref={emojiInputRef}
+                      type="text"
+                      value={celebrationEmoji}
+                      onChange={(e) => {
+                        // Extract the first emoji/character from whatever was typed/pasted
+                        const raw = e.target.value
+                        // Get grapheme clusters — use Intl.Segmenter when available, else slice
+                        let first = raw
+                        if (typeof Intl !== "undefined" && "Segmenter" in Intl) {
+                          const seg = new (Intl as unknown as { Segmenter: new (locale: string, opts: object) => { segment: (s: string) => Iterable<{ segment: string }> } }).Segmenter("en", { granularity: "grapheme" })
+                          const segments = [...seg.segment(raw)]
+                          first = segments[0]?.segment ?? raw.slice(0, 2)
+                        } else {
+                          // Fallback: grab up to 2 code units (covers most emoji)
+                          first = [...raw][0] ?? raw
+                        }
+                        if (first) setPreferences({ celebrationEmoji: first })
+                      }}
+                      placeholder="Paste any emoji…"
+                      className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-white/25 focus:outline-none"
+                      maxLength={8}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
   )
 }
